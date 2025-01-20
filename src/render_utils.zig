@@ -175,7 +175,15 @@ pub const GraphicsPipeline = struct {
     const Args = struct {
         vert: []u32,
         frag: []u32,
-        pass: vk.RenderPass,
+        vertex_info: struct {
+            binding_desc: []const vk.VertexInputBindingDescription,
+            attr_desc: []const vk.VertexInputAttributeDescription,
+        },
+        dynamic_info: ?struct {
+            image_format: vk.Format,
+            depth_format: vk.Format,
+        },
+        pass: ?vk.RenderPass,
         desc_set_layouts: []const vk.DescriptorSetLayout,
     };
 
@@ -215,10 +223,10 @@ pub const GraphicsPipeline = struct {
         };
 
         const pvisci = vk.PipelineVertexInputStateCreateInfo{
-            // .vertex_binding_description_count = 0,
-            // .p_vertex_binding_descriptions = @ptrCast(&Vertex.binding_description),
-            // .vertex_attribute_description_count = Vertex.attribute_description.len,
-            // .p_vertex_attribute_descriptions = &Vertex.attribute_description,
+            .vertex_binding_description_count = @intCast(v.vertex_info.binding_desc.len),
+            .p_vertex_binding_descriptions = @ptrCast(v.vertex_info.binding_desc.ptr),
+            .vertex_attribute_description_count = @intCast(v.vertex_info.attr_desc.len),
+            .p_vertex_attribute_descriptions = @ptrCast(v.vertex_info.attr_desc.ptr),
         };
 
         const piasci = vk.PipelineInputAssemblyStateCreateInfo{
@@ -308,6 +316,14 @@ pub const GraphicsPipeline = struct {
             .max_depth_bounds = 1.0,
         };
 
+        const dynamic_info = if (v.dynamic_info) |info| vk.PipelineRenderingCreateInfoKHR{
+            .view_mask = 0,
+            .color_attachment_count = 1,
+            .p_color_attachment_formats = &[_]vk.Format{info.image_format},
+            .depth_attachment_format = info.depth_format,
+            .stencil_attachment_format = .undefined,
+        } else null;
+
         const gpci = vk.GraphicsPipelineCreateInfo{
             .flags = .{},
             .stage_count = 2,
@@ -322,7 +338,8 @@ pub const GraphicsPipeline = struct {
             .p_color_blend_state = &pcbsci,
             .p_dynamic_state = &pdsci,
             .layout = layout,
-            .render_pass = v.pass,
+            .render_pass = if (v.pass) |pass| pass else .null_handle,
+            .p_next = if (dynamic_info) |*info| info else null,
             .subpass = 0,
             .base_pipeline_handle = .null_handle,
             .base_pipeline_index = -1,
@@ -449,6 +466,7 @@ pub const Image = struct {
     view: vk.ImageView,
     sampler: vk.Sampler,
     io: vk.DescriptorImageInfo,
+    bind_desc_type: vk.DescriptorType,
 
     pub const BufferView = struct {
         buf: Buffer,
@@ -463,11 +481,14 @@ pub const Image = struct {
         img_view_type: vk.ImageViewType,
         format: vk.Format,
         extent: vk.Extent3D,
+        bind_desc_type: vk.DescriptorType = .storage_image,
+        tiling: vk.ImageTiling = .optimal,
+        layout: vk.ImageLayout = .general,
         usage: vk.ImageUsageFlags = .{},
         view_aspect_mask: vk.ImageAspectFlags = .{},
     };
 
-    pub fn new(ctx: *Engine.VulkanContext, v: Args) !@This() {
+    pub fn new(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: Args) !@This() {
         const device = &ctx.device;
 
         const img = try device.createImage(&.{
@@ -477,7 +498,7 @@ pub const Image = struct {
             .mip_levels = 1,
             .array_layers = 1,
             .samples = .{ .@"1_bit" = true },
-            .tiling = .optimal,
+            .tiling = v.tiling,
             .usage = v.usage,
             .sharing_mode = .exclusive,
             .initial_layout = .undefined,
@@ -529,7 +550,7 @@ pub const Image = struct {
         }, null);
         errdefer device.destroySampler(sampler, null);
 
-        return .{
+        var this = @This(){
             .image = img,
             .memory = memory,
             .view = view,
@@ -537,15 +558,19 @@ pub const Image = struct {
             .sampler = sampler,
             .extent = v.extent,
             .format = v.format,
+            .bind_desc_type = v.bind_desc_type,
             .io = .{
                 .sampler = sampler,
                 .image_view = view,
-                .image_layout = .general,
+                .image_layout = v.layout,
             },
         };
+
+        try this.transition(ctx, pool, .undefined, v.layout, v.view_aspect_mask);
+        return this;
     }
 
-    pub fn transition(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool, layout: vk.ImageLayout, new_layout: vk.ImageLayout) !void {
+    pub fn transition(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool, layout: vk.ImageLayout, new_layout: vk.ImageLayout, aspect_flags: vk.ImageAspectFlags) !void {
         const device = &ctx.device;
 
         var cmdbuf_handle: vk.CommandBuffer = undefined;
@@ -564,7 +589,7 @@ pub const Image = struct {
         });
 
         {
-            transitionImage(cmdbuf.handle, device, self.image, layout, new_layout, ctx.graphics_queue.family);
+            transitionImage(cmdbuf.handle, device, self.image, layout, new_layout, ctx.graphics_queue.family, aspect_flags);
         }
 
         try cmdbuf.endCommandBuffer();
@@ -644,10 +669,10 @@ pub const Image = struct {
         } };
     }
 
-    pub fn layout_binding(_: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
+    pub fn layout_binding(self: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
         return .{
             .binding = index,
-            .descriptor_type = .storage_image,
+            .descriptor_type = self.bind_desc_type,
             .descriptor_count = 1,
             .stage_flags = .{
                 .vertex_bit = true,
@@ -663,7 +688,7 @@ pub const Image = struct {
             .dst_binding = binding,
             .dst_array_element = 0,
             .descriptor_count = 1,
-            .descriptor_type = .storage_image,
+            .descriptor_type = self.bind_desc_type,
             .p_image_info = @ptrCast(&self.io),
             // OOF: ??
             .p_buffer_info = undefined,
@@ -792,6 +817,44 @@ pub const Buffer = struct {
         }
 
         try copyBuffer(ctx, &ctx.device, pool, this.buffer, staging_buffer, v.size);
+
+        return this;
+    }
+
+    pub fn new_from_slice(ctx: *Engine.VulkanContext, v: struct {
+        usage: vk.BufferUsageFlags = .{},
+    }, slice: anytype, pool: vk.CommandPool) !@This() {
+        const S = @TypeOf(slice);
+        const E = std.meta.Elem(S);
+
+        const size = slice.len * @sizeOf(E);
+        const this = try @This().new(
+            ctx,
+            .{ .size = @intCast(size), .usage = v.usage.merge(.{
+                .transfer_dst_bit = true,
+            }) },
+        );
+
+        const staging_buffer = try ctx.device.createBuffer(&.{
+            .size = size,
+            .usage = .{ .transfer_src_bit = true },
+            .sharing_mode = .exclusive,
+        }, null);
+        defer ctx.device.destroyBuffer(staging_buffer, null);
+        const staging_mem_reqs = ctx.device.getBufferMemoryRequirements(staging_buffer);
+        const staging_memory = try ctx.allocate(staging_mem_reqs, .{ .host_visible_bit = true, .host_coherent_bit = true });
+        defer ctx.device.freeMemory(staging_memory, null);
+        try ctx.device.bindBufferMemory(staging_buffer, staging_memory, 0);
+
+        {
+            const data = try ctx.device.mapMemory(staging_memory, 0, vk.WHOLE_SIZE, .{});
+            defer ctx.device.unmapMemory(staging_memory);
+
+            const gpu_vertices: [*]E = @ptrCast(@alignCast(data));
+            @memcpy(gpu_vertices[0..slice.len], slice);
+        }
+
+        try copyBuffer(ctx, &ctx.device, pool, this.buffer, staging_buffer, size);
 
         return this;
     }
@@ -999,10 +1062,111 @@ pub const CmdBuffer = struct {
             }, .@"inline");
 
             device.cmdBindPipeline(cmdbuf, .graphics, v.pipeline.pipeline);
-            device.cmdBindDescriptorSets(cmdbuf, .graphics, v.pipeline.layout, 0, 1, @ptrCast(&v.desc_set), 0, null);
+            device.cmdBindDescriptorSets(
+                cmdbuf,
+                .graphics,
+                v.pipeline.layout,
+                0,
+                1,
+                @ptrCast(&v.desc_set),
+                0,
+                null,
+            );
             device.cmdDraw(cmdbuf, 6, 1, 0, 0);
 
             device.cmdEndRenderPass(cmdbuf);
+        }
+    }
+
+    pub fn dynamic_render_begin(self: *@This(), device: *Device, v: struct {
+        image: vk.ImageView,
+        depth: vk.ImageView,
+        extent: vk.Extent2D,
+    }) void {
+        const viewport = vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(v.extent.width),
+            .height = @floatFromInt(v.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        };
+        const scissor = vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = v.extent,
+        };
+        for (self.bufs) |cmdbuf| {
+            device.cmdSetViewport(cmdbuf, 0, 1, @ptrCast(&viewport));
+            device.cmdSetScissor(cmdbuf, 0, 1, @ptrCast(&scissor));
+            device.cmdBeginRenderingKHR(cmdbuf, &vk.RenderingInfoKHR{
+                .render_area = .{
+                    .offset = .{ .x = 0, .y = 0 },
+                    .extent = v.extent,
+                },
+                .layer_count = 1,
+                .view_mask = 0,
+                .color_attachment_count = 1,
+                .p_color_attachments = &[_]vk.RenderingAttachmentInfoKHR{vk.RenderingAttachmentInfoKHR{
+                    .image_view = v.image,
+                    .image_layout = .color_attachment_optimal,
+                    .resolve_mode = .{},
+                    .resolve_image_layout = .undefined,
+                    .load_op = .clear,
+                    .store_op = .store,
+                    .clear_value = .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } },
+                }},
+                .p_depth_attachment = &vk.RenderingAttachmentInfoKHR{
+                    .image_view = v.depth,
+                    .image_layout = .depth_stencil_attachment_optimal,
+                    .resolve_mode = .{},
+                    .resolve_image_layout = .undefined,
+                    .load_op = .clear,
+                    .store_op = .store,
+                    .clear_value = .{ .depth_stencil = .{ .depth = 1.0, .stencil = 0 } },
+                },
+                // .p_stencil_attachment: ?*const RenderingAttachmentInfo = null,
+            });
+        }
+    }
+
+    pub fn dynamic_render_end(self: *@This(), device: *Device) void {
+        for (self.bufs) |cmdbuf| {
+            device.cmdEndRenderingKHR(cmdbuf);
+        }
+    }
+
+    pub fn draw(
+        self: *@This(),
+        device: *Device,
+        v: struct {
+            pipeline: *GraphicsPipeline,
+            desc_set: *DescriptorSet,
+            vertices: struct {
+                buffer: vk.Buffer,
+                count: u32,
+            },
+        },
+    ) void {
+        for (self.bufs) |cmdbuf| {
+            device.cmdBindPipeline(cmdbuf, .graphics, v.pipeline.pipeline);
+            device.cmdBindDescriptorSets(
+                cmdbuf,
+                .graphics,
+                v.pipeline.layout,
+                0,
+                1,
+                @ptrCast(&v.desc_set.set),
+                0,
+                null,
+            );
+            device.cmdBindVertexBuffers(
+                cmdbuf,
+                0,
+                1,
+                @ptrCast(&v.vertices.buffer),
+                &[_]vk.DeviceSize{0},
+            );
+            device.cmdDraw(cmdbuf, v.vertices.count, 1, 0, 0);
         }
     }
 
@@ -1021,9 +1185,10 @@ pub const CmdBuffer = struct {
         layout: vk.ImageLayout,
         new_layout: vk.ImageLayout,
         queue_family_index: u32,
+        aspect_mask: vk.ImageAspectFlags,
     }) void {
         for (self.bufs) |cmdbuf| {
-            transitionImage(cmdbuf, device, v.image, v.layout, v.new_layout, v.queue_family_index);
+            transitionImage(cmdbuf, device, v.image, v.layout, v.new_layout, v.queue_family_index, v.aspect_mask);
         }
     }
 
@@ -1034,7 +1199,7 @@ pub const CmdBuffer = struct {
         swapchain: *const Swapchain,
     }) void {
         for (self.bufs, v.swapchain.swap_images) |cmdbuf, img| {
-            transitionImage(cmdbuf, device, img.image, v.layout, v.new_layout, v.queue_family_index);
+            transitionImage(cmdbuf, device, img.image, v.layout, v.new_layout, v.queue_family_index, .{ .color_bit = true });
         }
     }
 
@@ -1139,6 +1304,7 @@ pub const CmdBuffer = struct {
             .layout = v.image_layout,
             .new_layout = .transfer_src_optimal,
             .queue_family_index = v.queue_family,
+            .aspect_mask = v.typ,
         });
 
         self.transitionSwapchain(device, .{
@@ -1165,6 +1331,7 @@ pub const CmdBuffer = struct {
             .layout = .transfer_src_optimal,
             .new_layout = v.image_layout,
             .queue_family_index = v.queue_family,
+            .aspect_mask = v.typ,
         });
     }
 
@@ -1587,6 +1754,7 @@ pub fn transitionImage(
     layout: vk.ImageLayout,
     new_layout: vk.ImageLayout,
     queue_family_index: u32,
+    aspect_mask: vk.ImageAspectFlags,
 ) void {
     const image_barrier = [_]vk.ImageMemoryBarrier2{.{
         .src_stage_mask = .{ .all_commands_bit = true },
@@ -1599,7 +1767,7 @@ pub fn transitionImage(
         .old_layout = layout,
         .new_layout = new_layout,
         .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
+            .aspect_mask = aspect_mask,
             .base_mip_level = 0,
             .level_count = 1,
             .base_array_layer = 0,
