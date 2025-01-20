@@ -590,6 +590,7 @@ pub const Image = struct {
 
         {
             transitionImage(cmdbuf.handle, device, self.image, layout, new_layout, ctx.graphics_queue.family, aspect_flags);
+            self.io.image_layout = new_layout;
         }
 
         try cmdbuf.endCommandBuffer();
