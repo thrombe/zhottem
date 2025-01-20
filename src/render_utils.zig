@@ -1880,11 +1880,19 @@ pub fn dump_image_to_file(
     copy_extent: vk.Extent2D,
     path: []const u8,
 ) !void {
-    const buf = try image.copy_to_host(ctx, pool, .{
-        .width = copy_extent.width,
-        .height = copy_extent.height,
-        .depth = 1,
-    });
+    const buf = blk: {
+        const old_layout = image.io.image_layout;
+        try image.transition(ctx, pool, old_layout, .transfer_src_optimal, .{ .color_bit = true });
+        defer image.transition(ctx, pool, .transfer_src_optimal, old_layout, .{ .color_bit = true }) catch {};
+        const buf = try image.copy_to_host(ctx, pool, .{
+            .width = copy_extent.width,
+            .height = copy_extent.height,
+            .depth = 1,
+        });
+        errdefer allocator.free(buf);
+
+        break :blk buf;
+    };
     defer allocator.free(buf);
 
     const pixels = try allocator.alloc(f32, copy_extent.width * copy_extent.height * 4);
