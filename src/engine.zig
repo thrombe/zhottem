@@ -159,7 +159,10 @@ pub const Window = struct {
 };
 
 pub const VulkanContext = struct {
-    const required_device_extensions = [_][*:0]const u8{vk.extensions.khr_swapchain.name};
+    const required_device_extensions = [_][*:0]const u8{
+        vk.extensions.khr_swapchain.name,
+        vk.extensions.khr_dynamic_rendering.name,
+    };
     pub const Api = struct {
         const apis: []const vk.ApiInfo = &.{
             // .{
@@ -176,6 +179,7 @@ pub const VulkanContext = struct {
             vk.features.version_1_3,
             vk.extensions.khr_surface,
             vk.extensions.khr_swapchain,
+            vk.extensions.khr_dynamic_rendering,
 
             // EH: ?what are these
             // vk.extensions.ext_validation_features,
@@ -264,7 +268,8 @@ pub const VulkanContext = struct {
                 2;
 
             const device = try vkinstance.createDevice(candidate.pdev, &.{
-                .p_next = @ptrCast(&vk.PhysicalDeviceSynchronization2Features{
+                .p_next = @ptrCast(&vk.PhysicalDeviceVulkan13Features{
+                    .dynamic_rendering = vk.TRUE,
                     .synchronization_2 = vk.TRUE,
                 }),
                 .queue_create_info_count = queue_count,
