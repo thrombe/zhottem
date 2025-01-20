@@ -15,7 +15,7 @@ const c = Engine.c;
 const gui = @import("gui.zig");
 const GuiEngine = gui.GuiEngine;
 
-const application = @import("mandlebulb.zig");
+const application = @import("app.zig");
 const App = application.App;
 const AppState = application.AppState;
 const GuiState = application.GuiState;

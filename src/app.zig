@@ -266,22 +266,22 @@ const ShaderStageManager = struct {
             .{
                 .typ = .volume,
                 .stage = .compute,
-                .path = "./src/mandlebulb.glsl",
-                .define = &[_][]const u8{"EYEFACE_VOLUME"},
+                .path = "./src/shader.glsl",
+                .define = &[_][]const u8{"VOLUME_PASS"},
                 .include = &[_][]const u8{"./src"},
             },
             .{
                 .typ = .render,
                 .stage = .compute,
-                .path = "./src/mandlebulb.glsl",
-                .define = &[_][]const u8{"EYEFACE_RENDER"},
+                .path = "./src/shader.glsl",
+                .define = &[_][]const u8{"RENDER_PASS"},
                 .include = &[_][]const u8{"./src"},
             },
             .{
                 .typ = .draw,
                 .stage = .compute,
-                .path = "./src/mandlebulb.glsl",
-                .define = &[_][]const u8{"EYEFACE_DRAW"},
+                .path = "./src/shader.glsl",
+                .define = &[_][]const u8{"DRAW_PASS"},
                 .include = &[_][]const u8{"./src"},
             },
         });
@@ -494,7 +494,7 @@ pub const AppState = struct {
         if (!self.uniform_shader_dumped) {
             self.uniform_shader_dumped = true;
 
-            try ShaderUtils.dump_glsl_uniform(ubo, "./src/mandlebulb_uniforms.glsl");
+            try ShaderUtils.dump_glsl_uniform(ubo, "./src/uniforms.glsl");
         }
 
         @memcpy(self.uniform_buffer, ubo_buffer);

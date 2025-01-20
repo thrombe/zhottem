@@ -1,7 +1,7 @@
 #version 460
 
 #include <common.glsl>
-#include <mandlebulb_uniforms.glsl>
+#include <uniforms.glsl>
 
 layout(set = 0, binding = 0) uniform Ubo {
     Uniforms ubo;
