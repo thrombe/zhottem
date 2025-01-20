@@ -1,0 +1,7 @@
+
+/.direnv
+/.zig-cache
+/zig-out
+/tmp
+/images
+/screenshots/*.png
