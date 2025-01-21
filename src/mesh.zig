@@ -9,6 +9,64 @@ pub const Mesh = struct {
     vertices: [][3]f32,
     faces: [][3]usize,
 
+    pub fn cube() !@This() {
+        var vertices = std.ArrayList([3]f32).init(allocator);
+        errdefer vertices.deinit();
+        var faces = std.ArrayList([3]usize).init(allocator);
+        errdefer faces.deinit();
+
+        try vertices.appendSlice(&[_][3]f32{
+            .{ 1.0, -1.0, -1.0 },
+            .{ 1.0, -1.0, 1.0 },
+            .{ -1.0, -1.0, 1.0 },
+
+            .{ 1.0, -1.0, -1.0 },
+            .{ -1.0, -1.0, 1.0 },
+            .{ -1.0, -1.0, -1.0 },
+
+            .{ 1.0, 1.0, -1.0 },
+            .{ 1.0, 1.0, 1.0 },
+            .{ -1.0, 1.0, 1.0 },
+
+            .{ 1.0, -1.0, -1.0 },
+            .{ 1.0, 1.0, -1.0 },
+            .{ -1.0, 1.0, -1.0 },
+
+            .{ 1.0, -1.0, -1.0 },
+            .{ -1.0, 1.0, -1.0 },
+            .{ -1.0, -1.0, -1.0 },
+
+            .{ 1.0, -1.0, 1.0 },
+            .{ 1.0, 1.0, 1.0 },
+            .{ -1.0, 1.0, 1.0 },
+
+            .{ 1.0, -1.0, 1.0 },
+            .{ -1.0, 1.0, 1.0 },
+            .{ -1.0, -1.0, 1.0 },
+
+            .{ 1.0, -1.0, -1.0 },
+            .{ 1.0, -1.0, 1.0 },
+            .{ 1.0, 1.0, 1.0 },
+
+            .{ 1.0, -1.0, -1.0 },
+            .{ 1.0, 1.0, 1.0 },
+            .{ 1.0, 1.0, -1.0 },
+
+            .{ -1.0, -1.0, -1.0 },
+            .{ -1.0, 1.0, 1.0 },
+            .{ -1.0, -1.0, 1.0 },
+
+            .{ -1.0, -1.0, -1.0 },
+            .{ -1.0, 1.0, 1.0 },
+            .{ -1.0, 1.0, -1.0 },
+        });
+
+        return .{
+            .vertices = try vertices.toOwnedSlice(),
+            .faces = try faces.toOwnedSlice(),
+        };
+    }
+
     pub fn deinit(self: *@This()) void {
         allocator.free(self.vertices);
         allocator.free(self.faces);
