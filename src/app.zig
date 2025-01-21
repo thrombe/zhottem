@@ -9,6 +9,8 @@ const ShaderUtils = utils.ShaderUtils;
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
 
+const mesh = @import("mesh.zig");
+
 const Engine = @import("engine.zig");
 const c = Engine.c;
 
@@ -18,6 +20,7 @@ const GuiEngine = gui.GuiEngine;
 const render_utils = @import("render_utils.zig");
 const Swapchain = render_utils.Swapchain;
 const UniformBuffer = render_utils.UniformBuffer;
+const DynamicUniformBuffer = render_utils.DynamicUniformBuffer;
 const Buffer = render_utils.Buffer;
 const Image = render_utils.Image;
 const GraphicsPipeline = render_utils.GraphicsPipeline;
@@ -32,8 +35,10 @@ const allocator = main.allocator;
 pub const App = @This();
 
 uniforms: UniformBuffer,
+model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
+mesh: mesh.Mesh,
 vertex_buffer: Buffer,
 descriptor_pool: DescriptorPool,
 descriptor_set: DescriptorSet,
@@ -60,11 +65,9 @@ const Vertex = struct {
 
     pos: [3]f32,
 };
-const vertices = [_]Vertex{
-    .{ .pos = .{ 0, -0.5, 0 } },
-    .{ .pos = .{ 0.5, 0.5, 0 } },
-    .{ .pos = .{ -0.5, 0.5, 0 } },
-};
+
+var matrices = std.mem.zeroes([2]math.Mat4x4);
+const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
 
 pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var ctx = &engine.graphics;
@@ -80,6 +83,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window), ctx);
     errdefer uniforms.deinit(device);
+
+    var model_uniform = try ModelUniformBuffer.new(&matrices, ctx);
+    errdefer model_uniform.deinit(device);
+    model_uniform.uniform_buffer[0] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.3)).mul_mat(math.Mat4x4.translation_mat(.{ .x = 1.5 }));
+    model_uniform.uniform_buffer[1] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.5)).mul_mat(math.Mat4x4.translation_mat(.{ .x = -2 }));
+    try model_uniform.upload(device);
 
     var screen = try Image.new(ctx, cmd_pool, .{
         .img_type = .@"2d",
@@ -120,9 +129,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
     errdefer depth.deinit(device);
 
+    var object = try mesh.Mesh.cube();
+    errdefer object.deinit();
     var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
         .vertex_buffer_bit = true,
-    } }, &vertices, cmd_pool);
+    } }, object.vertices, cmd_pool);
     errdefer vertex_buffer.deinit(device);
 
     var desc_pool = try DescriptorPool.new(device);
@@ -131,6 +142,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var desc_set_builder = desc_pool.set_builder();
     defer desc_set_builder.deinit();
     try desc_set_builder.add(&uniforms);
+    try desc_set_builder.add(&model_uniform);
     var desc_set = try desc_set_builder.build(device);
     errdefer desc_set.deinit(device);
 
@@ -139,8 +151,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     return .{
         .uniforms = uniforms,
+        .model_uniforms = model_uniform,
         .screen_image = screen,
         .depth_image = depth,
+        .mesh = object,
         .vertex_buffer = vertex_buffer,
         .descriptor_pool = desc_pool,
         .descriptor_set = desc_set,
@@ -152,8 +166,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 pub fn deinit(self: *@This(), device: *Device) void {
     defer device.destroyCommandPool(self.command_pool, null);
     defer self.uniforms.deinit(device);
+    defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
+    defer self.mesh.deinit();
     defer self.vertex_buffer.deinit(device);
     defer self.descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
@@ -219,9 +235,19 @@ pub const RendererState = struct {
         cmdbuf.draw(device, .{
             .pipeline = &pipeline,
             .desc_set = &app.descriptor_set,
+            .dynamic_offsets = &[_]u32{0},
             .vertices = .{
                 .buffer = app.vertex_buffer.buffer,
-                .count = vertices.len,
+                .count = @intCast(app.mesh.vertices.len),
+            },
+        });
+        cmdbuf.draw(device, .{
+            .pipeline = &pipeline,
+            .desc_set = &app.descriptor_set,
+            .dynamic_offsets = &[_]u32{256},
+            .vertices = .{
+                .buffer = app.vertex_buffer.buffer,
+                .count = @intCast(app.mesh.vertices.len),
             },
         });
         cmdbuf.dynamic_render_end(device);
