@@ -21,6 +21,10 @@ pub const DescriptorPool = struct {
                 .descriptor_count = 100,
             },
             .{
+                .type = .uniform_buffer_dynamic,
+                .descriptor_count = 100,
+            },
+            .{
                 .type = .storage_buffer,
                 .descriptor_count = 100,
             },
@@ -780,6 +784,102 @@ pub const UniformBuffer = struct {
     }
 };
 
+pub fn DynamicUniformBuffer(typ: type) type {
+    return struct {
+        // not owned
+        uniform_buffer: []typ,
+        buffer: vk.Buffer,
+        memory: vk.DeviceMemory,
+        dbi: vk.DescriptorBufferInfo,
+
+        pub fn new(uniforms: []typ, ctx: *Engine.VulkanContext) !@This() {
+            const device = &ctx.device;
+
+            const size = std.mem.alignForward(usize, @sizeOf(typ), 256);
+            const buffer = try device.createBuffer(&.{
+                .size = uniforms.len * size,
+                .usage = .{
+                    .uniform_buffer_bit = true,
+                },
+                .sharing_mode = .exclusive,
+            }, null);
+            errdefer device.destroyBuffer(buffer, null);
+            const mem_req = device.getBufferMemoryRequirements(buffer);
+            const memory = try ctx.allocate(mem_req, .{
+                .host_visible_bit = true,
+                .host_coherent_bit = true,
+            });
+            errdefer device.freeMemory(memory, null);
+            try device.bindBufferMemory(buffer, memory, 0);
+
+            return .{
+                .uniform_buffer = uniforms,
+                .buffer = buffer,
+                .memory = memory,
+                .dbi = .{
+                    .buffer = buffer,
+                    .offset = 0,
+                    .range = size,
+                },
+            };
+        }
+
+        pub fn deinit(self: *@This(), device: *Device) void {
+            device.destroyBuffer(self.buffer, null);
+            device.freeMemory(self.memory, null);
+
+            // not owned
+            // allocator.free(self.uniform_buffer);
+        }
+
+        pub fn upload(self: *@This(), device: *Device) !void {
+            const maybe_mapped = try device.mapMemory(
+                self.memory,
+                0,
+                self.uniform_buffer.len * self.dbi.range,
+                .{},
+            );
+            const mapped = maybe_mapped orelse return error.MappingMemoryFailed;
+            defer device.unmapMemory(self.memory);
+
+            const bytes: [*c]u8 = @ptrCast(@alignCast(mapped));
+            for (self.uniform_buffer, 0..) |ubo, i| {
+                @memcpy(bytes[i * self.dbi.range .. (i + 1) * self.dbi.range].ptr, std.mem.asBytes(&ubo));
+            }
+
+            // flush manually + host_coherent_bit = false
+            // device.flushMappedMemoryRanges(memory_range_count: u32, p_memory_ranges: [*]const MappedMemoryRange)
+        }
+
+        pub fn layout_binding(_: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
+            return .{
+                .binding = index,
+                .descriptor_type = .uniform_buffer_dynamic,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .vertex_bit = true,
+                    .fragment_bit = true,
+                    .compute_bit = true,
+                },
+            };
+        }
+
+        pub fn write_desc_set(self: *@This(), binding: u32, desc_set: vk.DescriptorSet) vk.WriteDescriptorSet {
+            return .{
+                .dst_set = desc_set,
+                .dst_binding = binding,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .uniform_buffer_dynamic,
+                .p_buffer_info = @ptrCast(&self.dbi),
+                // OOF: ??
+                .p_image_info = undefined,
+                .p_texel_buffer_view = undefined,
+            };
+        }
+    };
+}
+
 pub const Buffer = struct {
     buffer: vk.Buffer,
     memory: vk.DeviceMemory,
@@ -1142,6 +1242,7 @@ pub const CmdBuffer = struct {
         v: struct {
             pipeline: *GraphicsPipeline,
             desc_set: *DescriptorSet,
+            dynamic_offsets: []const u32,
             vertices: struct {
                 buffer: vk.Buffer,
                 count: u32,
@@ -1157,8 +1258,8 @@ pub const CmdBuffer = struct {
                 0,
                 1,
                 @ptrCast(&v.desc_set.set),
-                0,
-                null,
+                @intCast(v.dynamic_offsets.len),
+                v.dynamic_offsets.ptr,
             );
             device.cmdBindVertexBuffers(
                 cmdbuf,
