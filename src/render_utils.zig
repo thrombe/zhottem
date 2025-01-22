@@ -1247,6 +1247,10 @@ pub const CmdBuffer = struct {
                 buffer: vk.Buffer,
                 count: u32,
             },
+            instances: struct {
+                buffer: vk.Buffer,
+                count: u32,
+            },
         },
     ) void {
         for (self.bufs) |cmdbuf| {
@@ -1268,7 +1272,14 @@ pub const CmdBuffer = struct {
                 @ptrCast(&v.vertices.buffer),
                 &[_]vk.DeviceSize{0},
             );
-            device.cmdDraw(cmdbuf, v.vertices.count, 1, 0, 0);
+            device.cmdBindVertexBuffers(
+                cmdbuf,
+                1,
+                1,
+                @ptrCast(&v.instances.buffer),
+                &[_]vk.DeviceSize{0},
+            );
+            device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
         }
     }
 

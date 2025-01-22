@@ -15,10 +15,11 @@ void set_seed(int id) {
 }
 
 #ifdef VERT_PASS
-    layout(location = 0) in vec3 ipos;
+    layout(location = 0) in vec3 vpos; // vertex pos
+    layout(location = 1) in vec3 ipos; // instance pos
     layout(location = 0) out vec3 opos;
     void main() {
-        vec4 pos = vec4(ipos, 1.0);
+        vec4 pos = vec4(vpos + ipos * 3, 1.0);
         pos = ubo.world_to_screen * model_mat * pos;
         opos = pos.xyz;
         gl_Position = pos;

@@ -39,7 +39,9 @@ model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
 mesh: mesh.Mesh,
+instances: []Instance,
 vertex_buffer: Buffer,
+instance_buffer: Buffer,
 descriptor_pool: DescriptorPool,
 descriptor_set: DescriptorSet,
 command_pool: vk.CommandPool,
@@ -51,6 +53,8 @@ const Vertex = struct {
     const binding_description = [_]vk.VertexInputBindingDescription{.{
         .binding = 0,
         .stride = @sizeOf(Vertex),
+
+        // new data per vertex
         .input_rate = .vertex,
     }};
 
@@ -62,6 +66,24 @@ const Vertex = struct {
             .offset = @offsetOf(Vertex, "pos"),
         },
     };
+
+    pos: [3]f32,
+};
+
+const Instance = struct {
+    const binding_desc = [_]vk.VertexInputBindingDescription{.{
+        .binding = 1,
+        .stride = @sizeOf(Instance),
+
+        // new data per instance
+        .input_rate = .instance,
+    }};
+    const attribute_desc = [_]vk.VertexInputAttributeDescription{.{
+        .binding = 1,
+        .location = 1,
+        .format = .r32g32b32_sfloat,
+        .offset = @offsetOf(Instance, "pos"),
+    }};
 
     pos: [3]f32,
 };
@@ -87,7 +109,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var model_uniform = try ModelUniformBuffer.new(&matrices, ctx);
     errdefer model_uniform.deinit(device);
     model_uniform.uniform_buffer[0] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.3)).mul_mat(math.Mat4x4.translation_mat(.{ .x = 1.5 }));
-    model_uniform.uniform_buffer[1] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.5)).mul_mat(math.Mat4x4.translation_mat(.{ .x = -2 }));
+    model_uniform.uniform_buffer[1] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.5)).mul_mat(math.Mat4x4.translation_mat(.{ .y = 3 }));
     try model_uniform.upload(device);
 
     var screen = try Image.new(ctx, cmd_pool, .{
@@ -136,6 +158,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     } }, object.vertices, cmd_pool);
     errdefer vertex_buffer.deinit(device);
 
+    const instances = try allocator.alloc(Instance, 10);
+    errdefer allocator.free(instances);
+    for (instances, 0..) |*inst, i| {
+        inst.*.pos = [3]f32{ @floatFromInt(i), 0, 0 };
+    }
+    var instance_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
+        .vertex_buffer_bit = true,
+    } }, instances, cmd_pool);
+    errdefer instance_buffer.deinit(device);
+
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
 
@@ -155,7 +187,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .screen_image = screen,
         .depth_image = depth,
         .mesh = object,
+        .instances = instances,
         .vertex_buffer = vertex_buffer,
+        .instance_buffer = instance_buffer,
         .descriptor_pool = desc_pool,
         .descriptor_set = desc_set,
         .command_pool = cmd_pool,
@@ -170,7 +204,9 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
     defer self.mesh.deinit();
+    defer allocator.free(self.instances);
     defer self.vertex_buffer.deinit(device);
+    defer self.instance_buffer.deinit(device);
     defer self.descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
     defer self.stages.deinit();
@@ -208,8 +244,8 @@ pub const RendererState = struct {
             .vert = app.stages.shaders.map.get(.vert).code,
             .frag = app.stages.shaders.map.get(.frag).code,
             .vertex_info = .{
-                .binding_desc = &Vertex.binding_description,
-                .attr_desc = &Vertex.attribute_description,
+                .binding_desc = &(Vertex.binding_description ++ Instance.binding_desc),
+                .attr_desc = &(Vertex.attribute_description ++ Instance.attribute_desc),
             },
             .pass = null,
             .dynamic_info = .{
@@ -232,6 +268,10 @@ pub const RendererState = struct {
             .depth = app.depth_image.view,
             .extent = engine.window.extent,
         });
+
+        // these offsets are for each dynamic descriptor.
+        // basically - you bind a buffer of objects in the desc set, and just tell
+        // it what offset you want for that data here.
         cmdbuf.draw(device, .{
             .pipeline = &pipeline,
             .desc_set = &app.descriptor_set,
@@ -239,6 +279,10 @@ pub const RendererState = struct {
             .vertices = .{
                 .buffer = app.vertex_buffer.buffer,
                 .count = @intCast(app.mesh.vertices.len),
+            },
+            .instances = .{
+                .buffer = app.instance_buffer.buffer,
+                .count = @intCast(app.instances.len),
             },
         });
         cmdbuf.draw(device, .{
@@ -249,7 +293,12 @@ pub const RendererState = struct {
                 .buffer = app.vertex_buffer.buffer,
                 .count = @intCast(app.mesh.vertices.len),
             },
+            .instances = .{
+                .buffer = app.instance_buffer.buffer,
+                .count = 1,
+            },
         });
+
         cmdbuf.dynamic_render_end(device);
         cmdbuf.drawIntoSwapchain(device, .{
             .image = app.screen_image.image,

@@ -529,6 +529,13 @@ pub const ShaderUtils = struct {
         monitor_height: u32,
     };
 
+    // TODO: maybe enforce this
+    // - [Descriptor pool and sets - Vulkan Tutorial](https://vulkan-tutorial.com/Uniform_buffers/Descriptor_pool_and_sets)
+    // scalars => N (= 4 bytes given 32 bit floats).
+    // vec2 => 2N (= 8 bytes)
+    // vec3 or vec4 => 4N (= 16 bytes)
+    // nested structure => base alignment of its members rounded up to a multiple of 16.
+    // mat4 => same alignment as vec4.
     pub fn create_extern_type(comptime uniform: type) type {
         const Type = std.builtin.Type;
         const Ut: Type = @typeInfo(uniform);
