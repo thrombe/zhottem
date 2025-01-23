@@ -58,14 +58,12 @@ const Vertex = struct {
         .input_rate = .vertex,
     }};
 
-    const attribute_description = [_]vk.VertexInputAttributeDescription{
-        .{
-            .binding = 0,
-            .location = 0,
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "pos"),
-        },
-    };
+    const attribute_description = [_]vk.VertexInputAttributeDescription{.{
+        .binding = 0,
+        .location = 0,
+        .format = .r32g32b32_sfloat,
+        .offset = @offsetOf(Vertex, "pos"),
+    }};
 
     pos: [3]f32,
 };
@@ -259,7 +257,10 @@ pub const RendererState = struct {
         var swapchain = try Swapchain.init(ctx, engine.window.extent, .{});
         errdefer swapchain.deinit(device);
 
-        var cmdbuf = try CmdBuffer.init(device, .{ .pool = app.command_pool, .size = swapchain.swap_images.len });
+        var cmdbuf = try CmdBuffer.init(device, .{
+            .pool = app.command_pool,
+            .size = swapchain.swap_images.len,
+        });
         errdefer cmdbuf.deinit(device);
 
         try cmdbuf.begin(device);

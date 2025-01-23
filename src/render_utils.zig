@@ -622,7 +622,10 @@ pub const Image = struct {
         }, null);
         defer ctx.device.destroyBuffer(staging_buffer, null);
         const staging_mem_reqs = ctx.device.getBufferMemoryRequirements(staging_buffer);
-        const staging_memory = try ctx.allocate(staging_mem_reqs, .{ .host_visible_bit = true, .host_coherent_bit = true });
+        const staging_memory = try ctx.allocate(staging_mem_reqs, .{
+            .host_visible_bit = true,
+            .host_coherent_bit = true,
+        });
         defer ctx.device.freeMemory(staging_memory, null);
         try ctx.device.bindBufferMemory(staging_buffer, staging_memory, 0);
 
@@ -751,6 +754,7 @@ pub const UniformBuffer = struct {
     pub fn upload(self: *@This(), device: *Device) !void {
         const maybe_mapped = try device.mapMemory(self.memory, 0, self.uniform_buffer.len, .{});
         const mapped = maybe_mapped orelse return error.MappingMemoryFailed;
+        // keeping memory mapped is not bad in vulkan
         defer device.unmapMemory(self.memory);
 
         @memcpy(@as([*]u8, @ptrCast(mapped)), self.uniform_buffer);
@@ -905,7 +909,10 @@ pub const Buffer = struct {
         }, null);
         defer ctx.device.destroyBuffer(staging_buffer, null);
         const staging_mem_reqs = ctx.device.getBufferMemoryRequirements(staging_buffer);
-        const staging_memory = try ctx.allocate(staging_mem_reqs, .{ .host_visible_bit = true, .host_coherent_bit = true });
+        const staging_memory = try ctx.allocate(staging_mem_reqs, .{
+            .host_visible_bit = true,
+            .host_coherent_bit = true,
+        });
         defer ctx.device.freeMemory(staging_memory, null);
         try ctx.device.bindBufferMemory(staging_buffer, staging_memory, 0);
 
@@ -943,7 +950,10 @@ pub const Buffer = struct {
         }, null);
         defer ctx.device.destroyBuffer(staging_buffer, null);
         const staging_mem_reqs = ctx.device.getBufferMemoryRequirements(staging_buffer);
-        const staging_memory = try ctx.allocate(staging_mem_reqs, .{ .host_visible_bit = true, .host_coherent_bit = true });
+        const staging_memory = try ctx.allocate(staging_mem_reqs, .{
+            .host_visible_bit = true,
+            .host_coherent_bit = true,
+        });
         defer ctx.device.freeMemory(staging_memory, null);
         try ctx.device.bindBufferMemory(staging_buffer, staging_memory, 0);
 
