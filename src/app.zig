@@ -482,7 +482,7 @@ pub const AppState = struct {
                 .left = @intCast(@intFromBool(self.mouse.left)),
                 .right = @intCast(@intFromBool(self.mouse.right)),
             },
-            .world_to_screen = self.camera.world_to_screen_mat(window.extent.width, window.extent.height),
+            .world_to_screen = self.camera.world_to_screen_mat(.{ .width = window.extent.width, .height = window.extent.height }),
             .frame = self.frame,
             .time = self.time,
             .deltatime = self.deltatime,

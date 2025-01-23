@@ -594,12 +594,18 @@ pub const Camera = struct {
         }
     }
 
-    pub fn world_to_screen_mat(self: *const @This(), width: u32, height: u32) Mat4x4 {
+    pub fn world_to_screen_mat(self: *const @This(), v: struct {
+        width: u32,
+        height: u32,
+        near: f32 = 0.1,
+        far: f32 = 10000.0,
+        fov: f32 = std.math.pi / 3.0,
+    }) Mat4x4 {
         const rot = self.rot_quat();
         const up = rot.rotate_vector(self.basis.up);
         const fwd = rot.rotate_vector(self.basis.fwd);
 
-        const projection_matrix = Mat4x4.perspective_projection(height, width, 0.01, 100.0, std.math.pi / 3.0);
+        const projection_matrix = Mat4x4.perspective_projection(v.height, v.width, v.near, v.far, v.fov);
         const view_matrix = Mat4x4.view(self.pos, fwd, up);
         const world_to_screen = projection_matrix.mul_mat(view_matrix);
 
