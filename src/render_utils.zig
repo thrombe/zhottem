@@ -187,7 +187,7 @@ pub const GraphicsPipeline = struct {
             image_format: vk.Format,
             depth_format: vk.Format,
         },
-        pass: ?vk.RenderPass,
+        pass: ?vk.RenderPass = null,
         desc_set_layouts: []const vk.DescriptorSetLayout,
     };
 
@@ -1251,14 +1251,14 @@ pub const CmdBuffer = struct {
         device: *Device,
         v: struct {
             pipeline: *GraphicsPipeline,
-            desc_set: *DescriptorSet,
+            desc_sets: []const vk.DescriptorSet,
             dynamic_offsets: []const u32,
             vertices: struct {
-                buffer: vk.Buffer,
+                buffer: ?vk.Buffer,
                 count: u32,
             },
             instances: struct {
-                buffer: vk.Buffer,
+                buffer: ?vk.Buffer,
                 count: u32,
             },
         },
@@ -1270,25 +1270,29 @@ pub const CmdBuffer = struct {
                 .graphics,
                 v.pipeline.layout,
                 0,
-                1,
-                @ptrCast(&v.desc_set.set),
+                @intCast(v.desc_sets.len),
+                v.desc_sets.ptr,
                 @intCast(v.dynamic_offsets.len),
                 v.dynamic_offsets.ptr,
             );
-            device.cmdBindVertexBuffers(
-                cmdbuf,
-                0,
-                1,
-                @ptrCast(&v.vertices.buffer),
-                &[_]vk.DeviceSize{0},
-            );
-            device.cmdBindVertexBuffers(
-                cmdbuf,
-                1,
-                1,
-                @ptrCast(&v.instances.buffer),
-                &[_]vk.DeviceSize{0},
-            );
+            if (v.vertices.buffer) |*vb| {
+                device.cmdBindVertexBuffers(
+                    cmdbuf,
+                    0,
+                    1,
+                    @ptrCast(vb),
+                    &[_]vk.DeviceSize{0},
+                );
+            }
+            if (v.instances.buffer) |*ib| {
+                device.cmdBindVertexBuffers(
+                    cmdbuf,
+                    1,
+                    1,
+                    @ptrCast(ib),
+                    &[_]vk.DeviceSize{0},
+                );
+            }
             device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
         }
     }

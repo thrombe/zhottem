@@ -43,7 +43,8 @@ instances: []Instance,
 vertex_buffer: Buffer,
 instance_buffer: Buffer,
 descriptor_pool: DescriptorPool,
-descriptor_set: DescriptorSet,
+camera_descriptor_set: DescriptorSet,
+model_descriptor_set: DescriptorSet,
 command_pool: vk.CommandPool,
 stages: ShaderStageManager,
 
@@ -169,12 +170,17 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
 
-    var desc_set_builder = desc_pool.set_builder();
-    defer desc_set_builder.deinit();
-    try desc_set_builder.add(&uniforms);
-    try desc_set_builder.add(&model_uniform);
-    var desc_set = try desc_set_builder.build(device);
-    errdefer desc_set.deinit(device);
+    var camera_desc_set_builder = desc_pool.set_builder();
+    defer camera_desc_set_builder.deinit();
+    try camera_desc_set_builder.add(&uniforms);
+    var camera_desc_set = try camera_desc_set_builder.build(device);
+    errdefer camera_desc_set.deinit(device);
+
+    var model_desc_set_builder = desc_pool.set_builder();
+    defer model_desc_set_builder.deinit();
+    try model_desc_set_builder.add(&model_uniform);
+    var model_desc_set = try model_desc_set_builder.build(device);
+    errdefer model_desc_set.deinit(device);
 
     const stages = try ShaderStageManager.init();
     errdefer stages.deinit();
@@ -189,7 +195,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .vertex_buffer = vertex_buffer,
         .instance_buffer = instance_buffer,
         .descriptor_pool = desc_pool,
-        .descriptor_set = desc_set,
+        .camera_descriptor_set = camera_desc_set,
+        .model_descriptor_set = model_desc_set,
         .command_pool = cmd_pool,
         .stages = stages,
     };
@@ -205,7 +212,8 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer allocator.free(self.instances);
     defer self.vertex_buffer.deinit(device);
     defer self.instance_buffer.deinit(device);
-    defer self.descriptor_set.deinit(device);
+    defer self.camera_descriptor_set.deinit(device);
+    defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
     defer self.stages.deinit();
 }
@@ -229,6 +237,7 @@ pub const RendererState = struct {
     swapchain: Swapchain,
     cmdbuffer: CmdBuffer,
     pipeline: GraphicsPipeline,
+    bg_pipeline: GraphicsPipeline,
 
     // not owned
     pool: vk.CommandPool,
@@ -245,14 +254,33 @@ pub const RendererState = struct {
                 .binding_desc = &(Vertex.binding_description ++ Instance.binding_desc),
                 .attr_desc = &(Vertex.attribute_description ++ Instance.attribute_desc),
             },
-            .pass = null,
             .dynamic_info = .{
                 .image_format = .r16g16b16a16_sfloat,
                 .depth_format = .d32_sfloat,
             },
-            .desc_set_layouts = &[_]vk.DescriptorSetLayout{app.descriptor_set.layout},
+            .desc_set_layouts = &[_]vk.DescriptorSetLayout{
+                app.camera_descriptor_set.layout,
+                app.model_descriptor_set.layout,
+            },
         });
         errdefer pipeline.deinit(device);
+
+        var bg_pipeline = try GraphicsPipeline.new(device, .{
+            .vert = app.stages.shaders.map.get(.bg_vert).code,
+            .frag = app.stages.shaders.map.get(.bg_frag).code,
+            .vertex_info = .{
+                .binding_desc = &[_]vk.VertexInputBindingDescription{},
+                .attr_desc = &[_]vk.VertexInputAttributeDescription{},
+            },
+            .dynamic_info = .{
+                .image_format = .r16g16b16a16_sfloat,
+                .depth_format = .d32_sfloat,
+            },
+            .desc_set_layouts = &[_]vk.DescriptorSetLayout{
+                app.camera_descriptor_set.layout,
+            },
+        });
+        errdefer bg_pipeline.deinit(device);
 
         var swapchain = try Swapchain.init(ctx, engine.window.extent, .{});
         errdefer swapchain.deinit(device);
@@ -275,7 +303,10 @@ pub const RendererState = struct {
         // it what offset you want for that data here.
         cmdbuf.draw(device, .{
             .pipeline = &pipeline,
-            .desc_set = &app.descriptor_set,
+            .desc_sets = &[_]vk.DescriptorSet{
+                app.camera_descriptor_set.set,
+                app.model_descriptor_set.set,
+            },
             .dynamic_offsets = &[_]u32{0},
             .vertices = .{
                 .buffer = app.vertex_buffer.buffer,
@@ -288,7 +319,10 @@ pub const RendererState = struct {
         });
         cmdbuf.draw(device, .{
             .pipeline = &pipeline,
-            .desc_set = &app.descriptor_set,
+            .desc_sets = &[_]vk.DescriptorSet{
+                app.camera_descriptor_set.set,
+                app.model_descriptor_set.set,
+            },
             .dynamic_offsets = &[_]u32{256},
             .vertices = .{
                 .buffer = app.vertex_buffer.buffer,
@@ -296,6 +330,22 @@ pub const RendererState = struct {
             },
             .instances = .{
                 .buffer = app.instance_buffer.buffer,
+                .count = 1,
+            },
+        });
+
+        cmdbuf.draw(device, .{
+            .pipeline = &bg_pipeline,
+            .desc_sets = &[_]vk.DescriptorSet{
+                app.camera_descriptor_set.set,
+            },
+            .dynamic_offsets = &[_]u32{},
+            .vertices = .{
+                .buffer = null,
+                .count = 6,
+            },
+            .instances = .{
+                .buffer = null,
                 .count = 1,
             },
         });
@@ -312,6 +362,7 @@ pub const RendererState = struct {
 
         return .{
             .pipeline = pipeline,
+            .bg_pipeline = bg_pipeline,
             .swapchain = swapchain,
             .cmdbuffer = cmdbuf,
             .pool = app.command_pool,
@@ -325,6 +376,7 @@ pub const RendererState = struct {
         defer self.cmdbuffer.deinit(device);
 
         defer self.pipeline.deinit(device);
+        defer self.bg_pipeline.deinit(device);
     }
 };
 
@@ -333,6 +385,8 @@ const ShaderStageManager = struct {
     compiler: CompilerUtils.Compiler,
 
     const ShaderStage = enum {
+        bg_vert,
+        bg_frag,
         vert,
         frag,
     };
@@ -344,6 +398,20 @@ const ShaderStageManager = struct {
 
     pub fn init() !@This() {
         var comp = try CompilerUtils.Compiler.init(.{ .opt = .fast, .env = .vulkan1_3 }, &[_]CompilerUtils.ShaderInfo{
+            .{
+                .typ = .bg_vert,
+                .stage = .vertex,
+                .path = "./src/shader.glsl",
+                .define = &[_][]const u8{"BG_VERT_PASS"},
+                .include = &[_][]const u8{"./src"},
+            },
+            .{
+                .typ = .bg_frag,
+                .stage = .fragment,
+                .path = "./src/shader.glsl",
+                .define = &[_][]const u8{"BG_FRAG_PASS"},
+                .include = &[_][]const u8{"./src"},
+            },
             .{
                 .typ = .vert,
                 .stage = .vertex,
