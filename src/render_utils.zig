@@ -80,10 +80,10 @@ pub const DescriptorSet = struct {
         desc_set_update: std.ArrayListUnmanaged(vk.WriteDescriptorSet) = .{},
 
         pub fn add(self: *@This(), binding: anytype) !void {
-            try self.layout_binding.append(allocator, binding.layout_binding(@intCast(self.layout_binding.items.len)));
+            try self.layout_binding.appendSlice(allocator, &binding.layout_binding());
 
             // NOTE: undefined is written to in .build()
-            try self.desc_set_update.append(allocator, binding.write_desc_set(@intCast(self.desc_set_update.items.len), undefined));
+            try self.desc_set_update.appendSlice(allocator, &binding.write_desc_set());
         }
 
         pub fn deinit(self: *@This()) void {
@@ -92,6 +92,14 @@ pub const DescriptorSet = struct {
         }
 
         pub fn build(self: *@This(), device: *Device) !DescriptorSet {
+            // overwriting binding index thing
+            for (self.layout_binding.items, 0..) |*lb, i| {
+                lb.*.binding = @intCast(i);
+            }
+            for (self.desc_set_update.items, 0..) |*dsu, i| {
+                dsu.*.dst_binding = @intCast(i);
+            }
+
             const layouts = [_]vk.DescriptorSetLayout{try device.createDescriptorSetLayout(&.{
                 .flags = .{},
                 .binding_count = @intCast(self.layout_binding.items.len),
@@ -492,6 +500,76 @@ pub const Image = struct {
         view_aspect_mask: vk.ImageAspectFlags = .{},
     };
 
+    pub fn new_from_slice(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: struct {
+        extent: vk.Extent2D,
+        bind_desc_type: vk.DescriptorType,
+        layout: vk.ImageLayout,
+        usage: vk.ImageUsageFlags = .{},
+    }, slice: [][4]u8) !@This() {
+        const S = @TypeOf(slice);
+        const E = std.meta.Elem(S);
+        const size = slice.len * @sizeOf(E);
+
+        if (v.extent.width * v.extent.height != slice.len) {
+            return error.SizeMismatch;
+        }
+
+        const extent = vk.Extent3D{ .width = v.extent.width, .height = v.extent.height, .depth = 1 };
+        var this = try @This().new(
+            ctx,
+            pool,
+            .{
+                .usage = v.usage.merge(.{
+                    .transfer_dst_bit = true,
+                }),
+                .format = .r8g8b8a8_unorm,
+                .img_type = .@"2d",
+                .img_view_type = .@"2d",
+                .tiling = .optimal,
+                .layout = .transfer_dst_optimal,
+                .view_aspect_mask = .{ .color_bit = true },
+                .extent = extent,
+                .bind_desc_type = v.bind_desc_type,
+            },
+        );
+
+        const staging_buffer = try ctx.device.createBuffer(&.{
+            .size = size,
+            .usage = .{ .transfer_src_bit = true },
+            .sharing_mode = .exclusive,
+        }, null);
+        defer ctx.device.destroyBuffer(staging_buffer, null);
+        const staging_mem_reqs = ctx.device.getBufferMemoryRequirements(staging_buffer);
+        const staging_memory = try ctx.allocate(staging_mem_reqs, .{
+            .host_visible_bit = true,
+            .host_coherent_bit = true,
+        });
+        defer ctx.device.freeMemory(staging_memory, null);
+        try ctx.device.bindBufferMemory(staging_buffer, staging_memory, 0);
+
+        {
+            const data = try ctx.device.mapMemory(staging_memory, 0, vk.WHOLE_SIZE, .{});
+            defer ctx.device.unmapMemory(staging_memory);
+
+            const gpu_vertices: [*]E = @ptrCast(@alignCast(data));
+            @memcpy(gpu_vertices[0..slice.len], slice);
+        }
+
+        try copyBufferToImage(
+            ctx,
+            &ctx.device,
+            pool,
+            staging_buffer,
+            this.image,
+            this.io.image_layout,
+            extent,
+        );
+
+        try this.transition(ctx, pool, .transfer_dst_optimal, v.layout, .{ .color_bit = true });
+
+        return this;
+    }
+
     pub fn new(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: Args) !@This() {
         const device = &ctx.device;
 
@@ -652,6 +730,7 @@ pub const Image = struct {
         device.destroySampler(self.sampler, null);
     }
 
+    // i don't think this works unless image memory is linear. totally not what i want.
     pub fn buffer(self: *@This(), device: *Device, v: struct {
         usage: vk.BufferUsageFlags = .{},
     }) !BufferView {
@@ -677,9 +756,9 @@ pub const Image = struct {
         } };
     }
 
-    pub fn layout_binding(self: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
-        return .{
-            .binding = index,
+    pub fn layout_binding(self: *@This()) [1]vk.DescriptorSetLayoutBinding {
+        return [_]vk.DescriptorSetLayoutBinding{.{
+            .binding = undefined,
             .descriptor_type = self.bind_desc_type,
             .descriptor_count = 1,
             .stage_flags = .{
@@ -687,13 +766,13 @@ pub const Image = struct {
                 .fragment_bit = true,
                 .compute_bit = true,
             },
-        };
+        }};
     }
 
-    pub fn write_desc_set(self: *@This(), binding: u32, desc_set: vk.DescriptorSet) vk.WriteDescriptorSet {
-        return .{
-            .dst_set = desc_set,
-            .dst_binding = binding,
+    pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+        return [_]vk.WriteDescriptorSet{.{
+            .dst_set = undefined,
+            .dst_binding = undefined,
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = self.bind_desc_type,
@@ -701,7 +780,7 @@ pub const Image = struct {
             // OOF: ??
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
-        };
+        }};
     }
 };
 
@@ -760,9 +839,9 @@ pub const UniformBuffer = struct {
         @memcpy(@as([*]u8, @ptrCast(mapped)), self.uniform_buffer);
     }
 
-    pub fn layout_binding(_: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
-        return .{
-            .binding = index,
+    pub fn layout_binding(_: *@This()) [1]vk.DescriptorSetLayoutBinding {
+        return [_]vk.DescriptorSetLayoutBinding{.{
+            .binding = undefined,
             .descriptor_type = .uniform_buffer,
             .descriptor_count = 1,
             .stage_flags = .{
@@ -770,13 +849,13 @@ pub const UniformBuffer = struct {
                 .fragment_bit = true,
                 .compute_bit = true,
             },
-        };
+        }};
     }
 
-    pub fn write_desc_set(self: *@This(), binding: u32, desc_set: vk.DescriptorSet) vk.WriteDescriptorSet {
-        return .{
-            .dst_set = desc_set,
-            .dst_binding = binding,
+    pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+        return [_]vk.WriteDescriptorSet{.{
+            .dst_set = undefined,
+            .dst_binding = undefined,
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .uniform_buffer,
@@ -784,7 +863,7 @@ pub const UniformBuffer = struct {
             // OOF: ??
             .p_image_info = undefined,
             .p_texel_buffer_view = undefined,
-        };
+        }};
     }
 };
 
@@ -855,9 +934,10 @@ pub fn DynamicUniformBuffer(typ: type) type {
             // device.flushMappedMemoryRanges(memory_range_count: u32, p_memory_ranges: [*]const MappedMemoryRange)
         }
 
-        pub fn layout_binding(_: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
-            return .{
-                .binding = index,
+        pub fn layout_binding(_: *@This()) [1]vk.DescriptorSetLayoutBinding {
+            return [_]vk.DescriptorSetLayoutBinding{.{
+                .binding = undefined,
+
                 .descriptor_type = .uniform_buffer_dynamic,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -865,13 +945,14 @@ pub fn DynamicUniformBuffer(typ: type) type {
                     .fragment_bit = true,
                     .compute_bit = true,
                 },
-            };
+            }};
         }
 
-        pub fn write_desc_set(self: *@This(), binding: u32, desc_set: vk.DescriptorSet) vk.WriteDescriptorSet {
-            return .{
-                .dst_set = desc_set,
-                .dst_binding = binding,
+        pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+            return [_]vk.WriteDescriptorSet{.{
+                .dst_set = undefined,
+                .dst_binding = undefined,
+
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .uniform_buffer_dynamic,
@@ -879,7 +960,7 @@ pub fn DynamicUniformBuffer(typ: type) type {
                 // OOF: ??
                 .p_image_info = undefined,
                 .p_texel_buffer_view = undefined,
-            };
+            }};
         }
     };
 }
@@ -1003,9 +1084,10 @@ pub const Buffer = struct {
         device.freeMemory(self.memory, null);
     }
 
-    pub fn layout_binding(_: *@This(), index: u32) vk.DescriptorSetLayoutBinding {
-        return .{
-            .binding = index,
+    pub fn layout_binding(_: *@This()) [1]vk.DescriptorSetLayoutBinding {
+        return [_]vk.DescriptorSetLayoutBinding{.{
+            .binding = undefined,
+
             .descriptor_type = .storage_buffer,
             .descriptor_count = 1,
             .stage_flags = .{
@@ -1013,13 +1095,14 @@ pub const Buffer = struct {
                 .fragment_bit = true,
                 .compute_bit = true,
             },
-        };
+        }};
     }
 
-    pub fn write_desc_set(self: *@This(), binding: u32, desc_set: vk.DescriptorSet) vk.WriteDescriptorSet {
-        return .{
-            .dst_set = desc_set,
-            .dst_binding = binding,
+    pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+        return [_]vk.WriteDescriptorSet{.{
+            .dst_set = undefined,
+            .dst_binding = undefined,
+
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .storage_buffer,
@@ -1027,7 +1110,7 @@ pub const Buffer = struct {
             // OOF: ??
             .p_image_info = undefined,
             .p_texel_buffer_view = undefined,
-        };
+        }};
     }
 };
 
@@ -1974,7 +2057,7 @@ pub fn copyImageToBuffer(
         .flags = .{ .one_time_submit_bit = true },
     });
 
-    const region = vk.BufferImageCopy{
+    const region = [_]vk.BufferImageCopy{.{
         .buffer_offset = 0,
         .buffer_row_length = extent.width,
         .buffer_image_height = extent.height,
@@ -1986,8 +2069,57 @@ pub fn copyImageToBuffer(
         },
         .image_offset = .{ .x = 0, .y = 0, .z = 0 },
         .image_extent = extent,
+    }};
+    cmdbuf.copyImageToBuffer(src, src_layout, dst, @intCast(region.len), &region);
+
+    try cmdbuf.endCommandBuffer();
+
+    const si = vk.SubmitInfo{
+        .command_buffer_count = 1,
+        .p_command_buffers = (&cmdbuf.handle)[0..1],
+        .p_wait_dst_stage_mask = undefined,
     };
-    cmdbuf.copyImageToBuffer(src, src_layout, dst, 1, @ptrCast(&region));
+    try device.queueSubmit(ctx.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
+    try device.queueWaitIdle(ctx.graphics_queue.handle);
+}
+
+pub fn copyBufferToImage(
+    ctx: *Engine.VulkanContext,
+    device: *Device,
+    pool: vk.CommandPool,
+    src: vk.Buffer,
+    dst: vk.Image,
+    dst_layout: vk.ImageLayout,
+    extent: vk.Extent3D,
+) !void {
+    var cmdbuf_handle: vk.CommandBuffer = undefined;
+    try device.allocateCommandBuffers(&.{
+        .command_pool = pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&cmdbuf_handle));
+    defer device.freeCommandBuffers(pool, 1, @ptrCast(&cmdbuf_handle));
+
+    const cmdbuf = Engine.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
+
+    try cmdbuf.beginCommandBuffer(&.{
+        .flags = .{ .one_time_submit_bit = true },
+    });
+
+    const region = [_]vk.BufferImageCopy{.{
+        .buffer_offset = 0,
+        .buffer_row_length = extent.width,
+        .buffer_image_height = extent.height,
+        .image_subresource = .{
+            .aspect_mask = .{ .color_bit = true },
+            .mip_level = 0,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .image_offset = .{ .x = 0, .y = 0, .z = 0 },
+        .image_extent = extent,
+    }};
+    cmdbuf.copyBufferToImage(src, dst, dst_layout, @intCast(region.len), &region);
 
     try cmdbuf.endCommandBuffer();
 
