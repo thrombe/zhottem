@@ -361,6 +361,23 @@ pub const ImageMagick = struct {
         @cInclude("MagickWand/MagickWand.h");
     });
 
+    pub const PixelType = enum {
+        unorm,
+        half,
+        float,
+
+        fn typ(comptime self: @This()) type {
+            return switch (self) {
+                .unorm => u8,
+                .half => f16,
+                .float => f32,
+            };
+        }
+
+        fn img_typ(comptime self: @This()) type {
+            return Image(Pixel(self.typ()));
+        }
+    };
     pub fn Pixel(typ: type) type {
         return extern struct {
             r: typ,
@@ -381,15 +398,21 @@ pub const ImageMagick = struct {
         };
     }
 
-    pub const FloatImage = Image(Pixel(f32));
-    pub const HalfImage = Image(Pixel(f16));
-    pub const UnormImage = Image(Pixel(u8));
+    pub const FloatImage = PixelType.float.img_typ();
+    pub const HalfImage = PixelType.half.img_typ();
+    pub const UnormImage = PixelType.unorm.img_typ();
 
-    pub fn decode_jpg(bytes: []u8, comptime typ: enum { unorm, half, float }) !(switch (typ) {
-        .unorm => Image(Pixel(u8)),
-        .half => Image(Pixel(f16)),
-        .float => Image(Pixel(f32)),
-    }) {
+    pub fn from_file(path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+        var file = try std.fs.cwd().openFile(path, .{});
+        defer file.close();
+
+        const buf = try file.readToEndAlloc(allocator, 50 * 1000 * 1000);
+        defer allocator.free(buf);
+
+        return decode_img(buf, typ);
+    }
+
+    pub fn decode_img(bytes: []u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
         magick.MagickWandGenesis();
         const wand = magick.NewMagickWand() orelse {
             return error.CouldNotGetWand;
