@@ -41,12 +41,16 @@ depth_image: Image,
 mesh: mesh.Mesh,
 instances: []Instance,
 vertex_buffer: Buffer,
+index_buffer: Buffer,
 instance_buffer: Buffer,
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
 command_pool: vk.CommandPool,
 stages: ShaderStageManager,
+
+texture_img: utils.ImageMagick.UnormImage,
+texture: Image,
 
 const Device = Engine.VulkanContext.Api.Device;
 
@@ -59,14 +63,43 @@ const Vertex = struct {
         .input_rate = .vertex,
     }};
 
-    const attribute_description = [_]vk.VertexInputAttributeDescription{.{
-        .binding = 0,
-        .location = 0,
-        .format = .r32g32b32_sfloat,
-        .offset = @offsetOf(Vertex, "pos"),
-    }};
+    const attribute_description = [_]vk.VertexInputAttributeDescription{
+        .{
+            .binding = 0,
+            .location = 0,
+            .format = .r32g32b32_sfloat,
+            .offset = @offsetOf(Vertex, "pos"),
+        },
+        .{
+            .binding = 0,
+            .location = 1,
+            .format = .r32g32b32_sfloat,
+            .offset = @offsetOf(Vertex, "normal"),
+        },
+        .{
+            .binding = 0,
+            .location = 2,
+            .format = .r32g32_sfloat,
+            .offset = @offsetOf(Vertex, "uv"),
+        },
+    };
 
-    pos: [3]f32,
+    pos: [4]f32,
+    normal: [4]f32,
+    uv: [4]f32,
+
+    fn from_slices(vertices: [][3]f32, normals: [][3]f32, uvs: [][2]f32) ![]@This() {
+        const buf = try allocator.alloc(@This(), vertices.len);
+        errdefer allocator.free(buf);
+
+        for (vertices, normals, uvs, 0..) |v, n, uv, i| {
+            buf[i].pos = [4]f32{ v[0], v[1], v[2], 0 };
+            buf[i].normal = [4]f32{ n[0], n[1], n[2], 0 };
+            buf[i].uv = [4]f32{ uv[0], uv[1], 0, 0 };
+        }
+
+        return buf;
+    }
 };
 
 const Instance = struct {
@@ -79,7 +112,7 @@ const Instance = struct {
     }};
     const attribute_desc = [_]vk.VertexInputAttributeDescription{.{
         .binding = 1,
-        .location = 1,
+        .location = 3,
         .format = .r32g32b32_sfloat,
         .offset = @offsetOf(Instance, "pos"),
     }};
@@ -150,12 +183,35 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
     errdefer depth.deinit(device);
 
+    var image = try utils.ImageMagick.from_file("./assets/img.png", .unorm);
+    errdefer image.deinit();
+    const slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(image.buffer));
+
+    var gpu_img = try Image.new_from_slice(ctx, cmd_pool, .{
+        .extent = .{ .width = @intCast(image.width), .height = @intCast(image.height) },
+        .bind_desc_type = .combined_image_sampler,
+        .layout = .shader_read_only_optimal,
+        .usage = .{
+            .sampled_bit = true,
+        },
+    }, slice);
+    errdefer gpu_img.deinit(device);
+
     var object = try mesh.Mesh.cube();
     errdefer object.deinit();
+
+    const vertices = try Vertex.from_slices(object.vertices, object.normals, object.uvs);
+    defer allocator.free(vertices);
+
     var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
         .vertex_buffer_bit = true,
-    } }, object.vertices, cmd_pool);
+    } }, vertices, cmd_pool);
     errdefer vertex_buffer.deinit(device);
+
+    var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
+        .index_buffer_bit = true,
+    } }, object.faces, cmd_pool);
+    errdefer index_buffer.deinit(device);
 
     const instances = try allocator.alloc(Instance, 10);
     errdefer allocator.free(instances);
@@ -179,6 +235,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var model_desc_set_builder = desc_pool.set_builder();
     defer model_desc_set_builder.deinit();
     try model_desc_set_builder.add(&model_uniform);
+    try model_desc_set_builder.add(&gpu_img);
     var model_desc_set = try model_desc_set_builder.build(device);
     errdefer model_desc_set.deinit(device);
 
@@ -193,12 +250,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .mesh = object,
         .instances = instances,
         .vertex_buffer = vertex_buffer,
+        .index_buffer = index_buffer,
         .instance_buffer = instance_buffer,
         .descriptor_pool = desc_pool,
         .camera_descriptor_set = camera_desc_set,
         .model_descriptor_set = model_desc_set,
         .command_pool = cmd_pool,
         .stages = stages,
+
+        .texture_img = image,
+        .texture = gpu_img,
     };
 }
 
@@ -211,11 +272,14 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.mesh.deinit();
     defer allocator.free(self.instances);
     defer self.vertex_buffer.deinit(device);
+    defer self.index_buffer.deinit(device);
     defer self.instance_buffer.deinit(device);
     defer self.camera_descriptor_set.deinit(device);
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
     defer self.stages.deinit();
+    defer self.texture_img.deinit();
+    defer self.texture.deinit(device);
 }
 
 pub fn present(
@@ -312,6 +376,10 @@ pub const RendererState = struct {
                 .buffer = app.vertex_buffer.buffer,
                 .count = @intCast(app.mesh.vertices.len),
             },
+            .indices = .{
+                .buffer = app.index_buffer.buffer,
+                .count = @intCast(app.mesh.faces.len * 3),
+            },
             .instances = .{
                 .buffer = app.instance_buffer.buffer,
                 .count = @intCast(app.instances.len),
@@ -328,6 +396,10 @@ pub const RendererState = struct {
                 .buffer = app.vertex_buffer.buffer,
                 .count = @intCast(app.mesh.vertices.len),
             },
+            .indices = .{
+                .buffer = app.index_buffer.buffer,
+                .count = @intCast(app.mesh.faces.len * 3),
+            },
             .instances = .{
                 .buffer = app.instance_buffer.buffer,
                 .count = 1,
@@ -343,6 +415,10 @@ pub const RendererState = struct {
             .vertices = .{
                 .buffer = null,
                 .count = 6,
+            },
+            .indices = .{
+                .buffer = null,
+                .count = undefined,
             },
             .instances = .{
                 .buffer = null,

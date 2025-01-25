@@ -889,6 +889,11 @@ pub fn DynamicUniformBuffer(typ: type) type {
             errdefer device.destroyBuffer(buffer, null);
             const mem_req = device.getBufferMemoryRequirements(buffer);
             const memory = try ctx.allocate(mem_req, .{
+                // https://community.khronos.org/t/memory-type-practice-for-an-mvp-uniform-buffer/109458/7
+                // we ideally want device local for cpu to gpu, but instance transforms are not a bottleneck (generally)
+                // so we save this memory (device_local + host_visible) for more useful things
+                // .device_local_bit = true,
+
                 .host_visible_bit = true,
                 .host_coherent_bit = true,
             });
@@ -1336,6 +1341,10 @@ pub const CmdBuffer = struct {
             pipeline: *GraphicsPipeline,
             desc_sets: []const vk.DescriptorSet,
             dynamic_offsets: []const u32,
+            indices: struct {
+                buffer: ?vk.Buffer,
+                count: u32,
+            },
             vertices: struct {
                 buffer: ?vk.Buffer,
                 count: u32,
@@ -1376,7 +1385,12 @@ pub const CmdBuffer = struct {
                     &[_]vk.DeviceSize{0},
                 );
             }
-            device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
+            if (v.indices.buffer) |ib| {
+                device.cmdBindIndexBuffer(cmdbuf, ib, 0, .uint32);
+                device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 0, 0);
+            } else {
+                device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
+            }
         }
     }
 
