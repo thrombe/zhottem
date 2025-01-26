@@ -35,3 +35,14 @@
      int monitor_height;
  };
 
+ const int _bind_camera = 0;
+ const int _bind_instanced = 1;
+
+ const int _bind_vertex = 0;
+ const int _bind_instance = 1;
+
+ const int _bind_instance_position = 0;
+ const int _bind_vertex_position = 1;
+ const int _bind_normal = 2;
+ const int _bind_uv = 3;
+

@@ -1345,6 +1345,7 @@ pub const CmdBuffer = struct {
             dynamic_offsets: []const u32,
             indices: struct {
                 buffer: ?vk.Buffer,
+                offset: u32,
                 count: u32,
             },
             vertices: struct {
@@ -1388,11 +1389,15 @@ pub const CmdBuffer = struct {
                 );
             }
             if (v.indices.buffer) |ib| {
-                device.cmdBindIndexBuffer(cmdbuf, ib, 0, .uint32);
+                device.cmdBindIndexBuffer(cmdbuf, ib, v.indices.offset, .uint32);
                 device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 0, 0);
             } else {
                 device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
             }
+
+            // very cool
+            // - [Vulkan/examples/indirectdraw/README.md](https://github.com/SaschaWillems/Vulkan/blob/master/examples/indirectdraw/README.md)
+            // device.cmdDrawIndirect(command_buffer: CommandBuffer, buffer: Buffer, offset: DeviceSize, draw_count: u32, stride: u32)
         }
     }
 

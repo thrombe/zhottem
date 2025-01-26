@@ -38,10 +38,8 @@ uniforms: UniformBuffer,
 model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
-mesh: mesh.Mesh,
 instances: []Instance,
-vertex_buffer: Buffer,
-index_buffer: Buffer,
+gpu_resources: GpuResourceManager.GpuResources,
 instance_buffer: Buffer,
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
@@ -52,11 +50,18 @@ stages: ShaderStageManager,
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
 
+handles: struct {
+    object: GpuResourceManager.MeshResourceHandle,
+    cube: GpuResourceManager.MeshResourceHandle,
+},
+
 const Device = Engine.VulkanContext.Api.Device;
 
 const Vertex = struct {
+    // TODO: these locations and bindings are just numbers. they can be skipped. maybe create a enum and sync them to shader using generated code.
+    // const int one = 1; layout(location = one) blah; works
     const binding_description = [_]vk.VertexInputBindingDescription{.{
-        .binding = 0,
+        .binding = VertexBinds.vertex.bind(),
         .stride = @sizeOf(Vertex),
 
         // new data per vertex
@@ -65,20 +70,20 @@ const Vertex = struct {
 
     const attribute_description = [_]vk.VertexInputAttributeDescription{
         .{
-            .binding = 0,
-            .location = 0,
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.vertex_position.bind(),
             .format = .r32g32b32_sfloat,
             .offset = @offsetOf(Vertex, "pos"),
         },
         .{
-            .binding = 0,
-            .location = 1,
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.normal.bind(),
             .format = .r32g32b32_sfloat,
             .offset = @offsetOf(Vertex, "normal"),
         },
         .{
-            .binding = 0,
-            .location = 2,
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.uv.bind(),
             .format = .r32g32_sfloat,
             .offset = @offsetOf(Vertex, "uv"),
         },
@@ -104,20 +109,143 @@ const Vertex = struct {
 
 const Instance = struct {
     const binding_desc = [_]vk.VertexInputBindingDescription{.{
-        .binding = 1,
+        .binding = VertexBinds.instance.bind(),
         .stride = @sizeOf(Instance),
 
         // new data per instance
         .input_rate = .instance,
     }};
     const attribute_desc = [_]vk.VertexInputAttributeDescription{.{
-        .binding = 1,
-        .location = 3,
+        .binding = VertexBinds.instance.bind(),
+        .location = VertexInputLocations.instance_position.bind(),
         .format = .r32g32b32_sfloat,
         .offset = @offsetOf(Instance, "pos"),
     }};
 
     pos: [3]f32,
+};
+
+pub const VertexBinds = enum(u32) {
+    vertex,
+    instance,
+
+    pub fn bind(self: @This()) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const VertexInputLocations = enum(u32) {
+    instance_position,
+    vertex_position,
+    normal,
+    uv,
+
+    pub fn bind(self: @This()) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const UniformBinds = enum(u32) {
+    camera,
+    instanced,
+
+    pub fn bind(self: @This()) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const Drawable = struct {
+    mesh: GpuResourceManager.MeshResourceHandle,
+    pipeline: GraphicsPipeline,
+};
+
+pub const GpuResourceManager = struct {
+    pub const MeshResourceHandle = struct {
+        index_offset: u32,
+        index_count: u32,
+
+        vertex_offset: u32,
+        vertex_count: u32,
+    };
+    pub const CpuResources = struct {
+        vertices: Vertices,
+        triangles: Triangles,
+
+        const Vertices = std.ArrayList(Vertex);
+        const Triangles = std.ArrayList([3]u32);
+
+        pub fn init() @This() {
+            return .{
+                .vertices = Vertices.init(allocator),
+                .triangles = Triangles.init(allocator),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.vertices.deinit();
+            self.triangles.deinit();
+        }
+
+        pub fn add_mesh(self: *@This(), m: *mesh.Mesh) !MeshResourceHandle {
+            const handle = MeshResourceHandle{
+                .index_offset = @intCast(self.triangles.items.len * 3 * @sizeOf(u32)),
+                .index_count = @intCast(m.faces.len * 3),
+
+                .vertex_offset = @intCast(self.vertices.items.len * @sizeOf(Vertex)),
+                .vertex_count = @intCast(m.vertices.len),
+            };
+
+            for (m.vertices, m.normals, m.uvs) |v, n, uv| {
+                var vertex = std.mem.zeroes(Vertex);
+                vertex.pos = [4]f32{ v[0], v[1], v[2], 0 };
+                vertex.normal = [4]f32{ n[0], n[1], n[2], 0 };
+                vertex.uv = [4]f32{ uv[0], uv[1], 0, 0 };
+
+                try self.vertices.append(vertex);
+            }
+
+            const base: u32 = @intCast(self.triangles.items.len * 3);
+            for (m.faces) |f| {
+                try self.triangles.append([3]u32{
+                    f[0] + base,
+                    f[1] + base,
+                    f[2] + base,
+                });
+            }
+
+            return handle;
+        }
+
+        pub fn upload(self: *@This(), engine: *Engine, pool: vk.CommandPool) !GpuResources {
+            const ctx = &engine.graphics;
+            const device = &ctx.device;
+
+            var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
+                .vertex_buffer_bit = true,
+            } }, self.vertices.items, pool);
+            errdefer vertex_buffer.deinit(device);
+
+            var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
+                .index_buffer_bit = true,
+            } }, self.triangles.items, pool);
+            errdefer index_buffer.deinit(device);
+
+            return .{
+                .vertex_buffer = vertex_buffer,
+                .index_buffer = index_buffer,
+            };
+        }
+    };
+
+    pub const GpuResources = struct {
+        vertex_buffer: Buffer,
+        index_buffer: Buffer,
+
+        pub fn deinit(self: *@This(), device: *Device) void {
+            self.vertex_buffer.deinit(device);
+            self.index_buffer.deinit(device);
+        }
+    };
 };
 
 var matrices = std.mem.zeroes([2]math.Mat4x4);
@@ -197,21 +325,19 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var object = try mesh.Mesh.cube();
-    errdefer object.deinit();
+    var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
+    defer object.deinit();
+    var cube = try mesh.Mesh.cube();
+    defer cube.deinit();
 
-    const vertices = try Vertex.from_slices(object.vertices, object.normals, object.uvs);
-    defer allocator.free(vertices);
+    var cpu = GpuResourceManager.CpuResources.init();
+    defer cpu.deinit();
 
-    var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-        .vertex_buffer_bit = true,
-    } }, vertices, cmd_pool);
-    errdefer vertex_buffer.deinit(device);
+    const object_handle = try cpu.add_mesh(&object);
+    const cube_handle = try cpu.add_mesh(&cube);
 
-    var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-        .index_buffer_bit = true,
-    } }, object.faces, cmd_pool);
-    errdefer index_buffer.deinit(device);
+    var gpu = try cpu.upload(engine, cmd_pool);
+    errdefer gpu.deinit(device);
 
     const instances = try allocator.alloc(Instance, 10);
     errdefer allocator.free(instances);
@@ -247,10 +373,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .model_uniforms = model_uniform,
         .screen_image = screen,
         .depth_image = depth,
-        .mesh = object,
         .instances = instances,
-        .vertex_buffer = vertex_buffer,
-        .index_buffer = index_buffer,
+        .gpu_resources = gpu,
         .instance_buffer = instance_buffer,
         .descriptor_pool = desc_pool,
         .camera_descriptor_set = camera_desc_set,
@@ -260,6 +384,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
         .texture_img = image,
         .texture = gpu_img,
+
+        .handles = .{
+            .object = object_handle,
+            .cube = cube_handle,
+        },
     };
 }
 
@@ -269,10 +398,8 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
-    defer self.mesh.deinit();
     defer allocator.free(self.instances);
-    defer self.vertex_buffer.deinit(device);
-    defer self.index_buffer.deinit(device);
+    defer self.gpu_resources.deinit(device);
     defer self.instance_buffer.deinit(device);
     defer self.camera_descriptor_set.deinit(device);
     defer self.model_descriptor_set.deinit(device);
@@ -373,12 +500,13 @@ pub const RendererState = struct {
             },
             .dynamic_offsets = &[_]u32{0},
             .vertices = .{
-                .buffer = app.vertex_buffer.buffer,
-                .count = @intCast(app.mesh.vertices.len),
+                .buffer = app.gpu_resources.vertex_buffer.buffer,
+                .count = app.handles.object.vertex_count,
             },
             .indices = .{
-                .buffer = app.index_buffer.buffer,
-                .count = @intCast(app.mesh.faces.len * 3),
+                .buffer = app.gpu_resources.index_buffer.buffer,
+                .count = app.handles.object.index_count,
+                .offset = app.handles.object.index_offset,
             },
             .instances = .{
                 .buffer = app.instance_buffer.buffer,
@@ -393,12 +521,13 @@ pub const RendererState = struct {
             },
             .dynamic_offsets = &[_]u32{256},
             .vertices = .{
-                .buffer = app.vertex_buffer.buffer,
-                .count = @intCast(app.mesh.vertices.len),
+                .buffer = app.gpu_resources.vertex_buffer.buffer,
+                .count = app.handles.cube.vertex_count,
             },
             .indices = .{
-                .buffer = app.index_buffer.buffer,
-                .count = @intCast(app.mesh.faces.len * 3),
+                .buffer = app.gpu_resources.index_buffer.buffer,
+                .count = app.handles.cube.index_count,
+                .offset = app.handles.cube.index_offset,
             },
             .instances = .{
                 .buffer = app.instance_buffer.buffer,
@@ -419,6 +548,7 @@ pub const RendererState = struct {
             .indices = .{
                 .buffer = null,
                 .count = undefined,
+                .offset = undefined,
             },
             .instances = .{
                 .buffer = null,
@@ -647,7 +777,14 @@ pub const AppState = struct {
         if (!self.uniform_shader_dumped) {
             self.uniform_shader_dumped = true;
 
-            try ShaderUtils.dump_glsl_uniform(ubo, "./src/uniforms.glsl");
+            var gen = try ShaderUtils.GlslBindingGenerator.init();
+            defer gen.deinit();
+
+            try gen.add_uniform(ubo);
+            try gen.add_bind_enum(UniformBinds);
+            try gen.add_bind_enum(VertexBinds);
+            try gen.add_bind_enum(VertexInputLocations);
+            try gen.dump_shader("./src/uniforms.glsl");
         }
 
         @memcpy(self.uniform_buffer, ubo_buffer);

@@ -16,10 +16,10 @@ void set_seed(int id) {
         mat4 model_mat;
     };
 
-    layout(location = 0) in vec3 vpos;
-    layout(location = 1) in vec3 vnormal;
-    layout(location = 2) in vec2 uv;
-    layout(location = 3) in vec3 ipos;
+    layout(location = _bind_vertex_position) in vec3 vpos;
+    layout(location = _bind_normal) in vec3 vnormal;
+    layout(location = _bind_uv) in vec2 uv;
+    layout(location = _bind_instance_position) in vec3 ipos;
 
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
