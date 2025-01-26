@@ -736,9 +736,9 @@ pub const Image = struct {
     }) !BufferView {
         const buf = try device.createBuffer(&.{
             .size = self.size,
-            .usage = (vk.BufferUsageFlags{
+            .usage = v.usage.merge(.{
                 .storage_buffer_bit = true,
-            }).merge(v.usage),
+            }),
             .sharing_mode = .exclusive,
         }, null);
         errdefer device.destroyBuffer(buf, null);
@@ -983,9 +983,10 @@ pub const Buffer = struct {
     pub fn new_initialized(ctx: *Engine.VulkanContext, v: Args, val: anytype, pool: vk.CommandPool) !@This() {
         const this = try @This().new(
             ctx,
-            .{ .size = v.size, .usage = v.usage.merge(.{
-                .transfer_dst_bit = true,
-            }) },
+            .{
+                .size = v.size,
+                .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
+            },
         );
 
         const staging_buffer = try ctx.device.createBuffer(&.{
@@ -1024,9 +1025,10 @@ pub const Buffer = struct {
         const size = slice.len * @sizeOf(E);
         const this = try @This().new(
             ctx,
-            .{ .size = @intCast(size), .usage = v.usage.merge(.{
-                .transfer_dst_bit = true,
-            }) },
+            .{
+                .size = @intCast(size),
+                .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
+            },
         );
 
         const staging_buffer = try ctx.device.createBuffer(&.{
@@ -1061,9 +1063,9 @@ pub const Buffer = struct {
 
         const buffer = try device.createBuffer(&.{
             .size = v.size,
-            .usage = (vk.BufferUsageFlags{
+            .usage = v.usage.merge(.{
                 .storage_buffer_bit = true,
-            }).merge(v.usage),
+            }),
             .sharing_mode = .exclusive,
         }, null);
         errdefer device.destroyBuffer(buffer, null);
