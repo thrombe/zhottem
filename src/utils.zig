@@ -5,6 +5,25 @@ const math = @import("math.zig");
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+// - [typeId in zig?](https://github.com/ziglang/zig/issues/19858#issuecomment-2596933195)
+const TypeId = struct {
+    id: u64,
+};
+
+pub inline fn typeId(comptime T: type) TypeId {
+    const Phantom = *const struct {
+        _: u8,
+    };
+    const ptr = &struct {
+        comptime {
+            _ = T;
+        }
+        var id: @typeInfo(Phantom).Pointer.child = undefined;
+    }.id;
+
+    return .{ .id = @intCast(@intFromPtr(ptr)) };
+}
+
 // assumes ok has ok.deinit()
 pub fn Result(ok: type, err_typ: type) type {
     return union(enum) {
@@ -588,88 +607,141 @@ pub const ShaderUtils = struct {
         return uniform_object;
     }
 
-    pub fn dump_glsl_uniform(ubo: anytype, path: []const u8) !void {
-        const Dumper = struct {
-            const Writer = std.ArrayList(u8).Writer;
+    pub const GlslBindingGenerator = struct {
+        known_types: std.AutoHashMap(TypeId, void),
+        shader: std.ArrayList(u8),
 
-            fn glsl_type(t: type) []const u8 {
-                return switch (t) {
-                    Vec4 => "vec4",
-                    Mat4x4 => "mat4",
-                    i32 => "int",
-                    u32 => "uint",
-                    f32 => "float",
-                    Mouse => "Mouse",
-                    Camera => "Camera",
-                    Camera.CameraMeta => "CameraMeta",
-                    Frame => "Frame",
-                    @TypeOf(ubo) => "Uniforms",
-                    else => switch (@typeInfo(t)) {
-                        .Array => |child| glsl_type(child.child),
-                        else => @compileError("cannot handle this type"),
-                    },
-                };
+        const Writer = std.ArrayList(u8).Writer;
+
+        pub fn init() !@This() {
+            var self = @This(){
+                .shader = std.ArrayList(u8).init(allocator),
+                .known_types = std.AutoHashMap(TypeId, void).init(allocator),
+            };
+            errdefer self.deinit();
+
+            try self.shader.appendSlice(
+                \\ // This file is generated from code. DO NOT EDIT.
+                \\
+                \\
+            );
+
+            return self;
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.shader.deinit();
+            self.known_types.deinit();
+        }
+
+        fn zig_to_glsl_type(t: type) []const u8 {
+            return switch (t) {
+                Vec4 => "vec4",
+                Mat4x4 => "mat4",
+                i32 => "int",
+                u32 => "uint",
+                f32 => "float",
+                Mouse => "Mouse",
+                Camera => "Camera",
+                Camera.CameraMeta => "CameraMeta",
+                Frame => "Frame",
+                else => switch (@typeInfo(t)) {
+                    .Array => |child| zig_to_glsl_type(child.child),
+                    else => @compileError("cannot handle this type"),
+                },
+            };
+        }
+
+        fn fieldname(field: std.builtin.Type.StructField) []const u8 {
+            switch (@typeInfo(field.type)) {
+                .Array => |child| {
+                    const len = std.fmt.comptimePrint("{d}", .{child.len});
+                    return field.name ++ "[" ++ len ++ "]";
+                },
+                else => return field.name,
+            }
+        }
+
+        fn remember(self: *@This(), t: type) !bool {
+            const id = typeId(t);
+            if (self.known_types.contains(id)) {
+                return true;
+            } else {
+                try self.known_types.put(id, {});
+                return false;
+            }
+        }
+
+        fn add_struct(self: *@This(), name: []const u8, t: type) !void {
+            if (try self.remember(t)) {
+                return;
             }
 
-            fn glsl_fieldname(field: std.builtin.Type.StructField) []const u8 {
-                switch (@typeInfo(field.type)) {
-                    .Array => |child| {
-                        const len = std.fmt.comptimePrint("{d}", .{child.len});
-                        return field.name ++ "[" ++ len ++ "]";
-                    },
-                    else => return field.name,
-                }
-            }
+            const w = self.shader.writer();
 
-            fn dump_type(w: Writer, t: type) !void {
-                switch (t) {
-                    []Mat4x4, Mat4x4, Vec4, i32, u32, f32 => return,
-                    else => switch (@typeInfo(t)) {
-                        .Array => return,
-                        else => {
-                            const fields = @typeInfo(t).Struct.fields;
-                            inline for (fields) |field| {
-                                try dump_type(w, field.type);
-                            }
+            switch (t) {
+                []Mat4x4, Mat4x4, Vec4, i32, u32, f32 => return,
+                else => switch (@typeInfo(t)) {
+                    .Array => return,
+                    else => {
+                        const fields = @typeInfo(t).Struct.fields;
+                        inline for (fields) |field| {
+                            try self.add_struct(zig_to_glsl_type(field.type), field.type);
+                        }
 
+                        try w.print(
+                            \\ struct {s} {{
+                            \\
+                        , .{name});
+
+                        inline for (fields) |field| {
                             try w.print(
-                                \\ struct {s} {{
+                                \\     {s} {s};
                                 \\
-                            , .{glsl_type(t)});
+                            , .{ zig_to_glsl_type(field.type), fieldname(field) });
+                        }
 
-                            inline for (fields) |field| {
-                                try w.print(
-                                    \\     {s} {s};
-                                    \\
-                                , .{ glsl_type(field.type), glsl_fieldname(field) });
-                            }
-
-                            try w.print(
-                                \\ }};
-                                \\
-                                \\
-                            , .{});
-                        },
+                        try w.print(
+                            \\ }};
+                            \\
+                            \\
+                        , .{});
                     },
-                }
+                },
             }
-        };
+        }
 
-        var data = std.ArrayList(u8).init(allocator);
-        defer data.deinit();
+        pub fn add_uniform(self: *@This(), ubo: anytype) !void {
+            try self.add_struct("Uniforms", @TypeOf(ubo));
+        }
 
-        try data.appendSlice(
-            \\ // This file is generated from code. DO NOT EDIT.
-            \\
-            \\
-        );
-        try Dumper.dump_type(data.writer(), @TypeOf(ubo));
+        pub fn add_bind_enum(self: *@This(), bind: type) !void {
+            if (try self.remember(bind)) {
+                return;
+            }
 
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
+            const w = self.shader.writer();
 
-        try file.writeAll(data.items);
-    }
+            inline for (@typeInfo(bind).Enum.fields) |field| {
+                try w.print(
+                    \\ const int _bind_{s} = {d};
+                    \\
+                , .{ field.name, field.value });
+            }
+
+            try w.print(
+                \\
+                \\
+            , .{});
+        }
+
+        pub fn dump_shader(self: *@This(), path: []const u8) !void {
+            const file = try std.fs.cwd().createFile(path, .{});
+            defer file.close();
+
+            try file.writeAll(self.shader.items);
+        }
+    };
 };
 
 pub fn ShaderCompiler(meta: type, stages: type) type {
