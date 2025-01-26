@@ -213,6 +213,68 @@ pub fn Channel(typ: type) type {
     };
 }
 
+pub const JsonHelpers = struct {
+    pub const StringBool = enum {
+        true,
+        false,
+
+        pub fn jsonParse(alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
+            switch (try source.nextAlloc(alloc, options.allocate orelse .alloc_if_needed)) {
+                .string, .allocated_string => |field| {
+                    if (std.mem.eql(u8, field, "true")) {
+                        return .true;
+                    } else if (std.mem.eql(u8, field, "false")) {
+                        return .false;
+                    } else {
+                        return error.InvalidEnumTag;
+                    }
+                },
+                else => |token| {
+                    std.debug.print("{any}\n", .{token});
+                    return error.UnexpectedToken;
+                },
+            }
+        }
+    };
+
+    pub fn parseUnionAsStringWithUnknown(t: type, alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !t {
+        switch (try source.nextAlloc(alloc, options.allocate orelse .alloc_if_needed)) {
+            .string, .allocated_string => |field| {
+                inline for (@typeInfo(t).Union.fields) |typ| {
+                    comptime if (std.meta.stringToEnum(std.meta.Tag(t), typ.name).? == .unknown) {
+                        continue;
+                    };
+
+                    if (std.mem.eql(u8, field, typ.name)) {
+                        return @unionInit(t, typ.name, {});
+                    }
+                }
+                return .{ .unknown = field };
+            },
+            else => return error.UnexpectedToken,
+        }
+    }
+
+    pub fn parseEnumAsString(t: type, alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !t {
+        @setEvalBranchQuota(2000);
+        switch (try source.nextAlloc(alloc, options.allocate orelse .alloc_if_needed)) {
+            .string, .allocated_string => |field| {
+                inline for (@typeInfo(t).Enum.fields) |typ| {
+                    if (std.mem.eql(u8, field, typ.name)) {
+                        return comptime std.meta.stringToEnum(t, typ.name).?;
+                    }
+                }
+                std.debug.print("unknown type: {s}\n", .{field});
+                return error.InvalidEnumTag;
+            },
+            else => |token| {
+                std.debug.print("{any}\n", .{token});
+                return error.UnexpectedToken;
+            },
+        }
+    }
+};
+
 pub const Fuse = struct {
     fused: std.atomic.Value(bool) = .{ .raw = false },
 
