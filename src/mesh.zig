@@ -241,7 +241,8 @@ pub const Gltf = struct {
         allocator.free(self.buf);
     }
 
-    pub fn get_bytes(self: *@This(), acc: *Info.Accessor) ![]const u8 {
+    pub fn get_bytes(self: *@This(), ai: Info.AccessorIndex) ![]const u8 {
+        const acc = &self.info.value.accessors[ai];
         const view = &self.info.value.bufferViews[acc.bufferView];
         if (view.buffer != 0 or self.info.value.buffers[view.buffer].uri != null) {
             return error.ExternalBufferNotSupported;
@@ -251,7 +252,19 @@ pub const Gltf = struct {
         return raw;
     }
 
-    pub fn get_slice(self: *@This(), acc: *Info.Accessor, typ: type) ![]const typ {
+    pub fn get_slice(self: *@This(), ai: Info.AccessorIndex, typ: type) ![]const typ {
+        const acc = &self.info.value.accessors[ai];
+
+        const Ti = @typeInfo(typ);
+        const T = switch (Ti) {
+            .Array => |child| child.child,
+            else => typ,
+        };
+
+        if (!acc.componentType.typ(T)) {
+            return error.BadAccessorTyp;
+        }
+
         const view = &self.info.value.bufferViews[acc.bufferView];
         if (view.buffer != 0 or self.info.value.buffers[view.buffer].uri != null) {
             return error.ExternalBufferNotSupported;
@@ -437,14 +450,14 @@ pub const Gltf = struct {
                 unsigned_integer = 5125,
                 float = 5126,
 
-                pub fn typ(self: @This()) type {
+                pub fn typ(self: @This(), t: type) bool {
                     return switch (self) {
-                        .byte => i8,
-                        .unsigned_byte => u8,
-                        .short => i16,
-                        .unsigned_short => u16,
-                        .unsigned_integer => u32,
-                        .float => f32,
+                        .byte => i8 == t,
+                        .unsigned_byte => u8 == t,
+                        .short => i16 == t,
+                        .unsigned_short => u16 == t,
+                        .unsigned_integer => u32 == t,
+                        .float => f32 == t,
                     };
                 }
 
@@ -520,7 +533,7 @@ pub const Gltf = struct {
 
         fn get_slice(self: *@This(), acc: *Info.Accessor, view: *Info.BufferView, typ: type) []const typ {
             const buf = self.get_bytes(acc, view);
-            return std.mem.bytesAsSlice(typ, buf);
+            return std.mem.bytesAsSlice(typ, @as([]align(4) const u8, @alignCast(buf)));
         }
     };
 
