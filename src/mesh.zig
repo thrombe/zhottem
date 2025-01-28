@@ -237,6 +237,96 @@ pub const Gltf = struct {
     }
 
     pub fn to_mesh(self: *@This()) !Mesh {
+        const info = &self.info.value;
+        const scene = &info.scenes[info.scene];
+
+        var vertices = std.ArrayList([3]f32).init(allocator);
+        errdefer vertices.deinit();
+        var normals = std.ArrayList([3]f32).init(allocator);
+        errdefer normals.deinit();
+        var uvs = std.ArrayList([2]f32).init(allocator);
+        errdefer uvs.deinit();
+        var faces = std.ArrayList([3]u32).init(allocator);
+        errdefer faces.deinit();
+
+        for (scene.nodes) |ni| {
+            const node = &info.nodes[ni];
+            const meshi = node.mesh orelse continue;
+            const mesh = &info.meshes[meshi];
+
+            const mat = node.transform();
+
+            for (mesh.primitives) |prim| {
+                const base: u32 = @intCast(vertices.items.len);
+
+                for (prim.attributes.items) |attr| {
+                    switch (attr.typ) {
+                        .position => {
+                            const slice = try self.get_slice(attr.acc, [3]f32);
+                            try vertices.appendSlice(slice);
+                        },
+                        .normal => {
+                            const slice = try self.get_slice(attr.acc, [3]f32);
+                            try normals.appendSlice(slice);
+                        },
+                        .texcoord => |set| {
+                            if (set.set != 0) {
+                                continue;
+                            }
+
+                            const slice = try self.get_slice(attr.acc, [2]f32);
+                            try uvs.appendSlice(slice);
+                        },
+                        else => {},
+                    }
+                }
+
+                for (base..vertices.items.len) |i| {
+                    {
+                        const v = vertices.items[i];
+                        const vec = math.Vec4{
+                            .x = v[0],
+                            .y = v[1],
+                            .z = v[2],
+                            .w = 1,
+                        };
+                        const v2 = mat.mul_vec4(vec).to_buf();
+                        vertices.items[i] = [3]f32{ v2[0], v2[1], v2[2] };
+                    }
+                    {
+                        const v = normals.items[i];
+                        const vec = math.Vec4{
+                            .x = v[0],
+                            .y = v[1],
+                            .z = v[2],
+                            .w = 0, // we don't want translations to apply to this vector
+                        };
+                        const v2 = mat.mul_vec4(vec).normalize3D().to_buf();
+                        normals.items[i] = [3]f32{ v2[0], v2[1], v2[2] };
+                    }
+                }
+
+                const slice = try self.get_slice(prim.indices, [3]u16);
+                const duped = try allocator.alloc([3]u32, slice.len);
+                defer allocator.free(duped);
+                for (0..duped.len) |i| {
+                    duped[i][0] = slice[i][0] + base;
+                    duped[i][1] = slice[i][1] + base;
+                    duped[i][2] = slice[i][2] + base;
+                }
+                try faces.appendSlice(duped);
+            }
+        }
+
+        return .{
+            .vertices = try vertices.toOwnedSlice(),
+            .normals = try normals.toOwnedSlice(),
+            .uvs = try uvs.toOwnedSlice(),
+            .faces = try faces.toOwnedSlice(),
+        };
+    }
+
+    pub fn to_mesh_bad(self: *@This()) !Mesh {
         var vertices = std.ArrayList([3]f32).init(allocator);
         errdefer vertices.deinit();
         var normals = std.ArrayList([3]f32).init(allocator);
@@ -346,28 +436,12 @@ pub const Gltf = struct {
     };
 
     const Info = struct {
-        scene: usize,
+        scene: SceneIndex,
         scenes: []struct {
             name: []const u8,
-            nodes: []usize,
+            nodes: []NodeIndex,
         },
-        nodes: []struct {
-            name: ?[]const u8 = null,
-
-            mesh: ?usize = null,
-            camera: ?usize = null,
-            skin: ?usize = null,
-
-            rotation: ?[4]f32 = null,
-            scale: ?[3]f32 = null,
-            translation: ?[3]f32 = null,
-
-            matrix: ?[16]f32 = null,
-
-            weights: ?[]f32 = null, // only with morph targets
-
-            children: ?[]usize = null,
-        },
+        nodes: []Node,
         meshes: []struct {
             name: []const u8,
             primitives: []struct {
@@ -424,6 +498,60 @@ pub const Gltf = struct {
         } = null,
         accessors: []Accessor,
 
+        const AccessorIndex = usize;
+        const SceneIndex = usize;
+        const NodeIndex = usize;
+        const Node = struct {
+            name: ?[]const u8 = null,
+
+            mesh: ?usize = null,
+            camera: ?usize = null,
+            skin: ?usize = null,
+
+            rotation: ?[4]f32 = null,
+            scale: ?[3]f32 = null,
+            translation: ?[3]f32 = null,
+
+            matrix: ?[16]f32 = null,
+
+            weights: ?[]f32 = null, // only with morph targets
+
+            children: ?[]usize = null,
+
+            // NOTE: returns matrix with column vectors (vulkan => opengl.transpose())
+            pub fn transform(self: *const @This()) math.Mat4x4 {
+                if (self.matrix) |m| {
+                    const mat = std.mem.bytesToValue(math.Mat4x4, std.mem.asBytes(&m));
+                    return mat.transpose();
+                }
+
+                const rot = self.rotation orelse [4]f32{ 0, 0, 0, 1 };
+                const scale = self.scale orelse [3]f32{ 1, 1, 1 };
+                const translate = self.translation orelse [3]f32{ 0, 0, 0 };
+
+                const rotation_mat = math.Mat4x4.rot_mat_from_quat(.{
+                    .x = rot[0],
+                    .y = rot[1],
+                    .z = rot[2],
+                    .w = rot[3],
+                });
+                const scale_mat = math.Mat4x4.scaling_mat(.{
+                    .x = scale[0],
+                    .y = scale[1],
+                    .z = scale[2],
+                });
+                const translation_mat = math.Mat4x4.translation_mat(.{
+                    .x = translate[0],
+                    .y = translate[1],
+                    .z = translate[2],
+                });
+
+                // - [glTF™ 2.0 Specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#transformations)
+                // To compose the local transformation matrix, TRS properties MUST be converted to matrices and postmultiplied in the T * R * S order.
+                // first the scale is applied to the vertices, then the rotation, and then the translation
+                return translation_mat.mul_mat(rotation_mat).mul_mat(scale_mat);
+            }
+        };
         const PrimitiveAttribute = struct {
             typ: PrimitiveAttributeType,
             acc: AccessorIndex,
@@ -503,7 +631,6 @@ pub const Gltf = struct {
                 };
             }
         };
-        const AccessorIndex = usize;
         const Accessor = struct {
             bufferView: usize,
             byteOffset: u32 = 0,
