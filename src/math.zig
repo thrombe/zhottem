@@ -65,6 +65,7 @@ pub const Vec4 = extern struct {
             self.w * other.w;
     }
 
+    // right handed cross product
     pub fn cross(self: *const @This(), other: @This()) @This() {
         return .{
             .x = self.y * other.z - self.z * other.y,
@@ -338,10 +339,12 @@ pub const Mat4x4 = extern struct {
 
     pub fn view(eye: Vec4, at: Vec4, _up: Vec4) @This() {
         // - [» Deriving the View Matrix](https://twodee.org/blog/17560)
+        //   - this seems to be left handed
 
+        // i assume we do this dance to be sure to get right handed basis vectors (the cross product is right handed)
         const front = at.normalize3D();
-        const up = _up.normalize3D();
-        const right = front.cross(up);
+        const right = front.cross(_up.normalize3D());
+        const up = front.cross(right);
 
         const translate_inv = Mat4x4{ .data = .{
             .{ .x = 1, .y = 0, .z = 0, .w = -eye.x },
@@ -533,15 +536,17 @@ pub const Camera = struct {
         pub const pitch_min = -std.math.pi / 2.0 + 0.1;
         pub const pitch_max = std.math.pi / 2.0 - 0.1;
         pub const basis = struct {
+            // right handed -y up
             pub const vulkan = struct {
                 pub const up = Vec4{ .y = -1 };
                 pub const fwd = Vec4{ .z = 1 };
                 pub const right = Vec4{ .x = 1 };
             };
+            // right handed y up
             pub const opengl = struct {
                 pub const up = Vec4{ .y = 1 };
-                pub const fwd = Vec4{ .z = -1 };
-                pub const right = Vec4{ .x = 1 };
+                pub const fwd = Vec4{ .z = 1 };
+                pub const right = Vec4{ .x = -1 };
             };
         };
     };
@@ -565,7 +570,7 @@ pub const Camera = struct {
     ) void {
         // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
         self.yaw += @as(f32, @floatFromInt(dp.dx)) * self.sensitivity_scale * self.sensitivity;
-        self.pitch -= @as(f32, @floatFromInt(dp.dy)) * self.sensitivity_scale * self.sensitivity;
+        self.pitch += @as(f32, @floatFromInt(dp.dy)) * self.sensitivity_scale * self.sensitivity;
         self.pitch = std.math.clamp(self.pitch, constants.pitch_min, constants.pitch_max);
 
         const rot = self.rot_quat();

@@ -675,7 +675,7 @@ pub const AppState = struct {
 
         return .{
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
-            .camera = math.Camera.init(Vec4{ .z = -2 }, math.Camera.constants.basis.vulkan),
+            .camera = math.Camera.init(Vec4{ .z = -2 }, math.Camera.constants.basis.opengl), // i like y up. so we are going opengl
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = rng,
             .uniform_buffer = try allocator.alloc(u8, 0),
