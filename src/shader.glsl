@@ -25,7 +25,7 @@ void set_seed(int id) {
     layout(location = 1) out vec3 onormal;
     layout(location = 2) out vec2 ouv;
     void main() {
-        vec4 pos = vec4(vpos + ipos * 3, 1.0);
+        vec4 pos = vec4(vpos + ipos, 1.0);
         pos = ubo.world_to_screen * model_mat * pos;
         opos = pos.xyz;
         onormal = vnormal;

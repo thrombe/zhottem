@@ -325,7 +325,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
+    var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
+    defer gltf.deinit();
+
+    var object = try gltf.to_mesh();
+    // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     defer object.deinit();
     var cube = try mesh.Mesh.cube();
     defer cube.deinit();
@@ -339,7 +343,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
 
-    const instances = try allocator.alloc(Instance, 10);
+    const instances = try allocator.alloc(Instance, 1);
     errdefer allocator.free(instances);
     for (instances, 0..) |*inst, i| {
         inst.*.pos = [3]f32{ @floatFromInt(i), 0, 0 };
