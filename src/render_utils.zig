@@ -978,6 +978,7 @@ pub const Buffer = struct {
     const Args = struct {
         size: u64,
         usage: vk.BufferUsageFlags = .{},
+        memory_type: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
     };
 
     pub fn new_initialized(ctx: *Engine.VulkanContext, v: Args, val: anytype, pool: vk.CommandPool) !@This() {
@@ -986,6 +987,7 @@ pub const Buffer = struct {
             .{
                 .size = v.size,
                 .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
+                .memory_type = v.memory_type,
             },
         );
 
@@ -1018,6 +1020,7 @@ pub const Buffer = struct {
 
     pub fn new_from_slice(ctx: *Engine.VulkanContext, v: struct {
         usage: vk.BufferUsageFlags = .{},
+        memory_type: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
     }, slice: anytype, pool: vk.CommandPool) !@This() {
         const S = @TypeOf(slice);
         const E = std.meta.Elem(S);
@@ -1028,6 +1031,7 @@ pub const Buffer = struct {
             .{
                 .size = @intCast(size),
                 .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
+                .memory_type = v.memory_type,
             },
         );
 
@@ -1063,15 +1067,13 @@ pub const Buffer = struct {
 
         const buffer = try device.createBuffer(&.{
             .size = v.size,
-            .usage = v.usage.merge(.{
-                .storage_buffer_bit = true,
-            }),
+            .usage = v.usage,
             .sharing_mode = .exclusive,
         }, null);
         errdefer device.destroyBuffer(buffer, null);
 
         const mem_reqs = device.getBufferMemoryRequirements(buffer);
-        const memory = try ctx.allocate(mem_reqs, .{ .device_local_bit = true });
+        const memory = try ctx.allocate(mem_reqs, v.memory_type);
         errdefer device.freeMemory(memory, null);
         try device.bindBufferMemory(buffer, memory, 0);
 
