@@ -1357,6 +1357,7 @@ pub const CmdBuffer = struct {
             instances: struct {
                 buffer: ?vk.Buffer,
                 count: u32,
+                first: u32 = 0,
             },
         },
     ) void {
@@ -1392,7 +1393,7 @@ pub const CmdBuffer = struct {
             }
             if (v.indices.buffer) |ib| {
                 device.cmdBindIndexBuffer(cmdbuf, ib, v.indices.offset, .uint32);
-                device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 0, 0);
+                device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 0, v.instances.first);
             } else {
                 device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
             }
@@ -1861,7 +1862,7 @@ pub const Swapchain = struct {
         return &self.swap_images[self.image_index];
     }
 
-    pub fn present(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *Engine.VulkanContext, uniforms: anytype) !PresentState {
+    pub fn present_start(self: *Swapchain, ctx: *Engine.VulkanContext) !*const SwapImage {
         // Simple method:
         // 1) Acquire next image
         // 2) Wait for and reset fence of the acquired image
@@ -1884,8 +1885,10 @@ pub const Swapchain = struct {
         try current.waitForFence(&ctx.device);
         try ctx.device.resetFences(1, @ptrCast(&current.frame_fence));
 
-        try uniforms.upload(&ctx.device);
+        return current;
+    }
 
+    pub fn present_end(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *Engine.VulkanContext, current: *const SwapImage) !PresentState {
         // Step 2: Submit the command buffer
         const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
         try ctx.device.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{

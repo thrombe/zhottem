@@ -422,7 +422,11 @@ pub fn present(
     const cmdbuf = dynamic_state.cmdbuffer.bufs[dynamic_state.swapchain.image_index];
     const gui_cmdbuf = gui_renderer.cmd_bufs[dynamic_state.swapchain.image_index];
 
-    return dynamic_state.swapchain.present(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, &self.uniforms) catch |err| switch (err) {
+    const current_si = try dynamic_state.swapchain.present_start(ctx);
+
+    try self.uniforms.upload(&ctx.device);
+
+    return dynamic_state.swapchain.present_end(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, current_si) catch |err| switch (err) {
         error.OutOfDateKHR => return .suboptimal,
         else => |narrow| return narrow,
     };
