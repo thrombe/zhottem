@@ -22,6 +22,10 @@
             .url = "https://github.com/tiawl/cimgui.zig/archive/refs/tags/v1.91.5.tar.gz",
             .hash = "12200647346469870ce79c32a69d3888f3ae0eaf21426663db023b35bbf7ac9cf19e",
         },
+        .cgltf = .{
+            .url = "https://github.com/jkuhlmann/cgltf/archive/refs/tags/v1.14.tar.gz",
+            .hash = "12209ac27a63c8a2eeb5691f139eaa1d7d1fcee223e8fa9763da3a592253c6b57032",
+        },
     },
 
     .paths = .{""},

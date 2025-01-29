@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
         .platform = .GLFW,
         .renderer = .Vulkan,
     });
+    const cgltf = b.dependency("cgltf", .{});
 
     const exe = b.addExecutable(.{
         .name = "zhottem",
@@ -33,6 +34,20 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary2("ImageMagick", .{});
     exe.linkSystemLibrary2("MagickWand", .{});
     exe.linkSystemLibrary2("MagickCore", .{});
+
+    // OOF: zig can't compile .h files as c source?? .h compiles to "precompiled header file" something something
+    // exe.addCSourceFile(.{
+    //     .file = cgltf.path("./cgltf.h"),
+    //     .flags = &.{ "-std=c99", "-DCGLTF_IMPLEMENTATION" },
+    // });
+    exe.addCSourceFile(.{
+        .file = b.path("./src/c_imports.c"),
+        .flags = &.{ "-std=c99", "-DCGLTF_IMPLEMENTATION" },
+    });
+    exe.addIncludePath(.{ .dependency = .{
+        .dependency = cgltf,
+        .sub_path = "./",
+    } });
 
     exe.linkLibC();
     b.installArtifact(exe);
