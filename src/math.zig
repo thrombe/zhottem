@@ -337,14 +337,9 @@ pub const Mat4x4 = extern struct {
         return self;
     }
 
-    pub fn view(eye: Vec4, at: Vec4, _up: Vec4) @This() {
+    pub fn view(eye: Vec4, fwd: Vec4, left: Vec4, up: Vec4) @This() {
         // - [» Deriving the View Matrix](https://twodee.org/blog/17560)
         //   - this seems to be left handed
-
-        // i assume we do this dance to be sure to get right handed basis vectors (the cross product is right handed)
-        const front = at.normalize3D();
-        const right = front.cross(_up.normalize3D());
-        const up = front.cross(right);
 
         const translate_inv = Mat4x4{ .data = .{
             .{ .x = 1, .y = 0, .z = 0, .w = -eye.x },
@@ -354,9 +349,9 @@ pub const Mat4x4 = extern struct {
         } };
 
         return (Mat4x4{ .data = .{
-            right,
-            up,
-            front,
+            left.normalize3D(),
+            up.normalize3D(),
+            fwd.normalize3D(),
             .{ .w = 1 },
         } }).transpose().mul_mat(translate_inv.transpose());
     }
@@ -526,7 +521,12 @@ pub const Camera = struct {
     speed: f32 = 1.0,
     sensitivity: f32 = 1.0,
     sensitivity_scale: f32 = 0.003,
-    basis: struct {
+    renderer_basis: struct {
+        fwd: Vec4,
+        right: Vec4,
+        up: Vec4,
+    },
+    world_basis: struct {
         fwd: Vec4,
         right: Vec4,
         up: Vec4,
@@ -551,13 +551,19 @@ pub const Camera = struct {
         };
     };
 
-    pub fn init(pos: Vec4, basis: anytype) @This() {
+    // right handed basis only (this file is right handed)
+    pub fn init(pos: Vec4, renderer_basis: anytype, world_basis: anytype) @This() {
         return .{
             .pos = pos,
-            .basis = .{
-                .fwd = basis.fwd,
-                .right = basis.right,
-                .up = basis.up,
+            .renderer_basis = .{
+                .fwd = renderer_basis.fwd,
+                .right = renderer_basis.right,
+                .up = renderer_basis.up,
+            },
+            .world_basis = .{
+                .fwd = world_basis.fwd,
+                .right = world_basis.right,
+                .up = world_basis.up,
             },
         };
     }
@@ -574,8 +580,10 @@ pub const Camera = struct {
         self.pitch = std.math.clamp(self.pitch, constants.pitch_min, constants.pitch_max);
 
         const rot = self.rot_quat();
-        const fwd = rot.rotate_vector(self.basis.fwd);
-        const right = rot.rotate_vector(self.basis.right);
+        const fwd = rot.rotate_vector(self.world_basis.fwd);
+        const right = rot.rotate_vector(self.world_basis.right);
+
+        std.debug.print("{any}\n", .{self.pos});
 
         var speed = self.speed;
         if (pressed.shift) {
@@ -607,11 +615,12 @@ pub const Camera = struct {
         fov: f32 = std.math.pi / 3.0,
     }) Mat4x4 {
         const rot = self.rot_quat();
-        const up = rot.rotate_vector(self.basis.up);
-        const fwd = rot.rotate_vector(self.basis.fwd);
+        const up = rot.rotate_vector(self.renderer_basis.up);
+        const fwd = rot.rotate_vector(self.renderer_basis.fwd);
+        const left = rot.rotate_vector(self.renderer_basis.right.scale(-1));
 
         const projection_matrix = Mat4x4.perspective_projection(v.height, v.width, v.near, v.far, v.fov);
-        const view_matrix = Mat4x4.view(self.pos, fwd, up);
+        const view_matrix = Mat4x4.view(self.pos, fwd, left, up);
         const world_to_screen = projection_matrix.mul_mat(view_matrix);
 
         return world_to_screen;
@@ -619,8 +628,8 @@ pub const Camera = struct {
 
     pub fn rot_quat(self: *const @This()) Vec4 {
         var rot = Vec4.quat_identity_rot();
-        rot = rot.quat_mul(Vec4.quat_angle_axis(self.pitch, self.basis.right));
-        rot = rot.quat_mul(Vec4.quat_angle_axis(self.yaw, self.basis.up));
+        rot = rot.quat_mul(Vec4.quat_angle_axis(self.pitch, self.world_basis.right));
+        rot = rot.quat_mul(Vec4.quat_angle_axis(self.yaw, self.world_basis.up));
         rot = rot.quat_conjugate();
         return rot;
     }

@@ -747,7 +747,11 @@ pub const AppState = struct {
 
         return .{
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
-            .camera = math.Camera.init(Vec4{ .z = -2 }, math.Camera.constants.basis.opengl), // i like y up. so we are going opengl
+            .camera = math.Camera.init(
+                Vec4{ .z = -2 },
+                math.Camera.constants.basis.vulkan,
+                math.Camera.constants.basis.opengl,
+            ),
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = rng,
             .uniform_buffer = try allocator.alloc(u8, 0),
@@ -817,9 +821,9 @@ pub const AppState = struct {
     pub fn uniforms(self: *@This(), window: *Engine.Window) ![]u8 {
         const rot = self.camera.rot_quat();
 
-        const fwd = rot.rotate_vector(self.camera.basis.fwd);
-        const right = rot.rotate_vector(self.camera.basis.right);
-        const up = rot.rotate_vector(self.camera.basis.up);
+        const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
+        const right = rot.rotate_vector(self.camera.world_basis.right);
+        const up = rot.rotate_vector(self.camera.world_basis.up);
         const eye = self.camera.pos;
 
         const uniform = .{
