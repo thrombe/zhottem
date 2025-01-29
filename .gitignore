@@ -6,3 +6,10 @@
 /images
 /imgui.ini
 /screenshots/*.png
+
+/assets/*.png
+/assets/*.obj
+/assets/*.mtl
+/assets/*.glb
+/assets/*.gltf
+/assets/*.bin
