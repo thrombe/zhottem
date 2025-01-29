@@ -19,14 +19,14 @@ void set_seed(int id) {
     layout(location = _bind_vertex_position) in vec3 vpos;
     layout(location = _bind_normal) in vec3 vnormal;
     layout(location = _bind_uv) in vec2 uv;
-    layout(location = _bind_instance_position) in vec3 ipos;
+    layout(location = _bind_instance_transform) in mat4 itransform;
 
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
     layout(location = 2) out vec2 ouv;
     void main() {
-        vec4 pos = vec4(vpos + ipos, 1.0);
-        pos = ubo.world_to_screen * model_mat * pos;
+        vec4 pos = vec4(vpos, 1.0);
+        pos = ubo.world_to_screen * itransform * pos;
         opos = pos.xyz;
         onormal = vnormal;
         ouv = uv;

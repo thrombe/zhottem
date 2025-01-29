@@ -38,9 +38,8 @@ uniforms: UniformBuffer,
 model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
-instances: []Instance,
+cpu_resources: GpuResourceManager.CpuResources,
 gpu_resources: GpuResourceManager.GpuResources,
-instance_buffer: Buffer,
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
@@ -52,14 +51,14 @@ texture: Image,
 
 handles: struct {
     object: GpuResourceManager.MeshResourceHandle,
+    object_instances: GpuResourceManager.BatchedInstanceResourceHandle,
     cube: GpuResourceManager.MeshResourceHandle,
+    cube_instances: GpuResourceManager.BatchedInstanceResourceHandle,
 },
 
 const Device = Engine.VulkanContext.Api.Device;
 
 const Vertex = struct {
-    // TODO: these locations and bindings are just numbers. they can be skipped. maybe create a enum and sync them to shader using generated code.
-    // const int one = 1; layout(location = one) blah; works
     const binding_description = [_]vk.VertexInputBindingDescription{.{
         .binding = VertexBinds.vertex.bind(),
         .stride = @sizeOf(Vertex),
@@ -107,7 +106,7 @@ const Vertex = struct {
     }
 };
 
-const Instance = struct {
+const Instance = extern struct {
     const binding_desc = [_]vk.VertexInputBindingDescription{.{
         .binding = VertexBinds.instance.bind(),
         .stride = @sizeOf(Instance),
@@ -115,14 +114,34 @@ const Instance = struct {
         // new data per instance
         .input_rate = .instance,
     }};
-    const attribute_desc = [_]vk.VertexInputAttributeDescription{.{
-        .binding = VertexBinds.instance.bind(),
-        .location = VertexInputLocations.instance_position.bind(),
-        .format = .r32g32b32_sfloat,
-        .offset = @offsetOf(Instance, "pos"),
-    }};
+    const attribute_desc = [_]vk.VertexInputAttributeDescription{
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind(),
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform"),
+        },
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind() + 1,
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform") + 4 * 4,
+        },
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind() + 2,
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform") + 8 * 4,
+        },
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind() + 3,
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform") + 12 * 4,
+        },
+    };
 
-    pos: [3]f32,
+    transform: math.Mat4x4,
 };
 
 pub const VertexBinds = enum(u32) {
@@ -134,11 +153,12 @@ pub const VertexBinds = enum(u32) {
     }
 };
 
+// so input locations are just numbers but you still have to reserve them if you want to store more than 4 floats worth of data? tf?
 pub const VertexInputLocations = enum(u32) {
-    instance_position,
-    vertex_position,
-    normal,
-    uv,
+    instance_transform = 0,
+    vertex_position = 4,
+    normal = 5,
+    uv = 6,
 
     pub fn bind(self: @This()) u32 {
         return @intFromEnum(self);
@@ -167,23 +187,31 @@ pub const GpuResourceManager = struct {
         vertex_offset: u32,
         vertex_count: u32,
     };
+    pub const BatchedInstanceResourceHandle = struct {
+        first: u32,
+        count: u32,
+    };
     pub const CpuResources = struct {
         vertices: Vertices,
         triangles: Triangles,
+        instances: Instances,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
+        const Instances = std.ArrayList(Instance);
 
         pub fn init() @This() {
             return .{
                 .vertices = Vertices.init(allocator),
                 .triangles = Triangles.init(allocator),
+                .instances = Instances.init(allocator),
             };
         }
 
         pub fn deinit(self: *@This()) void {
             self.vertices.deinit();
             self.triangles.deinit();
+            self.instances.deinit();
         }
 
         pub fn add_mesh(self: *@This(), m: *mesh.Mesh) !MeshResourceHandle {
@@ -216,34 +244,69 @@ pub const GpuResourceManager = struct {
             return handle;
         }
 
-        pub fn upload(self: *@This(), engine: *Engine, pool: vk.CommandPool) !GpuResources {
-            const ctx = &engine.graphics;
-            const device = &ctx.device;
-
-            var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-                .vertex_buffer_bit = true,
-            } }, self.vertices.items, pool);
-            errdefer vertex_buffer.deinit(device);
-
-            var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-                .index_buffer_bit = true,
-            } }, self.triangles.items, pool);
-            errdefer index_buffer.deinit(device);
+        pub fn batch_instances(self: *@This(), instances: []const Instance) !BatchedInstanceResourceHandle {
+            const first = self.instances.items.len;
+            try self.instances.appendSlice(instances);
 
             return .{
-                .vertex_buffer = vertex_buffer,
-                .index_buffer = index_buffer,
+                .first = @intCast(first),
+                .count = @intCast(instances.len),
             };
+        }
+
+        pub fn upload(self: *@This(), engine: *Engine, pool: vk.CommandPool) !GpuResources {
+            return try GpuResources.init(self, engine, pool);
         }
     };
 
     pub const GpuResources = struct {
         vertex_buffer: Buffer,
         index_buffer: Buffer,
+        instance_buffer: Buffer,
+
+        pub fn init(cpu: *CpuResources, engine: *Engine, pool: vk.CommandPool) !@This() {
+            const ctx = &engine.graphics;
+            const device = &ctx.device;
+
+            var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
+                .vertex_buffer_bit = true,
+            } }, cpu.vertices.items, pool);
+            errdefer vertex_buffer.deinit(device);
+
+            var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
+                .index_buffer_bit = true,
+            } }, cpu.triangles.items, pool);
+            errdefer index_buffer.deinit(device);
+
+            var instance_buffer = try Buffer.new_from_slice(ctx, .{
+                .usage = .{ .vertex_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, cpu.instances.items, pool);
+            errdefer instance_buffer.deinit(device);
+
+            return .{
+                .vertex_buffer = vertex_buffer,
+                .index_buffer = index_buffer,
+                .instance_buffer = instance_buffer,
+            };
+        }
+
+        pub fn update_instances(self: *@This(), device: *Device, instances: []Instance) !void {
+            const data = try device.mapMemory(self.instance_buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(self.instance_buffer.memory);
+
+            const gpu_vertices: [*]Instance = @ptrCast(@alignCast(data));
+            @memcpy(gpu_vertices[0..instances.len], instances);
+        }
 
         pub fn deinit(self: *@This(), device: *Device) void {
             self.vertex_buffer.deinit(device);
             self.index_buffer.deinit(device);
+            self.instance_buffer.deinit(device);
         }
     };
 };
@@ -328,30 +391,28 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
     defer gltf.deinit();
 
-    var object = try gltf.to_mesh();
-    // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
+    // var object = try gltf.to_mesh();
+    var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     defer object.deinit();
     var cube = try mesh.Mesh.cube();
     defer cube.deinit();
 
     var cpu = GpuResourceManager.CpuResources.init();
-    defer cpu.deinit();
+    errdefer cpu.deinit();
 
-    const object_handle = try cpu.add_mesh(&object);
-    const cube_handle = try cpu.add_mesh(&cube);
+    const object_mesh_handle = try cpu.add_mesh(&object);
+    const cube_mesh_handle = try cpu.add_mesh(&cube);
+    const object_instance_handle = try cpu.batch_instances(&[_]Instance{
+        .{ .transform = math.Mat4x4.scaling_mat(Vec4.splat3(0.3)).transpose() },
+    });
+    const cube_instance_handle = try cpu.batch_instances(&[_]Instance{
+        .{ .transform = math.Mat4x4.translation_mat(.{ .x = -3, .y = 5 }) },
+        .{ .transform = math.Mat4x4.translation_mat(.{ .x = 0, .y = 5 }) },
+        .{ .transform = math.Mat4x4.translation_mat(.{ .x = 3, .y = 5 }) },
+    });
 
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
-
-    const instances = try allocator.alloc(Instance, 1);
-    errdefer allocator.free(instances);
-    for (instances, 0..) |*inst, i| {
-        inst.*.pos = [3]f32{ @floatFromInt(i), 0, 0 };
-    }
-    var instance_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-        .vertex_buffer_bit = true,
-    } }, instances, cmd_pool);
-    errdefer instance_buffer.deinit(device);
 
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
@@ -377,9 +438,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .model_uniforms = model_uniform,
         .screen_image = screen,
         .depth_image = depth,
-        .instances = instances,
         .gpu_resources = gpu,
-        .instance_buffer = instance_buffer,
+        .cpu_resources = cpu,
         .descriptor_pool = desc_pool,
         .camera_descriptor_set = camera_desc_set,
         .model_descriptor_set = model_desc_set,
@@ -390,8 +450,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .texture = gpu_img,
 
         .handles = .{
-            .object = object_handle,
-            .cube = cube_handle,
+            .object = object_mesh_handle,
+            .object_instances = object_instance_handle,
+            .cube = cube_mesh_handle,
+            .cube_instances = cube_instance_handle,
         },
     };
 }
@@ -402,9 +464,8 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
-    defer allocator.free(self.instances);
+    defer self.cpu_resources.deinit();
     defer self.gpu_resources.deinit(device);
-    defer self.instance_buffer.deinit(device);
     defer self.camera_descriptor_set.deinit(device);
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
@@ -425,6 +486,7 @@ pub fn present(
     const current_si = try dynamic_state.swapchain.present_start(ctx);
 
     try self.uniforms.upload(&ctx.device);
+    try self.gpu_resources.update_instances(&ctx.device, self.cpu_resources.instances.items);
 
     return dynamic_state.swapchain.present_end(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, current_si) catch |err| switch (err) {
         error.OutOfDateKHR => return .suboptimal,
@@ -517,8 +579,9 @@ pub const RendererState = struct {
                 .offset = app.handles.object.index_offset,
             },
             .instances = .{
-                .buffer = app.instance_buffer.buffer,
-                .count = @intCast(app.instances.len),
+                .buffer = app.gpu_resources.instance_buffer.buffer,
+                .count = app.handles.object_instances.count,
+                .first = app.handles.object_instances.first,
             },
         });
         cmdbuf.draw(device, .{
@@ -527,7 +590,7 @@ pub const RendererState = struct {
                 app.camera_descriptor_set.set,
                 app.model_descriptor_set.set,
             },
-            .dynamic_offsets = &[_]u32{256},
+            .dynamic_offsets = &[_]u32{0},
             .vertices = .{
                 .buffer = app.gpu_resources.vertex_buffer.buffer,
                 .count = app.handles.cube.vertex_count,
@@ -538,8 +601,9 @@ pub const RendererState = struct {
                 .offset = app.handles.cube.index_offset,
             },
             .instances = .{
-                .buffer = app.instance_buffer.buffer,
-                .count = 1,
+                .buffer = app.gpu_resources.instance_buffer.buffer,
+                .count = app.handles.cube_instances.count,
+                .first = app.handles.cube_instances.first,
             },
         });
 
@@ -739,6 +803,13 @@ pub const AppState = struct {
                 app.command_pool,
                 window.extent,
                 "./images",
+            );
+        }
+
+        for (app.cpu_resources.instances.items[app.handles.cube_instances.first..][0..app.handles.cube_instances.count], 0..) |*t, i| {
+            const bb = @abs(@mod(self.time, 5.0) / 5.0 - 0.5) + 0.5;
+            t.transform = math.Mat4x4.translation_mat(.{ .x = @as(f32, @floatFromInt(i)) + bb }).mul_mat(
+                math.Mat4x4.scaling_mat(Vec4.splat3(bb / 7.0)),
             );
         }
     }
