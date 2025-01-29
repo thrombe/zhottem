@@ -775,3 +775,148 @@ pub const Gltf = struct {
         }
     };
 };
+
+const CGltf = struct {
+    const cgltf = @cImport({
+        @cInclude("cgltf.h");
+    });
+
+    fn load_mesh(filename: [:0]const u8) !Mesh {
+        const options = cgltf.cgltf_options{};
+        var data: *cgltf.cgltf_data = null;
+
+        if (cgltf.cgltf_parse_file(&options, filename.ptr, &data) != cgltf.cgltf_result_success) {
+            return error.CouldNotParseGltf;
+        }
+        defer cgltf.cgltf_free(data);
+        if (cgltf.cgltf_validate(data) != cgltf.cgltf_result_success) {
+            return error.InvalidGltf;
+        }
+
+        for (data.meshes[0..data.meshes_count]) |mesh| {
+            for (mesh.primitives[0..mesh.primitives_count]) |prim| {
+                var vertices = std.ArrayList([3]f32);
+                errdefer vertices.deinit();
+                var normals = std.ArrayList([3]f32);
+                errdefer normals.deinit();
+                var uvs = std.ArrayList([2]f32);
+                errdefer uvs.deinit();
+                var faces = std.ArrayList([3]u32);
+                errdefer faces.deinit();
+
+                for (prim.attributes[0..prim.attributes_count]) |attr| {
+                    switch (attr.type) {
+                        cgltf.cgltf_attribute_type_position => {
+                            const count = cgltf.cgltf_accessor_unpack_floats(attr.data, null, attr.data.*.count);
+                            _ = count;
+                            // switch (acc.type) {
+                            // }
+                        },
+                        cgltf.cgltf_attribute_type_normal => {},
+                        cgltf.cgltf_attribute_type_tangent => {},
+                        cgltf.cgltf_attribute_type_texcoord => {},
+                        cgltf.cgltf_attribute_type_color => {},
+                        cgltf.cgltf_attribute_type_joints => {},
+                        cgltf.cgltf_attribute_type_weights => {},
+                        cgltf.cgltf_attribute_type_custom => {},
+                        else => {},
+                    }
+                }
+            }
+        }
+        //                 cgltf_accessor* position_accessor = position_attr->data;
+        //                 size_t vertex_count = position_accessor->count;
+
+        //                 // Assuming position_accessor contains 3 floats per vertex (x, y, z)
+        //                 for (size_t v = 0; v < vertex_count; v++) {
+        //                     float* vertex = (float*)position_accessor->buffer_view->buffer->data +
+        //                                     position_accessor->buffer_view->offset +
+        //                                     position_accessor->byte_offset +
+        //                                     v * position_accessor->stride;
+
+        //                     myMesh.vertices[v][0] = vertex[0];
+        //                     myMesh.vertices[v][1] = vertex[1];
+        //                     myMesh.vertices[v][2] = vertex[2];
+        //                 }
+        //             }
+        //         }
+
+        //         // Extract normals
+        //         if (primitive->attributes_count > 1) {
+        //             cgltf_attribute* normal_attr = NULL;
+        //             for (size_t k = 0; k < primitive->attributes_count; k++) {
+        //                 if (primitive->attributes[k].type == cgltf_attribute_type_normal) {
+        //                     normal_attr = &primitive->attributes[k];
+        //                     break;
+        //                 }
+        //             }
+
+        //             if (normal_attr) {
+        //                 cgltf_accessor* normal_accessor = normal_attr->data;
+        //                 size_t normal_count = normal_accessor->count;
+
+        //                 // Assuming normal_accessor contains 3 floats per normal (nx, ny, nz)
+        //                 for (size_t v = 0; v < normal_count; v++) {
+        //                     float* normal = (float*)normal_accessor->buffer_view->buffer->data +
+        //                                     normal_accessor->buffer_view->offset +
+        //                                     normal_accessor->byte_offset +
+        //                                     v * normal_accessor->stride;
+
+        //                     myMesh.normals[v][0] = normal[0];
+        //                     myMesh.normals[v][1] = normal[1];
+        //                     myMesh.normals[v][2] = normal[2];
+        //                 }
+        //             }
+        //         }
+
+        //         // Extract UVs
+        //         if (primitive->attributes_count > 2) {
+        //             cgltf_attribute* uv_attr = NULL;
+        //             for (size_t k = 0; k < primitive->attributes_count; k++) {
+        //                 if (primitive->attributes[k].type == cgltf_attribute_type_texcoord) {
+        //                     uv_attr = &primitive->attributes[k];
+        //                     break;
+        //                 }
+        //             }
+
+        //             if (uv_attr) {
+        //                 cgltf_accessor* uv_accessor = uv_attr->data;
+        //                 size_t uv_count = uv_accessor->count;
+
+        //                 // Assuming uv_accessor contains 2 floats per uv (u, v)
+        //                 for (size_t v = 0; v < uv_count; v++) {
+        //                     float* uv = (float*)uv_accessor->buffer_view->buffer->data +
+        //                                 uv_accessor->buffer_view->offset +
+        //                                 uv_accessor->byte_offset +
+        //                                 v * uv_accessor->stride;
+
+        //                     myMesh.uvs[v][0] = uv[0];
+        //                     myMesh.uvs[v][1] = uv[1];
+        //                 }
+        //             }
+        //         }
+
+        //         // Extract faces (indices)
+        //         if (primitive->indices) {
+        //             cgltf_accessor* index_accessor = primitive->indices;
+        //             size_t index_count = index_accessor->count;
+
+        //             // Assuming index_accessor contains 3 integers per face
+        //             for (size_t f = 0; f < index_count; f += 3) {
+        //                 unsigned int* indices = (unsigned int*)index_accessor->buffer_view->buffer->data +
+        //                                         index_accessor->buffer_view->offset +
+        //                                         index_accessor->byte_offset +
+        //                                         f * index_accessor->stride;
+
+        //                 myMesh.faces[f / 3][0] = indices[0];
+        //                 myMesh.faces[f / 3][1] = indices[1];
+        //                 myMesh.faces[f / 3][2] = indices[2];
+        //             }
+        //         }
+
+        //         // Here you can now use `myMesh`, which contains the data for the mesh
+
+        //     }
+        // }
+    }
+};
