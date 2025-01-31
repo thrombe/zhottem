@@ -24,13 +24,16 @@ void set_seed(int id) {
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
     layout(location = 2) out vec2 ouv;
+    layout(location = 3) out float light;
     void main() {
         vec4 pos = vec4(vpos, 1.0);
+        vec4 normal = itransform * vec4(vnormal, 0.0);
         pos = ubo.world_to_screen * itransform * pos;
         opos = pos.xyz;
-        onormal = vnormal;
+        onormal = (ubo.world_to_screen * normal).xyz;
         ouv = uv;
         gl_Position = pos;
+        light = dot(normal.xyz, normalize(vec3(1.0, 1.0, 1.0)));
     }
 #endif // VERT_PASS
 
@@ -40,13 +43,13 @@ void set_seed(int id) {
     layout(location = 0) in vec3 vpos;
     layout(location = 1) in vec3 vnormal;
     layout(location = 2) in vec2 uv;
+    layout(location = 3) in float light;
     layout(location = 0) out vec4 fcolor;
     void main() {
         vec2 res = vec2(ubo.width, ubo.height);
         
-        float a = dot(vnormal, normalize(vec3(1.0, 1.0, 1.0)));
         vec3 color = texture(tex, uv).xyz;
-        fcolor = vec4(color * max(pow(a, 0.2), 0.2), 1.0);
+        fcolor = vec4(color * max(pow(light, 0.2), 0.2), 1.0);
     }
 #endif // FRAG_PASS
 
