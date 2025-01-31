@@ -40,6 +40,7 @@ screen_image: Image,
 depth_image: Image,
 cpu_resources: GpuResourceManager.CpuResources,
 gpu_resources: GpuResourceManager.GpuResources,
+drawcalls: std.ArrayList(DrawCall),
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
@@ -174,9 +175,39 @@ pub const UniformBinds = enum(u32) {
     }
 };
 
-pub const Drawable = struct {
+pub const DrawCall = struct {
     mesh: GpuResourceManager.MeshResourceHandle,
-    pipeline: GraphicsPipeline,
+    instances: GpuResourceManager.BatchedInstanceResourceHandle,
+
+    pub fn draw(
+        self: *const @This(),
+        pipeline: *GraphicsPipeline,
+        desc_sets: []const vk.DescriptorSet,
+        offsets: []const u32,
+        cmdbuf: *CmdBuffer,
+        device: *Device,
+        resources: *GpuResourceManager.GpuResources,
+    ) void {
+        cmdbuf.draw(device, .{
+            .pipeline = pipeline,
+            .desc_sets = desc_sets,
+            .dynamic_offsets = offsets,
+            .vertices = .{
+                .buffer = resources.vertex_buffer.buffer,
+                .count = self.mesh.vertex_count,
+            },
+            .indices = .{
+                .buffer = resources.index_buffer.buffer,
+                .count = self.mesh.index_count,
+                .offset = self.mesh.index_offset,
+            },
+            .instances = .{
+                .buffer = resources.instance_buffer.buffer,
+                .count = self.instances.count,
+                .first = self.instances.first,
+            },
+        });
+    }
 };
 
 pub const GpuResourceManager = struct {
@@ -254,11 +285,23 @@ pub const GpuResourceManager = struct {
             };
         }
 
+        pub fn batch_instances_cloned(self: @This(), instance: Instance, num: usize) !BatchedInstanceResourceHandle {
+            const first = self.instances.items.len;
+            try self.instances.appendNTimes(instance, num);
+
+            return .{
+                .first = @intCast(first),
+                .count = @intCast(num),
+            };
+        }
+
         pub fn upload(self: *@This(), engine: *Engine, pool: vk.CommandPool) !GpuResources {
             return try GpuResources.init(self, engine, pool);
         }
     };
 
+    // TODO: overallocate and suddenly we have a dynamic version of this.
+    // maybe pin some memory and have the handles point to it.
     pub const GpuResources = struct {
         vertex_buffer: Buffer,
         index_buffer: Buffer,
@@ -400,16 +443,22 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cpu = GpuResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
+    var drawcalls = std.ArrayList(DrawCall).init(allocator);
+    errdefer drawcalls.deinit();
+
     const object_mesh_handle = try cpu.add_mesh(&object);
-    const cube_mesh_handle = try cpu.add_mesh(&cube);
     const object_instance_handle = try cpu.batch_instances(&[_]Instance{
         .{ .transform = math.Mat4x4.scaling_mat(Vec4.splat3(0.3)).transpose() },
     });
+    try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
+
+    const cube_mesh_handle = try cpu.add_mesh(&cube);
     const cube_instance_handle = try cpu.batch_instances(&[_]Instance{
         .{ .transform = math.Mat4x4.translation_mat(.{ .x = -3, .y = 5 }) },
         .{ .transform = math.Mat4x4.translation_mat(.{ .x = 0, .y = 5 }) },
         .{ .transform = math.Mat4x4.translation_mat(.{ .x = 3, .y = 5 }) },
     });
+    try drawcalls.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
 
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
@@ -440,6 +489,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .depth_image = depth,
         .gpu_resources = gpu,
         .cpu_resources = cpu,
+        .drawcalls = drawcalls,
         .descriptor_pool = desc_pool,
         .camera_descriptor_set = camera_desc_set,
         .model_descriptor_set = model_desc_set,
@@ -466,6 +516,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.depth_image.deinit(device);
     defer self.cpu_resources.deinit();
     defer self.gpu_resources.deinit(device);
+    defer self.drawcalls.deinit();
     defer self.camera_descriptor_set.deinit(device);
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
@@ -516,8 +567,8 @@ pub const RendererState = struct {
                 .attr_desc = &(Vertex.attribute_description ++ Instance.attribute_desc),
             },
             .dynamic_info = .{
-                .image_format = .r16g16b16a16_sfloat,
-                .depth_format = .d32_sfloat,
+                .image_format = app.screen_image.format,
+                .depth_format = app.depth_image.format,
             },
             .desc_set_layouts = &[_]vk.DescriptorSetLayout{
                 app.camera_descriptor_set.layout,
@@ -534,8 +585,8 @@ pub const RendererState = struct {
                 .attr_desc = &[_]vk.VertexInputAttributeDescription{},
             },
             .dynamic_info = .{
-                .image_format = .r16g16b16a16_sfloat,
-                .depth_format = .d32_sfloat,
+                .image_format = app.screen_image.format,
+                .depth_format = app.depth_image.format,
             },
             .desc_set_layouts = &[_]vk.DescriptorSetLayout{
                 app.camera_descriptor_set.layout,
@@ -562,50 +613,19 @@ pub const RendererState = struct {
         // these offsets are for each dynamic descriptor.
         // basically - you bind a buffer of objects in the desc set, and just tell
         // it what offset you want for that data here.
-        cmdbuf.draw(device, .{
-            .pipeline = &pipeline,
-            .desc_sets = &[_]vk.DescriptorSet{
-                app.camera_descriptor_set.set,
-                app.model_descriptor_set.set,
-            },
-            .dynamic_offsets = &[_]u32{0},
-            .vertices = .{
-                .buffer = app.gpu_resources.vertex_buffer.buffer,
-                .count = app.handles.object.vertex_count,
-            },
-            .indices = .{
-                .buffer = app.gpu_resources.index_buffer.buffer,
-                .count = app.handles.object.index_count,
-                .offset = app.handles.object.index_offset,
-            },
-            .instances = .{
-                .buffer = app.gpu_resources.instance_buffer.buffer,
-                .count = app.handles.object_instances.count,
-                .first = app.handles.object_instances.first,
-            },
-        });
-        cmdbuf.draw(device, .{
-            .pipeline = &pipeline,
-            .desc_sets = &[_]vk.DescriptorSet{
-                app.camera_descriptor_set.set,
-                app.model_descriptor_set.set,
-            },
-            .dynamic_offsets = &[_]u32{0},
-            .vertices = .{
-                .buffer = app.gpu_resources.vertex_buffer.buffer,
-                .count = app.handles.cube.vertex_count,
-            },
-            .indices = .{
-                .buffer = app.gpu_resources.index_buffer.buffer,
-                .count = app.handles.cube.index_count,
-                .offset = app.handles.cube.index_offset,
-            },
-            .instances = .{
-                .buffer = app.gpu_resources.instance_buffer.buffer,
-                .count = app.handles.cube_instances.count,
-                .first = app.handles.cube_instances.first,
-            },
-        });
+        for (app.drawcalls.items) |call| {
+            call.draw(
+                &pipeline,
+                &[_]vk.DescriptorSet{
+                    app.camera_descriptor_set.set,
+                    app.model_descriptor_set.set,
+                },
+                &[_]u32{0},
+                &cmdbuf,
+                device,
+                &app.gpu_resources,
+            );
+        }
 
         cmdbuf.draw(device, .{
             .pipeline = &bg_pipeline,
