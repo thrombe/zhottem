@@ -34,6 +34,8 @@ const allocator = main.allocator;
 
 pub const App = @This();
 
+world: World,
+
 uniforms: UniformBuffer,
 model_uniforms: ModelUniformBuffer,
 screen_image: Image,
@@ -354,6 +356,70 @@ pub const GpuResourceManager = struct {
     };
 };
 
+pub const World = struct {
+    entities: std.ArrayList(Entity),
+
+    pub fn init() @This() {
+        return .{ .entities = std.ArrayList(Entity).init(allocator) };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.entities.deinit();
+    }
+
+    pub fn tick(self: *@This(), app: *App, state: *AppState) !void {
+        // for (app.cpu_resources.instances.items[app.handles.cube_instances.first..][0..app.handles.cube_instances.count], 0..) |*t, i| {
+        //     const bb = @abs(@mod(self.time, 5.0) / 5.0 - 0.5) + 0.5;
+        //     t.transform = math.Mat4x4.translation_mat(.{ .x = @as(f32, @floatFromInt(i)) + bb }).mul_mat(
+        //         math.Mat4x4.scaling_mat(Vec4.splat3(bb / 7.0)),
+        //     );
+        // }
+
+        for (self.entities.items, 0..) |*e, i| {
+            if (e.typ.cube) {
+                const bb = @abs(@mod(state.time, 5.0) / 5.0 - 0.5) + 0.5;
+                e.pos = .{ .x = @as(f32, @floatFromInt(i)) + bb };
+                e.scale = Vec4.splat3(bb / 7.0);
+            }
+
+            if (e.typ.player) {
+                const dirs = state.camera.dirs();
+                const pos = state.camera.pos.sub(dirs.up).add(dirs.fwd.scale(3.0));
+                e.pos = pos;
+                e.rotation = dirs.rot.quat_local_rot(Vec4.quat_angle_axis(0.4, state.camera.world_basis.up));
+            }
+
+            const transform = e.transform();
+            app.cpu_resources.instances.items[e.instance_attr_index].transform = transform;
+        }
+    }
+};
+
+pub const Entity = struct {
+    typ: packed struct {
+        player: bool = false,
+        cube: bool = false,
+        object: bool = false,
+    },
+
+    pos: Vec4 = .{},
+    scale: Vec4 = Vec4.splat3(1.0),
+    rotation: Vec4 = Vec4.quat_identity_rot(),
+    vel: Vec4 = .{},
+    force: Vec4 = .{},
+    mass: f32 = 1.0,
+    collider: Collider,
+
+    instance_attr_index: u32,
+
+    pub fn transform(self: *const @This()) math.Mat4x4 {
+        const translate = math.Mat4x4.translation_mat(self.pos);
+        const rot = math.Mat4x4.rot_mat_from_quat(self.rotation);
+        const scale = math.Mat4x4.scaling_mat(self.scale);
+        return translate.mul_mat(rot).mul_mat(scale);
+    }
+};
+
 var matrices = std.mem.zeroes([2]math.Mat4x4);
 const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
 
@@ -443,6 +509,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cpu = GpuResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
+    var world = World.init();
+    errdefer world.deinit();
+
     var drawcalls = std.ArrayList(DrawCall).init(allocator);
     errdefer drawcalls.deinit();
 
@@ -451,6 +520,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .{ .transform = math.Mat4x4.scaling_mat(Vec4.splat3(0.3)).transpose() },
     });
     try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
+    try world.entities.append(.{
+        .typ = .{ .object = true, .player = true },
+        .scale = Vec4.splat3(0.3),
+        .collider = .{ .sphere = .{ .radius = 5 } },
+        .instance_attr_index = object_instance_handle.first,
+    });
 
     const cube_mesh_handle = try cpu.add_mesh(&cube);
     const cube_instance_handle = try cpu.batch_instances(&[_]Instance{
@@ -459,6 +534,14 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .{ .transform = math.Mat4x4.translation_mat(.{ .x = 3, .y = 5 }) },
     });
     try drawcalls.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
+    for (cube_instance_handle.first..(cube_instance_handle.first + cube_instance_handle.count), 0..) |instance, i| {
+        try world.entities.append(.{
+            .typ = .{ .cube = true },
+            .pos = .{ .x = @floatFromInt(i * 3), .y = 5 },
+            .collider = .{ .sphere = .{ .radius = 1 } },
+            .instance_attr_index = @intCast(instance),
+        });
+    }
 
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
@@ -483,6 +566,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer stages.deinit();
 
     return .{
+        .world = world,
         .uniforms = uniforms,
         .model_uniforms = model_uniform,
         .screen_image = screen,
@@ -510,6 +594,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
 pub fn deinit(self: *@This(), device: *Device) void {
     defer device.destroyCommandPool(self.command_pool, null);
+    defer self.world.deinit();
     defer self.uniforms.deinit(device);
     defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
@@ -830,12 +915,7 @@ pub const AppState = struct {
             );
         }
 
-        for (app.cpu_resources.instances.items[app.handles.cube_instances.first..][0..app.handles.cube_instances.count], 0..) |*t, i| {
-            const bb = @abs(@mod(self.time, 5.0) / 5.0 - 0.5) + 0.5;
-            t.transform = math.Mat4x4.translation_mat(.{ .x = @as(f32, @floatFromInt(i)) + bb }).mul_mat(
-                math.Mat4x4.scaling_mat(Vec4.splat3(bb / 7.0)),
-            );
-        }
+        try app.world.tick(app, self);
     }
 
     pub fn uniforms(self: *@This(), window: *Engine.Window) ![]u8 {

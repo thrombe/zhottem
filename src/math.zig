@@ -583,8 +583,6 @@ pub const Camera = struct {
         const fwd = rot.rotate_vector(self.world_basis.fwd);
         const right = rot.rotate_vector(self.world_basis.right);
 
-        std.debug.print("{any}\n", .{self.pos});
-
         var speed = self.speed;
         if (pressed.shift) {
             speed *= 2.0;
@@ -632,5 +630,24 @@ pub const Camera = struct {
         rot = rot.quat_mul(Vec4.quat_angle_axis(self.yaw, self.world_basis.up));
         rot = rot.quat_conjugate();
         return rot;
+    }
+
+    pub fn dirs(self: *const @This()) struct {
+        rot: Vec4,
+        fwd: Vec4,
+        up: Vec4,
+        right: Vec4,
+    } {
+        const rot = self.rot_quat();
+        const up = rot.rotate_vector(self.world_basis.up);
+        const fwd = rot.rotate_vector(self.world_basis.fwd);
+        const right = rot.rotate_vector(self.world_basis.right);
+
+        return .{
+            .rot = rot,
+            .up = up,
+            .fwd = fwd,
+            .right = right,
+        };
     }
 };
