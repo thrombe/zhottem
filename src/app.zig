@@ -61,7 +61,7 @@ handles: struct {
 
 const Device = Engine.VulkanContext.Api.Device;
 
-const Vertex = struct {
+const Vertex = extern struct {
     const binding_description = [_]vk.VertexInputBindingDescription{.{
         .binding = VertexBinds.vertex.bind(),
         .stride = @sizeOf(Vertex),
@@ -196,12 +196,13 @@ pub const DrawCall = struct {
             .dynamic_offsets = offsets,
             .vertices = .{
                 .buffer = resources.vertex_buffer.buffer,
-                .count = self.mesh.vertex_count,
+                .count = self.mesh.vertex.count,
+                .first = self.mesh.vertex.first,
             },
             .indices = .{
                 .buffer = resources.index_buffer.buffer,
-                .count = self.mesh.index_count,
-                .offset = self.mesh.index_offset,
+                .count = self.mesh.index.count,
+                .first = self.mesh.index.first,
             },
             .instances = .{
                 .buffer = resources.instance_buffer.buffer,
@@ -214,11 +215,13 @@ pub const DrawCall = struct {
 
 pub const GpuResourceManager = struct {
     pub const MeshResourceHandle = struct {
-        index_offset: u32,
-        index_count: u32,
+        index: Region,
+        vertex: Region,
 
-        vertex_offset: u32,
-        vertex_count: u32,
+        const Region = struct {
+            first: u32,
+            count: u32,
+        };
     };
     pub const BatchedInstanceResourceHandle = struct {
         first: u32,
@@ -249,11 +252,14 @@ pub const GpuResourceManager = struct {
 
         pub fn add_mesh(self: *@This(), m: *mesh.Mesh) !MeshResourceHandle {
             const handle = MeshResourceHandle{
-                .index_offset = @intCast(self.triangles.items.len * 3 * @sizeOf(u32)),
-                .index_count = @intCast(m.faces.len * 3),
-
-                .vertex_offset = @intCast(self.vertices.items.len * @sizeOf(Vertex)),
-                .vertex_count = @intCast(m.vertices.len),
+                .index = .{
+                    .first = @intCast(self.triangles.items.len * 3),
+                    .count = @intCast(m.faces.len * 3),
+                },
+                .vertex = .{
+                    .first = @intCast(self.vertices.items.len),
+                    .count = @intCast(m.vertices.len),
+                },
             };
 
             for (m.vertices, m.normals, m.uvs) |v, n, uv| {
@@ -264,15 +270,7 @@ pub const GpuResourceManager = struct {
 
                 try self.vertices.append(vertex);
             }
-
-            const base: u32 = @intCast(self.triangles.items.len * 3);
-            for (m.faces) |f| {
-                try self.triangles.append([3]u32{
-                    f[0] + base,
-                    f[1] + base,
-                    f[2] + base,
-                });
-            }
+            try self.triangles.appendSlice(m.faces);
 
             return handle;
         }
@@ -367,30 +365,20 @@ pub const World = struct {
         self.entities.deinit();
     }
 
-    pub fn tick(self: *@This(), app: *App, state: *AppState) !void {
-        // for (app.cpu_resources.instances.items[app.handles.cube_instances.first..][0..app.handles.cube_instances.count], 0..) |*t, i| {
-        //     const bb = @abs(@mod(self.time, 5.0) / 5.0 - 0.5) + 0.5;
-        //     t.transform = math.Mat4x4.translation_mat(.{ .x = @as(f32, @floatFromInt(i)) + bb }).mul_mat(
-        //         math.Mat4x4.scaling_mat(Vec4.splat3(bb / 7.0)),
-        //     );
-        // }
-
+    pub fn tick(self: *@This(), state: *AppState) !void {
         for (self.entities.items, 0..) |*e, i| {
             if (e.typ.cube) {
                 const bb = @abs(@mod(state.time, 5.0) / 5.0 - 0.5) + 0.5;
-                e.pos = .{ .x = @as(f32, @floatFromInt(i)) + bb };
+                e.pos = .{ .x = @as(f32, @floatFromInt(i)) - 2.0 + bb };
                 e.scale = Vec4.splat3(bb / 7.0);
             }
 
             if (e.typ.player) {
                 const dirs = state.camera.dirs();
-                const pos = state.camera.pos.sub(dirs.up).add(dirs.fwd.scale(3.0));
+                const pos = state.camera.pos.add(dirs.up.scale(-0.5)).add(dirs.fwd.scale(2.0));
                 e.pos = pos;
                 e.rotation = dirs.rot.quat_local_rot(Vec4.quat_angle_axis(0.4, state.camera.world_basis.up));
             }
-
-            const transform = e.transform();
-            app.cpu_resources.instances.items[e.instance_attr_index].transform = transform;
         }
     }
 };
@@ -408,7 +396,6 @@ pub const Entity = struct {
     vel: Vec4 = .{},
     force: Vec4 = .{},
     mass: f32 = 1.0,
-    collider: Collider,
 
     instance_attr_index: u32,
 
@@ -497,12 +484,14 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
-    defer gltf.deinit();
-
+    // var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
+    // defer gltf.deinit();
     // var object = try gltf.to_mesh();
+    // defer object.deinit();
+
     var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     defer object.deinit();
+
     var cube = try mesh.Mesh.cube();
     defer cube.deinit();
 
@@ -522,8 +511,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
     try world.entities.append(.{
         .typ = .{ .object = true, .player = true },
-        .scale = Vec4.splat3(0.3),
-        .collider = .{ .sphere = .{ .radius = 5 } },
+        .pos = .{ .y = 2 },
+        .scale = Vec4.splat3(0.2),
         .instance_attr_index = object_instance_handle.first,
     });
 
@@ -538,7 +527,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         try world.entities.append(.{
             .typ = .{ .cube = true },
             .pos = .{ .x = @floatFromInt(i * 3), .y = 5 },
-            .collider = .{ .sphere = .{ .radius = 1 } },
             .instance_attr_index = @intCast(instance),
         });
     }
@@ -721,15 +709,17 @@ pub const RendererState = struct {
             .vertices = .{
                 .buffer = null,
                 .count = 6,
+                .first = 0,
             },
             .indices = .{
                 .buffer = null,
                 .count = undefined,
-                .offset = undefined,
+                .first = undefined,
             },
             .instances = .{
                 .buffer = null,
                 .count = 1,
+                .first = 0,
             },
         });
 
@@ -915,7 +905,13 @@ pub const AppState = struct {
             );
         }
 
-        try app.world.tick(app, self);
+        try app.world.tick(self);
+
+        // update instance attributes for all entities
+        for (app.world.entities.items) |*e| {
+            const transform = e.transform();
+            app.cpu_resources.instances.items[e.instance_attr_index].transform = transform;
+        }
     }
 
     pub fn uniforms(self: *@This(), window: *Engine.Window) ![]u8 {

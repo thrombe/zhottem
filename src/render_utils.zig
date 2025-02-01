@@ -1347,17 +1347,18 @@ pub const CmdBuffer = struct {
             dynamic_offsets: []const u32,
             indices: struct {
                 buffer: ?vk.Buffer,
-                offset: u32,
                 count: u32,
+                first: u32,
             },
             vertices: struct {
                 buffer: ?vk.Buffer,
                 count: u32,
+                first: u32,
             },
             instances: struct {
                 buffer: ?vk.Buffer,
                 count: u32,
-                first: u32 = 0,
+                first: u32,
             },
         },
     ) void {
@@ -1392,8 +1393,21 @@ pub const CmdBuffer = struct {
                 );
             }
             if (v.indices.buffer) |ib| {
-                device.cmdBindIndexBuffer(cmdbuf, ib, v.indices.offset, .uint32);
-                device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 0, v.instances.first);
+                device.cmdBindIndexBuffer(cmdbuf, ib, 0, .uint32);
+                device.cmdDrawIndexed(
+                    cmdbuf,
+                    v.indices.count,
+                    v.instances.count,
+                    v.indices.first,
+                    @intCast(v.vertices.first),
+                    v.instances.first,
+                );
+
+                // device.cmdBindIndexBuffer(cmdbuf, ib, 3 * 12 * 4 * 4, .uint32);
+                // device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 8 * 4, v.instances.first);
+
+                // device.cmdBindIndexBuffer(cmdbuf, ib, 0, .uint32);
+                // device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 3 * 12 * 4, 8 * 4, v.instances.first);
             } else {
                 device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
             }
