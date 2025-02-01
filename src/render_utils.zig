@@ -1402,14 +1402,8 @@ pub const CmdBuffer = struct {
                     @intCast(v.vertices.first),
                     v.instances.first,
                 );
-
-                // device.cmdBindIndexBuffer(cmdbuf, ib, 3 * 12 * 4 * 4, .uint32);
-                // device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 0, 8 * 4, v.instances.first);
-
-                // device.cmdBindIndexBuffer(cmdbuf, ib, 0, .uint32);
-                // device.cmdDrawIndexed(cmdbuf, v.indices.count, v.instances.count, 3 * 12 * 4, 8 * 4, v.instances.first);
             } else {
-                device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, 0, 0);
+                device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, v.vertices.first, 0);
             }
 
             // very cool

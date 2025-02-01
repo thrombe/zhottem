@@ -285,9 +285,19 @@ pub const GpuResourceManager = struct {
             };
         }
 
-        pub fn batch_instances_cloned(self: @This(), instance: Instance, num: usize) !BatchedInstanceResourceHandle {
+        pub fn batch_instances_cloned(self: *@This(), instance: Instance, num: usize) !BatchedInstanceResourceHandle {
             const first = self.instances.items.len;
             try self.instances.appendNTimes(instance, num);
+
+            return .{
+                .first = @intCast(first),
+                .count = @intCast(num),
+            };
+        }
+
+        pub fn batch_reserve(self: *@This(), num: usize) !BatchedInstanceResourceHandle {
+            const first = self.instances.items.len;
+            try self.instances.appendNTimes(std.mem.zeroes(Instance), num);
 
             return .{
                 .first = @intCast(first),
@@ -484,13 +494,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    // var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
-    // defer gltf.deinit();
-    // var object = try gltf.to_mesh();
-    // defer object.deinit();
-
-    var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
+    var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
+    defer gltf.deinit();
+    var object = try gltf.to_mesh();
     defer object.deinit();
+
+    // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
+    // defer object.deinit();
 
     var cube = try mesh.Mesh.cube();
     defer cube.deinit();
@@ -505,23 +515,17 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer drawcalls.deinit();
 
     const object_mesh_handle = try cpu.add_mesh(&object);
-    const object_instance_handle = try cpu.batch_instances(&[_]Instance{
-        .{ .transform = math.Mat4x4.scaling_mat(Vec4.splat3(0.3)).transpose() },
-    });
+    const object_instance_handle = try cpu.batch_reserve(1);
     try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
     try world.entities.append(.{
-        .typ = .{ .object = true, .player = true },
+        .typ = .{ .object = true },
         .pos = .{ .y = 2 },
         .scale = Vec4.splat3(0.2),
         .instance_attr_index = object_instance_handle.first,
     });
 
     const cube_mesh_handle = try cpu.add_mesh(&cube);
-    const cube_instance_handle = try cpu.batch_instances(&[_]Instance{
-        .{ .transform = math.Mat4x4.translation_mat(.{ .x = -3, .y = 5 }) },
-        .{ .transform = math.Mat4x4.translation_mat(.{ .x = 0, .y = 5 }) },
-        .{ .transform = math.Mat4x4.translation_mat(.{ .x = 3, .y = 5 }) },
-    });
+    const cube_instance_handle = try cpu.batch_reserve(3);
     try drawcalls.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
     for (cube_instance_handle.first..(cube_instance_handle.first + cube_instance_handle.count), 0..) |instance, i| {
         try world.entities.append(.{
