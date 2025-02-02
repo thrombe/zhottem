@@ -2,23 +2,135 @@ const std = @import("std");
 
 const vk = @import("vulkan");
 
+const math = @import("math.zig");
 const mesh = @import("mesh.zig");
 
 const Engine = @import("engine.zig");
+const Device = Engine.VulkanContext.Api.Device;
 
 const render_utils = @import("render_utils.zig");
 const Buffer = render_utils.Buffer;
 const GraphicsPipeline = render_utils.GraphicsPipeline;
 const CmdBuffer = render_utils.CmdBuffer;
 
-const app_mod = @import("app.zig");
-const Vertex = app_mod.Vertex;
-const Instance = app_mod.Instance;
-
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-const Device = Engine.VulkanContext.Api.Device;
+pub const Vertex = extern struct {
+    pub const binding_description = [_]vk.VertexInputBindingDescription{.{
+        .binding = VertexBinds.vertex.bind(),
+        .stride = @sizeOf(Vertex),
+
+        // new data per vertex
+        .input_rate = .vertex,
+    }};
+
+    pub const attribute_description = [_]vk.VertexInputAttributeDescription{
+        .{
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.vertex_position.bind(),
+            .format = .r32g32b32_sfloat,
+            .offset = @offsetOf(Vertex, "pos"),
+        },
+        .{
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.normal.bind(),
+            .format = .r32g32b32_sfloat,
+            .offset = @offsetOf(Vertex, "normal"),
+        },
+        .{
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.uv.bind(),
+            .format = .r32g32_sfloat,
+            .offset = @offsetOf(Vertex, "uv"),
+        },
+    };
+
+    pos: [4]f32,
+    normal: [4]f32,
+    uv: [4]f32,
+
+    pub fn from_slices(vertices: [][3]f32, normals: [][3]f32, uvs: [][2]f32) ![]@This() {
+        const buf = try allocator.alloc(@This(), vertices.len);
+        errdefer allocator.free(buf);
+
+        for (vertices, normals, uvs, 0..) |v, n, uv, i| {
+            buf[i].pos = [4]f32{ v[0], v[1], v[2], 0 };
+            buf[i].normal = [4]f32{ n[0], n[1], n[2], 0 };
+            buf[i].uv = [4]f32{ uv[0], uv[1], 0, 0 };
+        }
+
+        return buf;
+    }
+};
+
+pub const Instance = extern struct {
+    pub const binding_desc = [_]vk.VertexInputBindingDescription{.{
+        .binding = VertexBinds.instance.bind(),
+        .stride = @sizeOf(Instance),
+
+        // new data per instance
+        .input_rate = .instance,
+    }};
+    pub const attribute_desc = [_]vk.VertexInputAttributeDescription{
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind(),
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform"),
+        },
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind() + 1,
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform") + 4 * 4,
+        },
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind() + 2,
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform") + 8 * 4,
+        },
+        .{
+            .binding = VertexBinds.instance.bind(),
+            .location = VertexInputLocations.instance_transform.bind() + 3,
+            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
+            .offset = @offsetOf(Instance, "transform") + 12 * 4,
+        },
+    };
+
+    transform: math.Mat4x4,
+};
+
+pub const VertexBinds = enum(u32) {
+    vertex,
+    instance,
+
+    pub fn bind(self: @This()) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+// so input locations are just numbers but you still have to reserve them if you want to store more than 4 floats worth of data? tf?
+pub const VertexInputLocations = enum(u32) {
+    instance_transform = 0,
+    vertex_position = 4,
+    normal = 5,
+    uv = 6,
+
+    pub fn bind(self: @This()) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const UniformBinds = enum(u32) {
+    camera,
+    instanced,
+
+    pub fn bind(self: @This()) u32 {
+        return @intFromEnum(self);
+    }
+};
 
 pub const DrawCall = struct {
     mesh: GpuResourceManager.MeshResourceHandle,
