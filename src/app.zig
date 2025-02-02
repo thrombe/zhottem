@@ -29,6 +29,9 @@ const DescriptorPool = render_utils.DescriptorPool;
 const DescriptorSet = render_utils.DescriptorSet;
 const CmdBuffer = render_utils.CmdBuffer;
 
+const world_mod = @import("world.zig");
+const World = world_mod.World;
+
 const main = @import("main.zig");
 const allocator = main.allocator;
 
@@ -51,13 +54,6 @@ stages: ShaderStageManager,
 
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
-
-handles: struct {
-    object: GpuResourceManager.MeshResourceHandle,
-    object_instances: GpuResourceManager.BatchedInstanceResourceHandle,
-    cube: GpuResourceManager.MeshResourceHandle,
-    cube_instances: GpuResourceManager.BatchedInstanceResourceHandle,
-},
 
 const Device = Engine.VulkanContext.Api.Device;
 
@@ -364,59 +360,6 @@ pub const GpuResourceManager = struct {
     };
 };
 
-pub const World = struct {
-    entities: std.ArrayList(Entity),
-
-    pub fn init() @This() {
-        return .{ .entities = std.ArrayList(Entity).init(allocator) };
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.entities.deinit();
-    }
-
-    pub fn tick(self: *@This(), state: *AppState) !void {
-        for (self.entities.items, 0..) |*e, i| {
-            if (e.typ.cube) {
-                const bb = @abs(@mod(state.time, 5.0) / 5.0 - 0.5) + 0.5;
-                e.pos = .{ .x = @as(f32, @floatFromInt(i)) - 2.0 + bb };
-                e.scale = Vec4.splat3(bb / 7.0);
-            }
-
-            if (e.typ.player) {
-                const dirs = state.camera.dirs();
-                const pos = state.camera.pos.add(dirs.up.scale(-0.5)).add(dirs.fwd.scale(2.0));
-                e.pos = pos;
-                e.rotation = dirs.rot.quat_local_rot(Vec4.quat_angle_axis(0.4, state.camera.world_basis.up));
-            }
-        }
-    }
-};
-
-pub const Entity = struct {
-    typ: packed struct {
-        player: bool = false,
-        cube: bool = false,
-        object: bool = false,
-    },
-
-    pos: Vec4 = .{},
-    scale: Vec4 = Vec4.splat3(1.0),
-    rotation: Vec4 = Vec4.quat_identity_rot(),
-    vel: Vec4 = .{},
-    force: Vec4 = .{},
-    mass: f32 = 1.0,
-
-    instance_attr_index: u32,
-
-    pub fn transform(self: *const @This()) math.Mat4x4 {
-        const translate = math.Mat4x4.translation_mat(self.pos);
-        const rot = math.Mat4x4.rot_mat_from_quat(self.rotation);
-        const scale = math.Mat4x4.scaling_mat(self.scale);
-        return translate.mul_mat(rot).mul_mat(scale);
-    }
-};
-
 var matrices = std.mem.zeroes([2]math.Mat4x4);
 const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
 
@@ -502,14 +445,39 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     // defer object.deinit();
 
-    var cube = try mesh.Mesh.cube();
-    defer cube.deinit();
+    // var cube = try mesh.Mesh.cube();
+    // defer cube.deinit();
+
+    var sphere_gltf = try mesh.Gltf.parse_glb("./assets/sphere.glb");
+    defer sphere_gltf.deinit();
+    var sphere = try sphere_gltf.to_mesh();
+    defer sphere.deinit();
 
     var cpu = GpuResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
     var world = World.init();
     errdefer world.deinit();
+    try world.entities.append(.{
+        .typ = .{},
+        .transform = .{ .pos = .{ .y = -3 } },
+        .rigidbody = .{
+            .flags = .{ .pinned = true },
+        },
+        // .collider = .{ .plane = .{ .normal = .{ .y = 1 } } },
+        .collider = .{ .sphere = .{ .radius = -10 } },
+        .instance_attr_index = undefined,
+    });
+    try world.entities.append(.{
+        .typ = .{ .player = true },
+        .transform = .{ .pos = .{} },
+        .rigidbody = .{
+            .flags = .{ .pinned = true },
+            .mass = 10000,
+        },
+        .collider = .{ .sphere = .{ .radius = 2 } },
+        .instance_attr_index = undefined,
+    });
 
     var drawcalls = std.ArrayList(DrawCall).init(allocator);
     errdefer drawcalls.deinit();
@@ -519,18 +487,20 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
     try world.entities.append(.{
         .typ = .{ .object = true },
-        .pos = .{ .y = 2 },
-        .scale = Vec4.splat3(0.2),
+        .transform = .{
+            .pos = .{ .y = 2 },
+            .scale = Vec4.splat3(0.2),
+        },
         .instance_attr_index = object_instance_handle.first,
     });
 
-    const cube_mesh_handle = try cpu.add_mesh(&cube);
-    const cube_instance_handle = try cpu.batch_reserve(3);
-    try drawcalls.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
-    for (cube_instance_handle.first..(cube_instance_handle.first + cube_instance_handle.count), 0..) |instance, i| {
+    const sphere_mesh_handle = try cpu.add_mesh(&sphere);
+    const sphere_instance_handle = try cpu.batch_reserve(3);
+    try drawcalls.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
+    for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |instance, i| {
         try world.entities.append(.{
             .typ = .{ .cube = true },
-            .pos = .{ .x = @floatFromInt(i * 3), .y = 5 },
+            .transform = .{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
             .instance_attr_index = @intCast(instance),
         });
     }
@@ -574,13 +544,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
         .texture_img = image,
         .texture = gpu_img,
-
-        .handles = .{
-            .object = object_mesh_handle,
-            .object_instances = object_instance_handle,
-            .cube = cube_mesh_handle,
-            .cube_instances = cube_instance_handle,
-        },
     };
 }
 
@@ -847,7 +810,7 @@ pub const AppState = struct {
         return .{
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
             .camera = math.Camera.init(
-                Vec4{ .z = -2 },
+                Vec4{ .z = -4 },
                 math.Camera.constants.basis.vulkan,
                 math.Camera.constants.basis.opengl,
             ),
@@ -909,11 +872,11 @@ pub const AppState = struct {
             );
         }
 
-        try app.world.tick(self);
+        try app.world.tick(self, delta);
 
         // update instance attributes for all entities
         for (app.world.entities.items) |*e| {
-            const transform = e.transform();
+            const transform = e.transform.mat4();
             app.cpu_resources.instances.items[e.instance_attr_index].transform = transform;
         }
     }

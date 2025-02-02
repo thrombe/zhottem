@@ -123,6 +123,36 @@ pub const Vec4 = extern struct {
         return .{ .x = t, .y = t, .z = t, .w = t };
     }
 
+    pub fn max_v3(self: *const @This()) f32 {
+        return @max(self.x, @max(self.y, self.z));
+    }
+
+    pub fn max_v4(self: *const @This()) f32 {
+        return @max(@max(self.x, self.y), @max(self.z, self.w));
+    }
+
+    pub fn length(self: *const @This()) f32 {
+        return @sqrt(self.dot(self.*));
+    }
+
+    pub fn abs(self: *const @This()) @This() {
+        return .{
+            .x = @abs(self.x),
+            .y = @abs(self.y),
+            .z = @abs(self.z),
+            .w = @abs(self.w),
+        };
+    }
+
+    pub fn sign(self: *const @This()) @This() {
+        return .{
+            .x = std.math.sign(self.x),
+            .y = std.math.sign(self.y),
+            .z = std.math.sign(self.z),
+            .w = std.math.sign(self.w),
+        };
+    }
+
     pub fn normalize3D(self: *const @This()) @This() {
         var this = self.*;
         this.w = 0;
