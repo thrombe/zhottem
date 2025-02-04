@@ -25,7 +25,7 @@ pub const World = struct {
             if (e.typ.player) {
                 e.transform.pos = state.camera.pos;
             } else if (!e.rigidbody.flags.pinned) {
-                e.rigidbody.force = state.camera.world_basis.up.scale(-e.rigidbody.mass);
+                e.rigidbody.force = state.camera.world_basis.up.scale(-e.rigidbody.mass * 9.8);
             }
         }
 
@@ -40,7 +40,7 @@ pub const World = struct {
         for (self.entities.items) |*e| {
             const rb = &e.rigidbody;
             if (rb.flags.pinned) continue;
-            rb.vel = rb.vel.add(rb.force.scale(1 / rb.mass));
+            rb.vel = rb.vel.add(rb.force.scale(1 / rb.mass).scale(delta));
         }
 
         var collisions = std.ArrayList(EntityCollider.CollisionEntity).init(allocator);
