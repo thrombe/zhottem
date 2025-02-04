@@ -26,7 +26,7 @@ pub const World = struct {
     pub fn tick(self: *@This(), state: *AppState, delta: f32) !void {
         for (self.entities.items) |*e| {
             if (e.typ.player) {
-                e.transform.pos = state.camera.pos;
+                // e.transform.pos = state.camera.pos;
             } else if (!e.rigidbody.flags.pinned) {
                 e.rigidbody.force = state.camera.world_basis.up.scale(-e.rigidbody.mass * 9.8);
             }

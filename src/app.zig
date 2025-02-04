@@ -172,8 +172,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .typ = .{ .player = true },
         .transform = .{ .pos = .{} },
         .rigidbody = .{
-            .flags = .{ .pinned = true },
-            .mass = 10000,
+            .flags = .{},
+            .mass = 100,
         },
         .collider = .{ .sphere = .{ .radius = 2 } },
         .mesh = null,
@@ -597,14 +597,6 @@ pub const AppState = struct {
         self.camera_meta.did_move = @intCast(@intFromBool(kb.w or kb.a or kb.s or kb.d));
         self.camera_meta.did_rotate = @intCast(@intFromBool((dx | dy) != 0));
         self.camera_meta.did_change = @intCast(@intFromBool((self.camera_meta.did_move | self.camera_meta.did_rotate) > 0));
-        self.camera.tick(delta, .{ .dx = dx, .dy = dy }, .{
-            .w = kb.w,
-            .a = kb.a,
-            .s = kb.s,
-            .d = kb.d,
-            .shift = kb.shift,
-            .ctrl = kb.ctrl,
-        });
 
         self.mouse.left = mouse.left;
         self.mouse.x = mouse.x;
@@ -622,6 +614,47 @@ pub const AppState = struct {
                 window.extent,
                 "./images",
             );
+        }
+
+        for (app.world.entities.items) |*e| {
+            if (e.typ.player) {
+                // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
+                self.camera.yaw += @as(f32, @floatFromInt(dx)) * self.camera.sensitivity_scale * self.camera.sensitivity;
+                self.camera.pitch += @as(f32, @floatFromInt(dy)) * self.camera.sensitivity_scale * self.camera.sensitivity;
+                self.camera.pitch = std.math.clamp(self.camera.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+
+                const rot = self.camera.rot_quat();
+                const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
+                const right = rot.rotate_vector(self.camera.world_basis.right);
+
+                var speed = self.camera.speed;
+                if (kb.shift) {
+                    speed *= 2.0;
+                }
+                if (kb.ctrl) {
+                    speed *= 0.1;
+                }
+
+                speed *= 10 * self.camera.speed;
+                speed = std.math.clamp(speed, -10, 10);
+                speed *= e.rigidbody.mass;
+
+                if (kb.w) {
+                    e.rigidbody.force = fwd.scale(speed);
+                }
+                if (kb.a) {
+                    e.rigidbody.force = right.scale(-speed);
+                }
+                if (kb.s) {
+                    e.rigidbody.force = fwd.scale(-speed);
+                }
+                if (kb.d) {
+                    e.rigidbody.force = right.scale(speed);
+                }
+
+                e.transform.pos = self.camera.pos;
+                e.transform.rotation = rot;
+            }
         }
 
         try app.world.tick(self, delta);
@@ -647,6 +680,10 @@ pub const AppState = struct {
         var i: usize = 0;
         while (app.world.entities.items.len > i) : (i += 1) {
             const e = &app.world.entities.items[i];
+
+            if (e.typ.player) {
+                self.camera.pos = e.transform.pos;
+            }
 
             if (e.despawn_time) |t| {
                 if (t < self.time) {
