@@ -534,13 +534,32 @@ pub const AppState = struct {
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
         const window = engine.window;
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
-        const w = window.is_pressed(c.GLFW_KEY_W);
-        const a = window.is_pressed(c.GLFW_KEY_A);
-        const s = window.is_pressed(c.GLFW_KEY_S);
-        const d = window.is_pressed(c.GLFW_KEY_D);
-        const shift = window.is_pressed(c.GLFW_KEY_LEFT_SHIFT);
-        const ctrl = window.is_pressed(c.GLFW_KEY_LEFT_CONTROL);
-        const mouse = window.poll_mouse();
+
+        var w = window.is_pressed(c.GLFW_KEY_W);
+        var a = window.is_pressed(c.GLFW_KEY_A);
+        var s = window.is_pressed(c.GLFW_KEY_S);
+        var d = window.is_pressed(c.GLFW_KEY_D);
+        var shift = window.is_pressed(c.GLFW_KEY_LEFT_SHIFT);
+        var ctrl = window.is_pressed(c.GLFW_KEY_LEFT_CONTROL);
+        var mouse = window.poll_mouse();
+        var p = window.is_pressed(c.GLFW_KEY_P);
+
+        if (c.ImGui_GetIO().*.WantCaptureMouse) {
+            mouse = .{ .left = self.mouse.left, .x = self.mouse.x, .y = self.mouse.y };
+        }
+        if (c.ImGui_GetIO().*.WantCaptureKeyboard) {
+            w = false;
+            a = false;
+            s = false;
+            d = false;
+            shift = false;
+            ctrl = false;
+            p = false;
+        }
+
+        if (self.mouse.left != mouse.left) {
+            window.hide_cursor(mouse.left);
+        }
 
         var dx: i32 = 0;
         var dy: i32 = 0;
@@ -568,7 +587,6 @@ pub const AppState = struct {
         self.time += delta;
         self.deltatime = delta;
 
-        const p = window.is_pressed(c.GLFW_KEY_P);
         if (p) {
             try render_utils.dump_image_to_file(
                 &app.screen_image,

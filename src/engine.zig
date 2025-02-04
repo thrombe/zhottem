@@ -127,6 +127,14 @@ pub const Window = struct {
         return .{ .left = left == c.GLFW_PRESS, .x = @intFromFloat(x), .y = @intFromFloat(y) };
     }
 
+    pub fn set_cursor_pos(self: *@This(), x: f64, y: f64) void {
+        c.glfwSetCursorPos(self.handle, x, y);
+    }
+
+    pub fn hide_cursor(self: *@This(), hide: bool) void {
+        c.glfwSetInputMode(self.handle, c.GLFW_CURSOR, if (hide) c.GLFW_CURSOR_DISABLED else c.GLFW_CURSOR_NORMAL);
+    }
+
     pub fn get_res(self: *@This()) !struct { width: u32, height: u32 } {
         const monitor = c.glfwGetWindowMonitor(self.handle) orelse c.glfwGetPrimaryMonitor() orelse return error.CouldNotGetMonitor;
         const mode = c.glfwGetVideoMode(monitor);
