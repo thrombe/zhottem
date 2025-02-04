@@ -3,7 +3,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 
 const math = @import("math.zig");
-const mesh = @import("mesh.zig");
+const mesh_mod = @import("mesh.zig");
 
 const Engine = @import("engine.zig");
 const Device = Engine.VulkanContext.Api.Device;
@@ -132,9 +132,27 @@ pub const UniformBinds = enum(u32) {
     }
 };
 
-pub const DrawCall = struct {
+pub const DrawCallReserve = struct {
     mesh: GpuResourceManager.MeshResourceHandle,
     instances: GpuResourceManager.BatchedInstanceResourceHandle,
+    count: u32 = 0,
+
+    pub fn reset(self: *@This()) void {
+        self.count = 0;
+    }
+
+    pub fn reserve(self: *@This()) u32 {
+        self.count = @min(self.count + 1, self.instances.count);
+        return self.count + self.instances.first - 1;
+    }
+
+    pub fn maybe_reserve(self: *@This(), mesh: GpuResourceManager.MeshResourceHandle) u32 {
+        if (std.meta.eql(self.mesh, mesh)) {
+            _ = self.reserve();
+            return self.count + self.instances.first - 1;
+        }
+        return 0;
+    }
 
     pub fn draw(
         self: *const @This(),
@@ -161,7 +179,7 @@ pub const DrawCall = struct {
             },
             .instances = .{
                 .buffer = resources.instance_buffer.buffer,
-                .count = self.instances.count,
+                .count = self.count,
                 .first = self.instances.first,
             },
         });
@@ -205,7 +223,7 @@ pub const GpuResourceManager = struct {
             self.instances.deinit();
         }
 
-        pub fn add_mesh(self: *@This(), m: *mesh.Mesh) !MeshResourceHandle {
+        pub fn add_mesh(self: *@This(), m: *mesh_mod.Mesh) !MeshResourceHandle {
             const handle = MeshResourceHandle{
                 .index = .{
                     .first = @intCast(self.triangles.items.len * 3),

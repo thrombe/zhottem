@@ -9,7 +9,7 @@ const ShaderUtils = utils.ShaderUtils;
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
 
-const mesh = @import("mesh.zig");
+const mesh_mod = @import("mesh.zig");
 
 const Engine = @import("engine.zig");
 const c = Engine.c;
@@ -35,7 +35,7 @@ const World = world_mod.World;
 
 const resources_mod = @import("resources.zig");
 const GpuResourceManager = resources_mod.GpuResourceManager;
-const DrawCall = resources_mod.DrawCall;
+const DrawCallReserve = resources_mod.DrawCallReserve;
 
 const main = @import("main.zig");
 const allocator = main.allocator;
@@ -50,7 +50,7 @@ screen_image: Image,
 depth_image: Image,
 cpu_resources: GpuResourceManager.CpuResources,
 gpu_resources: GpuResourceManager.GpuResources,
-drawcalls: std.ArrayList(DrawCall),
+drawcalls: std.ArrayList(DrawCallReserve),
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
@@ -59,6 +59,12 @@ stages: ShaderStageManager,
 
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
+
+handles: struct {
+    mesh: struct {
+        sphere: GpuResourceManager.MeshResourceHandle,
+    },
+},
 
 var matrices = std.mem.zeroes([2]math.Mat4x4);
 const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
@@ -137,7 +143,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var gltf = try mesh.Gltf.parse_glb("./assets/well.glb");
+    var gltf = try mesh_mod.Gltf.parse_glb("./assets/well.glb");
     defer gltf.deinit();
     var object = try gltf.to_mesh();
     defer object.deinit();
@@ -148,10 +154,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // var cube = try mesh.Mesh.cube();
     // defer cube.deinit();
 
-    var plane = try mesh.Mesh.plane();
+    var plane = try mesh_mod.Mesh.plane();
     defer plane.deinit();
 
-    var sphere_gltf = try mesh.Gltf.parse_glb("./assets/sphere.glb");
+    var sphere_gltf = try mesh_mod.Gltf.parse_glb("./assets/sphere.glb");
     defer sphere_gltf.deinit();
     var sphere = try sphere_gltf.to_mesh();
     defer sphere.deinit();
@@ -162,6 +168,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var world = World.init();
     errdefer world.deinit();
     try world.entities.append(.{
+        .name = "player",
         .typ = .{ .player = true },
         .transform = .{ .pos = .{} },
         .rigidbody = .{
@@ -169,46 +176,52 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .mass = 10000,
         },
         .collider = .{ .sphere = .{ .radius = 2 } },
-        .instance_attr_index = undefined,
+        .mesh = null,
     });
 
-    var drawcalls = std.ArrayList(DrawCall).init(allocator);
+    var drawcalls = std.ArrayList(DrawCallReserve).init(allocator);
     errdefer drawcalls.deinit();
 
     const plane_mesh_handle = try cpu.add_mesh(&plane);
     const plane_instance_handle = try cpu.batch_reserve(1);
     try drawcalls.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
     try world.entities.append(.{
+        .name = "floor",
         .typ = .{},
-        .transform = .{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
         .rigidbody = .{
             .flags = .{ .pinned = true },
         },
-        .collider = .{ .plane = .{ .normal = .{ .y = 1 } } },
-        // .collider = .{ .sphere = .{ .radius = -10 } },
-        .instance_attr_index = plane_instance_handle.first,
+        // .transform = .{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
+        // .collider = .{ .plane = .{ .normal = .{ .y = 1 } } },
+        // .mesh = plane_mesh_handle,
+        .transform = .{ .pos = .{ .y = -3 } },
+        .collider = .{ .sphere = .{ .radius = -10 } },
+        .mesh = null,
     });
 
-    const object_mesh_handle = try cpu.add_mesh(&object);
-    const object_instance_handle = try cpu.batch_reserve(1);
-    try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
-    try world.entities.append(.{
-        .typ = .{ .object = true },
-        .transform = .{
-            .pos = .{ .y = 2 },
-            .scale = Vec4.splat3(0.2),
-        },
-        .instance_attr_index = object_instance_handle.first,
-    });
+    // const object_mesh_handle = try cpu.add_mesh(&object);
+    // const object_instance_handle = try cpu.batch_reserve(1);
+    // try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
+    // try world.entities.append(.{
+    //     .name = "object",
+    //     .typ = .{ .object = true },
+    //     .transform = .{
+    //         .pos = .{ .y = 2 },
+    //         .scale = Vec4.splat3(0.2),
+    //     },
+    //     .mesh = object_mesh_handle,
+    // });
 
     const sphere_mesh_handle = try cpu.add_mesh(&sphere);
-    const sphere_instance_handle = try cpu.batch_reserve(3);
+    const sphere_instance_handle = try cpu.batch_reserve(5000);
     try drawcalls.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
-    for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |instance, i| {
+    for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
+        if (i > 2) break;
         try world.entities.append(.{
+            .name = "persistent balls",
             .typ = .{ .cube = true },
             .transform = .{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
-            .instance_attr_index = @intCast(instance),
+            .mesh = sphere_mesh_handle,
         });
     }
 
@@ -251,6 +264,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
         .texture_img = image,
         .texture = gpu_img,
+
+        .handles = .{
+            .mesh = .{
+                .sphere = sphere_mesh_handle,
+            },
+        },
     };
 }
 
@@ -507,6 +526,7 @@ pub const AppState = struct {
     reset_render_state: Fuse = .{},
     uniform_buffer: []u8,
     uniform_shader_dumped: bool = false,
+    focus: bool = false,
 
     pub fn init(window: *Engine.Window) !@This() {
         const mouse = window.poll_mouse();
@@ -535,48 +555,55 @@ pub const AppState = struct {
         const window = engine.window;
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        var w = window.is_pressed(c.GLFW_KEY_W);
-        var a = window.is_pressed(c.GLFW_KEY_A);
-        var s = window.is_pressed(c.GLFW_KEY_S);
-        var d = window.is_pressed(c.GLFW_KEY_D);
-        var shift = window.is_pressed(c.GLFW_KEY_LEFT_SHIFT);
-        var ctrl = window.is_pressed(c.GLFW_KEY_LEFT_CONTROL);
         var mouse = window.poll_mouse();
-        var p = window.is_pressed(c.GLFW_KEY_P);
+        var kb = .{
+            .w = window.is_pressed(c.GLFW_KEY_W),
+            .a = window.is_pressed(c.GLFW_KEY_A),
+            .s = window.is_pressed(c.GLFW_KEY_S),
+            .d = window.is_pressed(c.GLFW_KEY_D),
+            .p = window.is_pressed(c.GLFW_KEY_P),
+            .t = window.is_pressed(c.GLFW_KEY_T),
+            .q = window.is_pressed(c.GLFW_KEY_Q),
+            .shift = window.is_pressed(c.GLFW_KEY_LEFT_SHIFT),
+            .ctrl = window.is_pressed(c.GLFW_KEY_LEFT_CONTROL),
+            .esc = window.is_pressed(c.GLFW_KEY_ESCAPE),
+        };
 
         if (c.ImGui_GetIO().*.WantCaptureMouse) {
             mouse = .{ .left = self.mouse.left, .x = self.mouse.x, .y = self.mouse.y };
         }
         if (c.ImGui_GetIO().*.WantCaptureKeyboard) {
-            w = false;
-            a = false;
-            s = false;
-            d = false;
-            shift = false;
-            ctrl = false;
-            p = false;
+            kb = std.mem.zeroes(@TypeOf(kb));
         }
 
-        if (self.mouse.left != mouse.left) {
-            window.hide_cursor(mouse.left);
+        if (mouse.left and !self.focus) {
+            self.focus = true;
+            window.hide_cursor(true);
+        }
+        if (kb.esc and self.focus) {
+            self.focus = false;
+            window.hide_cursor(false);
+        }
+        if (kb.q) {
+            window.queue_close();
         }
 
         var dx: i32 = 0;
         var dy: i32 = 0;
-        if (mouse.left) {
+        if (self.focus) {
             dx = mouse.x - self.mouse.x;
             dy = mouse.y - self.mouse.y;
         }
-        self.camera_meta.did_move = @intCast(@intFromBool(w or a or s or d));
+        self.camera_meta.did_move = @intCast(@intFromBool(kb.w or kb.a or kb.s or kb.d));
         self.camera_meta.did_rotate = @intCast(@intFromBool((dx | dy) != 0));
         self.camera_meta.did_change = @intCast(@intFromBool((self.camera_meta.did_move | self.camera_meta.did_rotate) > 0));
         self.camera.tick(delta, .{ .dx = dx, .dy = dy }, .{
-            .w = w,
-            .a = a,
-            .s = s,
-            .d = d,
-            .shift = shift,
-            .ctrl = ctrl,
+            .w = kb.w,
+            .a = kb.a,
+            .s = kb.s,
+            .d = kb.d,
+            .shift = kb.shift,
+            .ctrl = kb.ctrl,
         });
 
         self.mouse.left = mouse.left;
@@ -587,7 +614,7 @@ pub const AppState = struct {
         self.time += delta;
         self.deltatime = delta;
 
-        if (p) {
+        if (kb.p) {
             try render_utils.dump_image_to_file(
                 &app.screen_image,
                 &engine.graphics,
@@ -599,10 +626,46 @@ pub const AppState = struct {
 
         try app.world.tick(self, delta);
 
-        // update instance attributes for all entities
-        for (app.world.entities.items) |*e| {
-            const transform = e.transform.mat4();
-            app.cpu_resources.instances.items[e.instance_attr_index].transform = transform;
+        if (mouse.left) {
+            const dirs = self.camera.dirs();
+            try app.world.entities.append(.{
+                .name = "bullet",
+                .typ = .{ .cube = true },
+                .transform = .{ .pos = self.camera.pos.add(dirs.fwd.scale(5.0)), .scale = Vec4.splat3(0.4) },
+                .rigidbody = .{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
+                .collider = .{ .sphere = .{ .radius = 1.0 } },
+                .mesh = app.handles.mesh.sphere,
+                .despawn_time = self.time + 2,
+            });
+            _ = self.reset_render_state.fuse();
+        }
+
+        for (app.drawcalls.items) |*dc| {
+            dc.reset();
+        }
+
+        var i: usize = 0;
+        while (app.world.entities.items.len > i) : (i += 1) {
+            const e = &app.world.entities.items[i];
+
+            if (e.despawn_time) |t| {
+                if (t < self.time) {
+                    _ = app.world.entities.swapRemove(i);
+                    i -= 1;
+                    _ = self.reset_render_state.fuse();
+                    continue;
+                }
+            }
+
+            const instance = blk: {
+                const mesh = e.mesh orelse break :blk 0;
+                var count: u32 = 0;
+                for (app.drawcalls.items) |*dc| {
+                    count += dc.maybe_reserve(mesh);
+                }
+                break :blk count;
+            };
+            app.cpu_resources.instances.items[instance].transform = e.transform.mat4();
         }
     }
 

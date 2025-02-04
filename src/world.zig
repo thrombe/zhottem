@@ -6,6 +6,9 @@ const Vec4 = math.Vec4;
 const app = @import("app.zig");
 const AppState = app.AppState;
 
+const resources_mod = @import("resources.zig");
+const GpuResourceManager = resources_mod.GpuResourceManager;
+
 const main = @import("main.zig");
 const allocator = main.allocator;
 
@@ -314,6 +317,7 @@ pub const Components = struct {
 };
 
 pub const Entity = struct {
+    name: []const u8 = "none",
     typ: packed struct {
         player: bool = false,
         cube: bool = false,
@@ -323,6 +327,7 @@ pub const Entity = struct {
     transform: Components.Transform = .{},
     collider: Components.Collider = .{ .sphere = .{ .radius = 1 } },
     rigidbody: Components.Rigidbody = .{ .flags = .{} },
+    despawn_time: ?f32 = null,
 
-    instance_attr_index: u32,
+    mesh: ?GpuResourceManager.MeshResourceHandle,
 };

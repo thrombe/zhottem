@@ -107,10 +107,6 @@ pub const Window = struct {
         var h: c_int = undefined;
         c.glfwGetFramebufferSize(self.handle, &w, &h);
 
-        if (c.glfwGetKey(self.handle, c.GLFW_KEY_ESCAPE) == c.GLFW_PRESS) {
-            c.glfwSetWindowShouldClose(self.handle, c.GL_TRUE);
-        }
-
         // polls events and calls callbacks
         c.glfwPollEvents();
     }
