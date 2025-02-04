@@ -237,8 +237,8 @@ pub const PositionSolver = struct {
     };
 
     const constants = struct {
-        const p = 0.8;
-        const s = 0.01;
+        // - [fix objects jittering in physics engine](https://gamedev.stackexchange.com/questions/53991/how-do-i-fix-objects-popping-or-jittering-in-physics-engine)
+        const slop = 0.01;
     };
 
     pub fn solve(entity: *PositionEntity) void {
@@ -246,7 +246,7 @@ pub const PositionSolver = struct {
         const rbb = &entity.entity.b.rigidbody;
         const col = &entity.entity.collision;
 
-        const del = col.normal.scale(col.depth);
+        const del = col.normal.scale(@max(col.depth - constants.slop, 0));
 
         if (!rba.flags.pinned) {
             entity.dela = del;
