@@ -148,6 +148,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // var cube = try mesh.Mesh.cube();
     // defer cube.deinit();
 
+    var plane = try mesh.Mesh.plane();
+    defer plane.deinit();
+
     var sphere_gltf = try mesh.Gltf.parse_glb("./assets/sphere.glb");
     defer sphere_gltf.deinit();
     var sphere = try sphere_gltf.to_mesh();
@@ -158,16 +161,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var world = World.init();
     errdefer world.deinit();
-    try world.entities.append(.{
-        .typ = .{},
-        .transform = .{ .pos = .{ .y = -3 } },
-        .rigidbody = .{
-            .flags = .{ .pinned = true },
-        },
-        // .collider = .{ .plane = .{ .normal = .{ .y = 1 } } },
-        .collider = .{ .sphere = .{ .radius = -10 } },
-        .instance_attr_index = undefined,
-    });
     try world.entities.append(.{
         .typ = .{ .player = true },
         .transform = .{ .pos = .{} },
@@ -181,6 +174,20 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var drawcalls = std.ArrayList(DrawCall).init(allocator);
     errdefer drawcalls.deinit();
+
+    const plane_mesh_handle = try cpu.add_mesh(&plane);
+    const plane_instance_handle = try cpu.batch_reserve(1);
+    try drawcalls.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
+    try world.entities.append(.{
+        .typ = .{},
+        .transform = .{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
+        .rigidbody = .{
+            .flags = .{ .pinned = true },
+        },
+        .collider = .{ .plane = .{ .normal = .{ .y = 1 } } },
+        // .collider = .{ .sphere = .{ .radius = -10 } },
+        .instance_attr_index = plane_instance_handle.first,
+    });
 
     const object_mesh_handle = try cpu.add_mesh(&object);
     const object_instance_handle = try cpu.batch_reserve(1);

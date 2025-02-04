@@ -76,6 +76,47 @@ pub const Mesh = struct {
         };
     }
 
+    pub fn plane() !@This() {
+        var vertices = std.ArrayList([3]f32).init(allocator);
+        errdefer vertices.deinit();
+        var normals = std.ArrayList([3]f32).init(allocator);
+        errdefer normals.deinit();
+        var uvs = std.ArrayList([2]f32).init(allocator);
+        errdefer uvs.deinit();
+        var faces = std.ArrayList([3]u32).init(allocator);
+        errdefer faces.deinit();
+
+        try vertices.appendSlice(&[_][3]f32{
+            .{ -1.0, 0.0, -1.0 },
+            .{ 1.0, 0.0, -1.0 },
+            .{ 1.0, 0.0, 1.0 },
+            .{ -1.0, 0.0, 1.0 },
+        });
+        try normals.appendSlice(&[_][3]f32{
+            .{ 0.0, 1.0, 0.0 },
+            .{ 0.0, 1.0, 0.0 },
+            .{ 0.0, 1.0, 0.0 },
+            .{ 0.0, 1.0, 0.0 },
+        });
+        try uvs.appendSlice(&[_][2]f32{
+            .{ 0.0, 0.0 },
+            .{ 1.0, 0.0 },
+            .{ 1.0, 1.0 },
+            .{ 0.0, 1.0 },
+        });
+        try faces.appendSlice(&[_][3]u32{
+            .{ 0, 1, 2 },
+            .{ 0, 2, 3 },
+        });
+
+        return .{
+            .vertices = try vertices.toOwnedSlice(),
+            .normals = try normals.toOwnedSlice(),
+            .uvs = try uvs.toOwnedSlice(),
+            .faces = try faces.toOwnedSlice(),
+        };
+    }
+
     pub fn deinit(self: *@This()) void {
         allocator.free(self.vertices);
         allocator.free(self.normals);
