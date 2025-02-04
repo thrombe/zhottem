@@ -28,12 +28,16 @@ void set_seed(int id) {
     void main() {
         vec4 pos = vec4(vpos, 1.0);
         vec4 normal = itransform * vec4(vnormal, 0.0);
+        normal = normalize(normal);
+        vec4 light_dir = vec4(1.0, 1.0, 1.0, 0.0);
+        light_dir = normalize(light_dir);
+
         pos = ubo.world_to_screen * itransform * pos;
         opos = pos.xyz;
-        onormal = (ubo.world_to_screen * normal).xyz;
+        onormal = normal.xyz;
         ouv = uv;
         gl_Position = pos;
-        light = dot(normal.xyz, normalize(vec3(1.0, 1.0, 1.0)));
+        light = dot(normal.xyz, light_dir.xyz);
     }
 #endif // VERT_PASS
 
