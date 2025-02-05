@@ -611,58 +611,51 @@ pub const AppState = struct {
         const window = engine.window;
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        var mouse = window.poll_mouse();
-        var kb = .{
-            .w = window.is_pressed(c.GLFW_KEY_W),
-            .a = window.is_pressed(c.GLFW_KEY_A),
-            .s = window.is_pressed(c.GLFW_KEY_S),
-            .d = window.is_pressed(c.GLFW_KEY_D),
-            .p = window.is_pressed(c.GLFW_KEY_P),
-            .t = window.is_pressed(c.GLFW_KEY_T),
-            .q = window.is_pressed(c.GLFW_KEY_Q),
-            .shift = window.is_pressed(c.GLFW_KEY_LEFT_SHIFT),
-            .ctrl = window.is_pressed(c.GLFW_KEY_LEFT_CONTROL),
-            .esc = window.is_pressed(c.GLFW_KEY_ESCAPE),
-        };
+        const input = window.input();
+
+        var mouse = input.mouse;
+        var kb = input.keys;
 
         if (c.ImGui_GetIO().*.WantCaptureMouse) {
-            mouse = .{ .left = self.mouse.left, .x = self.mouse.x, .y = self.mouse.y };
+            mouse = std.mem.zeroes(@TypeOf(mouse));
+            mouse.x = input.mouse.x;
+            mouse.y = input.mouse.y;
         }
         if (c.ImGui_GetIO().*.WantCaptureKeyboard) {
             kb = std.mem.zeroes(@TypeOf(kb));
         }
 
-        if (mouse.left and !self.focus) {
+        if (mouse.left == .press and !self.focus) {
             self.focus = true;
             window.hide_cursor(true);
         }
-        if (kb.esc and self.focus) {
+        if (kb.escape == .press and self.focus) {
             self.focus = false;
             window.hide_cursor(false);
         }
-        if (kb.q) {
+        if (kb.q == .press) {
             window.queue_close();
         }
 
         var dx: i32 = 0;
         var dy: i32 = 0;
         if (self.focus) {
-            dx = mouse.x - self.mouse.x;
-            dy = mouse.y - self.mouse.y;
+            dx = @intFromFloat(mouse.dx);
+            dy = @intFromFloat(mouse.dy);
         }
-        self.camera_meta.did_move = @intCast(@intFromBool(kb.w or kb.a or kb.s or kb.d));
+        self.camera_meta.did_move = @intCast(@intFromBool(kb.w == .repeat or kb.a == .repeat or kb.s == .repeat or kb.d == .repeat));
         self.camera_meta.did_rotate = @intCast(@intFromBool((dx | dy) != 0));
         self.camera_meta.did_change = @intCast(@intFromBool((self.camera_meta.did_move | self.camera_meta.did_rotate) > 0));
 
-        self.mouse.left = mouse.left;
-        self.mouse.x = mouse.x;
-        self.mouse.y = mouse.y;
+        self.mouse.left = mouse.left == .repeat;
+        self.mouse.x = @intFromFloat(mouse.x);
+        self.mouse.y = @intFromFloat(mouse.y);
 
         self.frame += 1;
         self.time += delta;
         self.deltatime = delta;
 
-        if (kb.p) {
+        if (kb.p == .press) {
             try render_utils.dump_image_to_file(
                 &app.screen_image,
                 &engine.graphics,
@@ -672,22 +665,24 @@ pub const AppState = struct {
             );
         }
 
+        // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
+        self.camera.yaw += @as(f32, @floatFromInt(dx)) * self.camera.sensitivity_scale * self.camera.sensitivity;
+        self.camera.pitch += @as(f32, @floatFromInt(dy)) * self.camera.sensitivity_scale * self.camera.sensitivity;
+        self.camera.pitch = std.math.clamp(self.camera.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+
+        const rot = self.camera.rot_quat();
+        const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
+        const right = rot.rotate_vector(self.camera.world_basis.right);
+
+        var t_min: ?f32 = null;
+        var closest: ?*world_mod.Entity = null;
         for (app.world.entities.items) |*e| {
             if (e.typ.player) {
-                // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
-                self.camera.yaw += @as(f32, @floatFromInt(dx)) * self.camera.sensitivity_scale * self.camera.sensitivity;
-                self.camera.pitch += @as(f32, @floatFromInt(dy)) * self.camera.sensitivity_scale * self.camera.sensitivity;
-                self.camera.pitch = std.math.clamp(self.camera.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
-
-                const rot = self.camera.rot_quat();
-                const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
-                const right = rot.rotate_vector(self.camera.world_basis.right);
-
                 var speed = self.camera.speed;
-                if (kb.shift) {
+                if (kb.shift == .repeat) {
                     speed *= 2.0;
                 }
-                if (kb.ctrl) {
+                if (kb.ctrl == .repeat) {
                     speed *= 0.1;
                 }
 
@@ -695,27 +690,41 @@ pub const AppState = struct {
                 speed = std.math.clamp(speed, -10, 10);
                 speed *= e.rigidbody.mass;
 
-                if (kb.w) {
+                if (kb.w == .repeat) {
                     e.rigidbody.force = fwd.scale(speed);
                 }
-                if (kb.a) {
+                if (kb.a == .repeat) {
                     e.rigidbody.force = right.scale(-speed);
                 }
-                if (kb.s) {
+                if (kb.s == .repeat) {
                     e.rigidbody.force = fwd.scale(-speed);
                 }
-                if (kb.d) {
+                if (kb.d == .repeat) {
                     e.rigidbody.force = right.scale(speed);
                 }
 
                 e.transform.pos = self.camera.pos;
                 e.transform.rotation = rot;
             }
+            if (e.typ.cube and mouse.left == .repeat) {
+                if (e.collider.raycast(&e.transform, self.camera.pos, fwd)) |t| {
+                    if (t_min == null) {
+                        t_min = t;
+                        closest = e;
+                    } else if (t_min.? > t) {
+                        t_min = t;
+                        closest = e;
+                    }
+                }
+            }
+        }
+        if (closest) |e| {
+            e.rigidbody.vel = e.rigidbody.vel.add(fwd.scale(50));
         }
 
         try app.world.tick(self, delta);
 
-        if (mouse.left) {
+        if (mouse.right == .repeat) {
             const dirs = self.camera.dirs();
             try app.world.entities.append(.{
                 .name = "bullet",
