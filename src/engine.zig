@@ -88,10 +88,18 @@ pub const Window = struct {
             right: Action = .none,
             middle: Action = .none,
 
+            x: f32 = 0,
+            y: f32 = 0,
+            dx: f32 = 0,
+            dy: f32 = 0,
+
             fn tick(self: anytype) void {
-                inline for (@typeInfo(@This()).Struct.fields) |field| {
-                    @field(self, field.name).mouse_tick();
-                }
+                self.left.mouse_tick();
+                self.right.mouse_tick();
+                self.middle.mouse_tick();
+
+                self.dx = 0;
+                self.dy = 0;
             }
         } = .{},
         keys: packed struct {
@@ -143,6 +151,10 @@ pub const Window = struct {
             super: Action = .none,
             super_l: Action = .none,
             super_r: Action = .none,
+            enter: Action = .none,
+            escape: Action = .none,
+            space: Action = .none,
+            backspace: Action = .none,
 
             fn tick(self: anytype) void {
                 inline for (@typeInfo(@This()).Struct.fields) |field| {
@@ -166,6 +178,17 @@ pub const Window = struct {
                 .height = @intCast(height),
             };
             _ = global_window.resize_fuse.fuse();
+        }
+
+        fn cursor_pos(_: ?*c.GLFWwindow, x: f64, y: f64) callconv(.C) void {
+            const m = &global_window.input_state.mouse;
+
+            // NOTE: .tick() clears this to 0
+            m.dx += @as(f32, @floatCast(x)) - m.x;
+            m.dy += @as(f32, @floatCast(y)) - m.y;
+
+            m.x = @as(f32, @floatCast(x));
+            m.y = @as(f32, @floatCast(y));
         }
 
         fn mouse(_: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -253,6 +276,10 @@ pub const Window = struct {
                     global_window.input_state.keys.super = a;
                     global_window.input_state.keys.super_r = a;
                 },
+                c.GLFW_KEY_ESCAPE => global_window.input_state.keys.escape = a,
+                c.GLFW_KEY_SPACE => global_window.input_state.keys.space = a,
+                c.GLFW_KEY_BACKSPACE => global_window.input_state.keys.backspace = a,
+                c.GLFW_KEY_ENTER => global_window.input_state.keys.enter = a,
                 else => return,
             }
         }
@@ -282,6 +309,7 @@ pub const Window = struct {
         _ = c.glfwSetFramebufferSizeCallback(window, &Callbacks.resize);
         _ = c.glfwSetMouseButtonCallback(window, &Callbacks.mouse);
         _ = c.glfwSetKeyCallback(window, &Callbacks.key);
+        _ = c.glfwSetCursorPosCallback(window, &Callbacks.cursor_pos);
 
         const self = try allocator.create(@This());
         errdefer allocator.destroy(self);
