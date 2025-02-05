@@ -76,6 +76,18 @@ pub fn main() !void {
             // so just wait for one frame's queue to be empty before trying to render another frame
             try engine.graphics.device.queueWaitIdle(engine.graphics.graphics_queue.handle);
 
+            if (app.stages.update()) {
+                _ = app_state.shader_fuse.fuse();
+            }
+
+            if (app_state.shader_fuse.unfuse()) {
+                try renderer_state.recreate_pipelines(&engine, &app, &app_state);
+            }
+
+            if (app_state.cmdbuf_fuse.unfuse()) {
+                try renderer_state.recreate_cmdbuf(&engine, &app);
+            }
+
             const present = try app.present(&renderer_state, &gui_renderer, &engine.graphics);
             // IDK: this never triggers :/
             if (present == .suboptimal) {
@@ -84,11 +96,9 @@ pub fn main() !void {
 
             if (engine.window.resize_fuse.unfuse() or
                 present == .suboptimal or
-                app.stages.update() or
-                app_state.reset_render_state.unfuse())
+                app_state.resize_fuse.unfuse())
             {
-                renderer_state.deinit(&engine.graphics.device);
-                renderer_state = try RendererState.init(&app, &engine, &app_state);
+                try renderer_state.recreate_swapchain(&engine, &app_state);
 
                 gui_renderer.deinit(&engine.graphics.device);
                 gui_renderer = try GuiEngine.GuiRenderer.init(&engine, &renderer_state.swapchain);

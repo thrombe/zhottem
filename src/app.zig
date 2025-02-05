@@ -325,6 +325,62 @@ pub const RendererState = struct {
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
+        var swapchain = try Swapchain.init(ctx, engine.window.extent, .{});
+        errdefer swapchain.deinit(device);
+
+        var self: @This() = .{
+            .pipeline = undefined,
+            .bg_pipeline = undefined,
+            .swapchain = swapchain,
+            .pool = app.command_pool,
+            .cmdbuffer = undefined,
+        };
+
+        const pipelines = try self.create_pipelines(engine, app);
+        self.pipeline = pipelines.pipeline;
+        self.bg_pipeline = pipelines.bg_pipeline;
+        errdefer self.pipeline.deinit(device);
+        errdefer self.bg_pipeline.deinit(device);
+
+        self.cmdbuffer = try self.create_cmdbuf(engine, app);
+        errdefer self.cmdbuffer.deinit(device);
+
+        return self;
+    }
+
+    pub fn recreate_pipelines(self: *@This(), engine: *Engine, app: *App, app_state: *AppState) !void {
+        const ctx = &engine.graphics;
+        const device = &ctx.device;
+
+        const pipelines = try self.create_pipelines(engine, app);
+
+        self.pipeline.deinit(device);
+        self.bg_pipeline.deinit(device);
+        self.pipeline = pipelines.pipeline;
+        self.bg_pipeline = pipelines.bg_pipeline;
+
+        _ = app_state.cmdbuf_fuse.fuse();
+    }
+
+    pub fn recreate_swapchain(self: *@This(), engine: *Engine, app_state: *AppState) !void {
+        try self.swapchain.recreate(&engine.graphics, engine.window.extent, .{});
+        _ = app_state.cmdbuf_fuse.fuse();
+    }
+
+    pub fn recreate_cmdbuf(self: *@This(), engine: *Engine, app: *App) !void {
+        const ctx = &engine.graphics;
+        const device = &ctx.device;
+
+        const cmdbuffer = try self.create_cmdbuf(engine, app);
+        self.cmdbuffer.deinit(device);
+        self.cmdbuffer = cmdbuffer;
+    }
+
+    pub fn create_pipelines(self: *@This(), engine: *Engine, app: *App) !struct { bg_pipeline: GraphicsPipeline, pipeline: GraphicsPipeline } {
+        _ = self;
+        const ctx = &engine.graphics;
+        const device = &ctx.device;
+
         var pipeline = try GraphicsPipeline.new(device, .{
             .vert = app.stages.shaders.map.get(.vert).code,
             .frag = app.stages.shaders.map.get(.frag).code,
@@ -360,12 +416,16 @@ pub const RendererState = struct {
         });
         errdefer bg_pipeline.deinit(device);
 
-        var swapchain = try Swapchain.init(ctx, engine.window.extent, .{});
-        errdefer swapchain.deinit(device);
+        return .{ .pipeline = pipeline, .bg_pipeline = bg_pipeline };
+    }
+
+    pub fn create_cmdbuf(self: *@This(), engine: *Engine, app: *App) !CmdBuffer {
+        const ctx = &engine.graphics;
+        const device = &ctx.device;
 
         var cmdbuf = try CmdBuffer.init(device, .{
             .pool = app.command_pool,
-            .size = swapchain.swap_images.len,
+            .size = self.swapchain.swap_images.len,
         });
         errdefer cmdbuf.deinit(device);
 
@@ -381,7 +441,7 @@ pub const RendererState = struct {
         // it what offset you want for that data here.
         for (app.drawcalls.items) |call| {
             call.draw(
-                &pipeline,
+                &self.pipeline,
                 &[_]vk.DescriptorSet{
                     app.camera_descriptor_set.set,
                     app.model_descriptor_set.set,
@@ -394,7 +454,7 @@ pub const RendererState = struct {
         }
 
         cmdbuf.draw(device, .{
-            .pipeline = &bg_pipeline,
+            .pipeline = &self.bg_pipeline,
             .desc_sets = &[_]vk.DescriptorSet{
                 app.camera_descriptor_set.set,
             },
@@ -420,19 +480,13 @@ pub const RendererState = struct {
         cmdbuf.drawIntoSwapchain(device, .{
             .image = app.screen_image.image,
             .image_layout = .color_attachment_optimal,
-            .size = swapchain.extent,
-            .swapchain = &swapchain,
+            .size = self.swapchain.extent,
+            .swapchain = &self.swapchain,
             .queue_family = ctx.graphics_queue.family,
         });
         try cmdbuf.end(device);
 
-        return .{
-            .pipeline = pipeline,
-            .bg_pipeline = bg_pipeline,
-            .swapchain = swapchain,
-            .cmdbuffer = cmdbuf,
-            .pool = app.command_pool,
-        };
+        return cmdbuf;
     }
 
     pub fn deinit(self: *@This(), device: *Device) void {
@@ -523,7 +577,9 @@ pub const AppState = struct {
     fps_cap: u32 = 60,
 
     rng: std.Random.Xoshiro256,
-    reset_render_state: Fuse = .{},
+    resize_fuse: Fuse = .{},
+    cmdbuf_fuse: Fuse = .{},
+    shader_fuse: Fuse = .{},
     uniform_buffer: []u8,
     uniform_shader_dumped: bool = false,
     focus: bool = false,
@@ -664,13 +720,13 @@ pub const AppState = struct {
             try app.world.entities.append(.{
                 .name = "bullet",
                 .typ = .{ .cube = true },
-                .transform = .{ .pos = self.camera.pos.add(dirs.fwd.scale(5.0)), .scale = Vec4.splat3(0.4) },
+                .transform = .{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(0.2) },
                 .rigidbody = .{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
                 .collider = .{ .sphere = .{ .radius = 1.0 } },
                 .mesh = app.handles.mesh.sphere,
-                .despawn_time = self.time + 2,
+                .despawn_time = self.time + 5,
             });
-            _ = self.reset_render_state.fuse();
+            _ = self.cmdbuf_fuse.fuse();
         }
 
         for (app.drawcalls.items) |*dc| {
@@ -689,7 +745,7 @@ pub const AppState = struct {
                 if (t < self.time) {
                     _ = app.world.entities.swapRemove(i);
                     i -= 1;
-                    _ = self.reset_render_state.fuse();
+                    _ = self.cmdbuf_fuse.fuse();
                     continue;
                 }
             }
@@ -804,7 +860,7 @@ pub const GuiState = struct {
         reset = reset or c.ImGui_Button("Reset render state");
 
         if (reset) {
-            _ = state.reset_render_state.fuse();
+            _ = state.cmdbuf_fuse.fuse();
             state.reset_time();
         }
     }

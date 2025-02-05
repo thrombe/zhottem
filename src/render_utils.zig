@@ -1856,7 +1856,7 @@ pub const Swapchain = struct {
 
     pub fn recreate(self: *Swapchain, ctx: *Engine.VulkanContext, new_extent: vk.Extent2D, args: Args) !void {
         const old_handle = self.handle;
-        self.deinitExceptSwapchain();
+        self.deinitExceptSwapchain(&ctx.device);
         self.* = try initRecycle(ctx, old_handle, new_extent, .{
             .prefer_present_mode = args.prefer_present_mode orelse self.present_mode,
         });
