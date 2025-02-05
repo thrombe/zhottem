@@ -625,15 +625,15 @@ pub const AppState = struct {
             kb = std.mem.zeroes(@TypeOf(kb));
         }
 
-        if (mouse.left == .press and !self.focus) {
+        if (mouse.left.just_pressed() and !self.focus) {
             self.focus = true;
             window.hide_cursor(true);
         }
-        if (kb.escape == .press and self.focus) {
+        if (kb.escape.just_pressed() and self.focus) {
             self.focus = false;
             window.hide_cursor(false);
         }
-        if (kb.q == .press) {
+        if (kb.q.just_pressed()) {
             window.queue_close();
         }
 
@@ -643,11 +643,11 @@ pub const AppState = struct {
             dx = @intFromFloat(mouse.dx);
             dy = @intFromFloat(mouse.dy);
         }
-        self.camera_meta.did_move = @intCast(@intFromBool(kb.w == .repeat or kb.a == .repeat or kb.s == .repeat or kb.d == .repeat));
+        self.camera_meta.did_move = @intCast(@intFromBool(kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed()));
         self.camera_meta.did_rotate = @intCast(@intFromBool((dx | dy) != 0));
         self.camera_meta.did_change = @intCast(@intFromBool((self.camera_meta.did_move | self.camera_meta.did_rotate) > 0));
 
-        self.mouse.left = mouse.left == .repeat;
+        self.mouse.left = mouse.left.pressed();
         self.mouse.x = @intFromFloat(mouse.x);
         self.mouse.y = @intFromFloat(mouse.y);
 
@@ -655,7 +655,7 @@ pub const AppState = struct {
         self.time += delta;
         self.deltatime = delta;
 
-        if (kb.p == .press) {
+        if (kb.p.just_pressed()) {
             try render_utils.dump_image_to_file(
                 &app.screen_image,
                 &engine.graphics,
@@ -679,10 +679,10 @@ pub const AppState = struct {
         for (app.world.entities.items) |*e| {
             if (e.typ.player) {
                 var speed = self.camera.speed;
-                if (kb.shift == .repeat) {
+                if (kb.shift.pressed()) {
                     speed *= 2.0;
                 }
-                if (kb.ctrl == .repeat) {
+                if (kb.ctrl.pressed()) {
                     speed *= 0.1;
                 }
 
@@ -690,23 +690,23 @@ pub const AppState = struct {
                 speed = std.math.clamp(speed, -10, 10);
                 speed *= e.rigidbody.mass;
 
-                if (kb.w == .repeat) {
+                if (kb.w.pressed()) {
                     e.rigidbody.force = fwd.scale(speed);
                 }
-                if (kb.a == .repeat) {
+                if (kb.a.pressed()) {
                     e.rigidbody.force = right.scale(-speed);
                 }
-                if (kb.s == .repeat) {
+                if (kb.s.pressed()) {
                     e.rigidbody.force = fwd.scale(-speed);
                 }
-                if (kb.d == .repeat) {
+                if (kb.d.pressed()) {
                     e.rigidbody.force = right.scale(speed);
                 }
 
                 e.transform.pos = self.camera.pos;
                 e.transform.rotation = rot;
             }
-            if (e.typ.cube and mouse.left == .repeat) {
+            if (e.typ.cube and mouse.left.pressed()) {
                 if (e.collider.raycast(&e.transform, self.camera.pos, fwd)) |t| {
                     if (t_min == null) {
                         t_min = t;
@@ -724,7 +724,7 @@ pub const AppState = struct {
 
         try app.world.tick(self, delta);
 
-        if (mouse.right == .repeat) {
+        if (mouse.right.pressed()) {
             const dirs = self.camera.dirs();
             try app.world.entities.append(.{
                 .name = "bullet",

@@ -55,6 +55,42 @@ pub const Window = struct {
         repeat,
         release,
 
+        pub fn just_pressed(self: @This()) bool {
+            return switch (self) {
+                .none => false,
+                .press => true,
+                .repeat => false,
+                .release => false,
+            };
+        }
+
+        pub fn pressed(self: @This()) bool {
+            return switch (self) {
+                .none => false,
+                .press => true,
+                .repeat => true,
+                .release => false,
+            };
+        }
+
+        pub fn just_released(self: @This()) bool {
+            return switch (self) {
+                .none => false,
+                .press => false,
+                .repeat => false,
+                .release => true,
+            };
+        }
+
+        pub fn repeated(self: @This()) bool {
+            return switch (self) {
+                .none => false,
+                .press => false,
+                .repeat => true,
+                .release => false,
+            };
+        }
+
         fn key_tick(self: anytype) void {
             self.* = switch (self.*) {
                 .none => .none,
