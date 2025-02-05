@@ -625,16 +625,26 @@ pub const AppState = struct {
             kb = std.mem.zeroes(@TypeOf(kb));
         }
 
+        if (kb.p.just_pressed()) {
+            try render_utils.dump_image_to_file(
+                &app.screen_image,
+                &engine.graphics,
+                app.command_pool,
+                window.extent,
+                "./images",
+            );
+        }
+
         if (mouse.left.just_pressed() and !self.focus) {
             self.focus = true;
             window.hide_cursor(true);
         }
+        if (kb.escape.just_pressed() and !self.focus) {
+            window.queue_close();
+        }
         if (kb.escape.just_pressed() and self.focus) {
             self.focus = false;
             window.hide_cursor(false);
-        }
-        if (kb.q.just_pressed()) {
-            window.queue_close();
         }
 
         var dx: i32 = 0;
@@ -655,20 +665,12 @@ pub const AppState = struct {
         self.time += delta;
         self.deltatime = delta;
 
-        if (kb.p.just_pressed()) {
-            try render_utils.dump_image_to_file(
-                &app.screen_image,
-                &engine.graphics,
-                app.command_pool,
-                window.extent,
-                "./images",
-            );
-        }
-
         // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
-        self.camera.yaw += @as(f32, @floatFromInt(dx)) * self.camera.sensitivity_scale * self.camera.sensitivity;
-        self.camera.pitch += @as(f32, @floatFromInt(dy)) * self.camera.sensitivity_scale * self.camera.sensitivity;
-        self.camera.pitch = std.math.clamp(self.camera.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+        if (self.camera_meta.did_rotate > 0) {
+            self.camera.yaw += mouse.dx * self.camera.sensitivity_scale * self.camera.sensitivity;
+            self.camera.pitch += mouse.dy * self.camera.sensitivity_scale * self.camera.sensitivity;
+            self.camera.pitch = std.math.clamp(self.camera.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+        }
 
         const rot = self.camera.rot_quat();
         const fwd = rot.rotate_vector(self.camera.world_basis.fwd);

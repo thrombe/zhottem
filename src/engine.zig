@@ -91,16 +91,7 @@ pub const Window = struct {
             };
         }
 
-        fn key_tick(self: anytype) void {
-            self.* = switch (self.*) {
-                .none => .none,
-                .press => .press,
-                .repeat => .repeat,
-                .release => .none,
-            };
-        }
-
-        fn mouse_tick(self: anytype) void {
+        fn tick(self: anytype) void {
             self.* = switch (self.*) {
                 .none => .none,
                 .press => .repeat,
@@ -130,9 +121,9 @@ pub const Window = struct {
             dy: f32 = 0,
 
             fn tick(self: anytype) void {
-                self.left.mouse_tick();
-                self.right.mouse_tick();
-                self.middle.mouse_tick();
+                self.left.tick();
+                self.right.tick();
+                self.middle.tick();
 
                 self.dx = 0;
                 self.dy = 0;
@@ -194,7 +185,7 @@ pub const Window = struct {
 
             fn tick(self: anytype) void {
                 inline for (@typeInfo(@This()).Struct.fields) |field| {
-                    @field(self, field.name).key_tick();
+                    @field(self, field.name).tick();
                 }
             }
         } = .{},
