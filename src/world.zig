@@ -301,6 +301,37 @@ pub const Components = struct {
             center: Vec4 = .{},
             half_extent: Vec4,
         };
+
+        pub fn raycast(self: @This(), transform: *const Transform, ro: Vec4, rd: Vec4) ?f32 {
+            var this = self;
+            switch (this) {
+                .sphere => |*s| {
+                    s.center = s.center.add(transform.pos);
+                    s.radius *= transform.scale.max_v3();
+
+                    const oc = ro.sub(s.center);
+                    const a = 1.0; // assuming rd is normalized
+                    const b = 2.0 * oc.dot(rd);
+                    const c = oc.dot(oc) - s.radius * s.radius;
+
+                    const d = b * b - 4 * a * c;
+
+                    if (d < 0) {
+                        return null;
+                    }
+
+                    if (-b - d > 0) {
+                        return (-b - d) / (2 * a);
+                    }
+
+                    return (-b + d) / (2 * a);
+                },
+                .plane => |p| {
+                    _ = p;
+                    return null;
+                },
+            }
+        }
     };
 
     pub const Rigidbody = struct {
