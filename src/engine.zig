@@ -47,12 +47,109 @@ pub const Window = struct {
     extent: vk.Extent2D = .{ .width = 800, .height = 600 },
     handle: *c.GLFWwindow,
     resize_fuse: Fuse = .{},
+    input_state: InputState = .{},
 
-    pub const Event = union(enum) {
-        Resize: struct {
-            width: u32,
-            height: u32,
-        },
+    pub const Action = enum(u2) {
+        none,
+        press,
+        repeat,
+        release,
+
+        fn key_tick(self: anytype) void {
+            self.* = switch (self.*) {
+                .none => .none,
+                .press => .press,
+                .repeat => .repeat,
+                .release => .none,
+            };
+        }
+
+        fn mouse_tick(self: anytype) void {
+            self.* = switch (self.*) {
+                .none => .none,
+                .press => .repeat,
+                .repeat => .repeat,
+                .release => .none,
+            };
+        }
+
+        fn from_int(k: c_int) ?@This() {
+            return switch (k) {
+                c.GLFW_RELEASE => .release,
+                c.GLFW_PRESS => .press,
+                c.GLFW_REPEAT => .repeat,
+                else => return null,
+            };
+        }
+    };
+    pub const InputState = packed struct {
+        mouse: packed struct {
+            left: Action = .none,
+            right: Action = .none,
+            middle: Action = .none,
+
+            fn tick(self: anytype) void {
+                inline for (@typeInfo(@This()).Struct.fields) |field| {
+                    @field(self, field.name).mouse_tick();
+                }
+            }
+        } = .{},
+        keys: packed struct {
+            num_0: Action = .none,
+            num_1: Action = .none,
+            num_2: Action = .none,
+            num_3: Action = .none,
+            num_4: Action = .none,
+            num_5: Action = .none,
+            num_6: Action = .none,
+            num_7: Action = .none,
+            num_8: Action = .none,
+            num_9: Action = .none,
+            a: Action = .none,
+            b: Action = .none,
+            c: Action = .none,
+            d: Action = .none,
+            e: Action = .none,
+            f: Action = .none,
+            g: Action = .none,
+            h: Action = .none,
+            i: Action = .none,
+            j: Action = .none,
+            k: Action = .none,
+            l: Action = .none,
+            m: Action = .none,
+            n: Action = .none,
+            o: Action = .none,
+            p: Action = .none,
+            q: Action = .none,
+            r: Action = .none,
+            s: Action = .none,
+            t: Action = .none,
+            u: Action = .none,
+            v: Action = .none,
+            w: Action = .none,
+            x: Action = .none,
+            y: Action = .none,
+            z: Action = .none,
+            shift: Action = .none,
+            shift_l: Action = .none,
+            shift_r: Action = .none,
+            ctrl: Action = .none,
+            ctrl_l: Action = .none,
+            ctrl_r: Action = .none,
+            alt: Action = .none,
+            alt_l: Action = .none,
+            alt_r: Action = .none,
+            super: Action = .none,
+            super_l: Action = .none,
+            super_r: Action = .none,
+
+            fn tick(self: anytype) void {
+                inline for (@typeInfo(@This()).Struct.fields) |field| {
+                    @field(self, field.name).key_tick();
+                }
+            }
+        } = .{},
     };
 
     const Callbacks = struct {
@@ -64,8 +161,100 @@ pub const Window = struct {
         }
 
         fn resize(_: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
-            global_window.extent = .{ .width = @intCast(width), .height = @intCast(height) };
+            global_window.extent = .{
+                .width = @intCast(width),
+                .height = @intCast(height),
+            };
             _ = global_window.resize_fuse.fuse();
+        }
+
+        fn mouse(_: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
+            _ = mods;
+            const a = Action.from_int(action) orelse return;
+            switch (button) {
+                c.GLFW_MOUSE_BUTTON_LEFT => global_window.input_state.mouse.left = a,
+                c.GLFW_MOUSE_BUTTON_RIGHT => global_window.input_state.mouse.right = a,
+                c.GLFW_MOUSE_BUTTON_MIDDLE => global_window.input_state.mouse.middle = a,
+                else => return,
+            }
+        }
+
+        fn key(_: ?*c.GLFWwindow, button: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
+            _ = mods;
+            _ = scancode;
+
+            const a = Action.from_int(action) orelse return;
+            switch (button) {
+                c.GLFW_KEY_0 => global_window.input_state.keys.num_0 = a,
+                c.GLFW_KEY_1 => global_window.input_state.keys.num_1 = a,
+                c.GLFW_KEY_2 => global_window.input_state.keys.num_2 = a,
+                c.GLFW_KEY_3 => global_window.input_state.keys.num_3 = a,
+                c.GLFW_KEY_4 => global_window.input_state.keys.num_4 = a,
+                c.GLFW_KEY_5 => global_window.input_state.keys.num_5 = a,
+                c.GLFW_KEY_6 => global_window.input_state.keys.num_6 = a,
+                c.GLFW_KEY_7 => global_window.input_state.keys.num_7 = a,
+                c.GLFW_KEY_8 => global_window.input_state.keys.num_8 = a,
+                c.GLFW_KEY_9 => global_window.input_state.keys.num_9 = a,
+                c.GLFW_KEY_A => global_window.input_state.keys.a = a,
+                c.GLFW_KEY_B => global_window.input_state.keys.b = a,
+                c.GLFW_KEY_C => global_window.input_state.keys.c = a,
+                c.GLFW_KEY_D => global_window.input_state.keys.d = a,
+                c.GLFW_KEY_E => global_window.input_state.keys.e = a,
+                c.GLFW_KEY_F => global_window.input_state.keys.f = a,
+                c.GLFW_KEY_G => global_window.input_state.keys.g = a,
+                c.GLFW_KEY_H => global_window.input_state.keys.h = a,
+                c.GLFW_KEY_I => global_window.input_state.keys.i = a,
+                c.GLFW_KEY_J => global_window.input_state.keys.j = a,
+                c.GLFW_KEY_K => global_window.input_state.keys.k = a,
+                c.GLFW_KEY_L => global_window.input_state.keys.l = a,
+                c.GLFW_KEY_M => global_window.input_state.keys.m = a,
+                c.GLFW_KEY_N => global_window.input_state.keys.n = a,
+                c.GLFW_KEY_O => global_window.input_state.keys.o = a,
+                c.GLFW_KEY_P => global_window.input_state.keys.p = a,
+                c.GLFW_KEY_Q => global_window.input_state.keys.q = a,
+                c.GLFW_KEY_R => global_window.input_state.keys.r = a,
+                c.GLFW_KEY_S => global_window.input_state.keys.s = a,
+                c.GLFW_KEY_T => global_window.input_state.keys.t = a,
+                c.GLFW_KEY_U => global_window.input_state.keys.u = a,
+                c.GLFW_KEY_V => global_window.input_state.keys.v = a,
+                c.GLFW_KEY_W => global_window.input_state.keys.w = a,
+                c.GLFW_KEY_X => global_window.input_state.keys.x = a,
+                c.GLFW_KEY_Y => global_window.input_state.keys.y = a,
+                c.GLFW_KEY_Z => global_window.input_state.keys.z = a,
+                c.GLFW_KEY_LEFT_SHIFT => {
+                    global_window.input_state.keys.shift = a;
+                    global_window.input_state.keys.shift_l = a;
+                },
+                c.GLFW_KEY_LEFT_CONTROL => {
+                    global_window.input_state.keys.ctrl = a;
+                    global_window.input_state.keys.ctrl_l = a;
+                },
+                c.GLFW_KEY_LEFT_ALT => {
+                    global_window.input_state.keys.alt = a;
+                    global_window.input_state.keys.alt_l = a;
+                },
+                c.GLFW_KEY_LEFT_SUPER => {
+                    global_window.input_state.keys.super = a;
+                    global_window.input_state.keys.super_l = a;
+                },
+                c.GLFW_KEY_RIGHT_SHIFT => {
+                    global_window.input_state.keys.shift = a;
+                    global_window.input_state.keys.shift_r = a;
+                },
+                c.GLFW_KEY_RIGHT_CONTROL => {
+                    global_window.input_state.keys.ctrl = a;
+                    global_window.input_state.keys.ctrl_r = a;
+                },
+                c.GLFW_KEY_RIGHT_ALT => {
+                    global_window.input_state.keys.alt = a;
+                    global_window.input_state.keys.alt_r = a;
+                },
+                c.GLFW_KEY_RIGHT_SUPER => {
+                    global_window.input_state.keys.super = a;
+                    global_window.input_state.keys.super_r = a;
+                },
+                else => return,
+            }
         }
     };
 
@@ -91,13 +280,12 @@ pub const Window = struct {
         errdefer c.glfwDestroyWindow(window);
 
         _ = c.glfwSetFramebufferSizeCallback(window, &Callbacks.resize);
+        _ = c.glfwSetMouseButtonCallback(window, &Callbacks.mouse);
+        _ = c.glfwSetKeyCallback(window, &Callbacks.key);
 
         const self = try allocator.create(@This());
         errdefer allocator.destroy(self);
-        self.* = .{
-            .extent = extent,
-            .handle = window,
-        };
+        self.* = .{ .extent = extent, .handle = window };
         Callbacks.global_window = self;
         return self;
     }
@@ -106,6 +294,9 @@ pub const Window = struct {
         var w: c_int = undefined;
         var h: c_int = undefined;
         c.glfwGetFramebufferSize(self.handle, &w, &h);
+
+        self.input_state.keys.tick();
+        self.input_state.mouse.tick();
 
         // polls events and calls callbacks
         c.glfwPollEvents();
@@ -159,6 +350,10 @@ pub const Window = struct {
         c.glfwDestroyWindow(self.handle);
         c.glfwTerminate();
         allocator.destroy(self);
+    }
+
+    pub fn input(self: *@This()) Window.InputState {
+        return self.input_state;
     }
 };
 
