@@ -371,6 +371,12 @@ pub const EntityId = struct {
     index: u32,
 };
 
+pub const ArchetypeEntity = struct {
+    archetype: ArchetypeId,
+    // entity's index into archetype's components[i].items
+    entity_index: usize,
+};
+
 // index into self.archetypes
 pub const ArchetypeId = usize;
 
@@ -476,7 +482,7 @@ pub const Archetype = struct {
 pub const EntityComponentStore = struct {
     // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
 
-    entities: std.AutoArrayHashMap(EntityId, ArchetypeId),
+    entities: std.AutoArrayHashMap(EntityId, ArchetypeEntity),
     archetypes: std.ArrayList(Archetype),
     // not all types are components. we register components so that we can do cooler comptime stuff
     // another idea could be to have a fixed enum of all possible components, and having a fixed enum varient per component
@@ -505,7 +511,7 @@ pub const EntityComponentStore = struct {
 
     pub fn init() @This() {
         return @This(){
-            .entities = std.AutoArrayHashMap(EntityId, ArchetypeId).init(allocator),
+            .entities = std.AutoArrayHashMap(EntityId, ArchetypeEntity).init(allocator),
             .archetypes = std.ArrayList(Archetype).init(allocator),
             .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator),
             .archetype_map = ArchetypeMap.init(allocator),
@@ -599,8 +605,8 @@ pub const EntityComponentStore = struct {
             ei = @intCast(archetype.components[compi].items.len / bytes.len);
         }
 
-        const eid = EntityId{ .generation = 0, .index = ei - 1 };
-        try self.entities.put(eid, archeid);
+        const eid = EntityId{ .generation = 0, .index = @intCast(self.entities.count()) };
+        try self.entities.put(eid, .{ .archetype = archeid, .entity_index = ei - 1 });
         errdefer self.entities.pop();
 
         return eid;
@@ -610,8 +616,8 @@ pub const EntityComponentStore = struct {
         const typ = Type{ .components = &try self.component_ids_sorted_from(T) };
         var t: Type.pointer(T) = undefined;
 
-        const archeid = self.archetype_map.get(typ) orelse return error.ArchetypeNotFound;
-        const archetype = &self.archetypes.items[archeid];
+        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+        const archetype = &self.archetypes.items[ae.archetype];
 
         inline for (@typeInfo(T).Struct.fields) |field| {
             const compid = try self.get_component_id(field.type);
