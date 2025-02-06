@@ -6,23 +6,23 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 // - [typeId in zig?](https://github.com/ziglang/zig/issues/19858#issuecomment-2596933195)
-const TypeId = struct {
+pub const TypeId = struct {
     id: u64,
+
+    pub inline fn from(comptime T: type) @This() {
+        const Phantom = *const struct {
+            _: u8,
+        };
+        const ptr = &struct {
+            comptime {
+                _ = T;
+            }
+            var id: @typeInfo(Phantom).Pointer.child = undefined;
+        }.id;
+
+        return .{ .id = @intCast(@intFromPtr(ptr)) };
+    }
 };
-
-pub inline fn typeId(comptime T: type) TypeId {
-    const Phantom = *const struct {
-        _: u8,
-    };
-    const ptr = &struct {
-        comptime {
-            _ = T;
-        }
-        var id: @typeInfo(Phantom).Pointer.child = undefined;
-    }.id;
-
-    return .{ .id = @intCast(@intFromPtr(ptr)) };
-}
 
 // assumes ok has ok.deinit()
 pub fn Result(ok: type, err_typ: type) type {
@@ -725,7 +725,7 @@ pub const ShaderUtils = struct {
         }
 
         fn remember(self: *@This(), t: type) !bool {
-            const id = typeId(t);
+            const id = TypeId.from(t);
             if (self.known_types.contains(id)) {
                 return true;
             } else {
