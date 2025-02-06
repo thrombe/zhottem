@@ -3,6 +3,9 @@ const std = @import("std");
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
 
+const utils_mod = @import("utils.zig");
+const TypeId = utils_mod.TypeId;
+
 const app = @import("app.zig");
 const AppState = app.AppState;
 
@@ -361,4 +364,262 @@ pub const Entity = struct {
     despawn_time: ?f32 = null,
 
     mesh: ?GpuResourceManager.MeshResourceHandle,
+};
+
+pub const EntityId = struct {
+    generation: u32,
+    index: u32,
+};
+
+// index into self.archetypes
+pub const ArchetypeId = usize;
+
+// represents 1 component
+pub const ComponentId = u32;
+
+pub const Type = struct {
+    components: []const ComponentId,
+
+    pub fn deinit(self: *@This()) void {
+        allocator.free(self.components);
+    }
+
+    pub fn index(self: *const @This(), component: ComponentId) ?usize {
+        // there will never be more than like 20 items here. linear search should be faster
+        for (self.components, 0..) |comp, i| {
+            if (std.meta.eql(comp, component)) {
+                return i;
+            }
+        }
+
+        return null;
+    }
+
+    // ids must be sorted
+    pub fn has_components(self: *const @This(), ids: []const ComponentId) bool {
+        var i: usize = 0;
+        var j: usize = 0;
+        while (self.components.len > i and ids.len > j) {
+            const a = ids[j];
+            const b = self.components[i];
+
+            switch (std.math.order(a, b)) {
+                .eq => {
+                    i += 1;
+                    j += 1;
+                },
+                .lt => {
+                    return false;
+                },
+                .gt => {
+                    i += 1;
+                },
+            }
+        }
+
+        return ids.len == j;
+    }
+
+    // from a struct to a struct to the same struct but all fields are pointers
+    pub fn pointer(comptime typ: type) type {
+        const StructField = std.builtin.Type.StructField;
+        const input_val: typ = undefined;
+        const input_struct = @typeInfo(typ).Struct;
+
+        comptime {
+            var fields: [input_struct.fields.len]StructField = undefined;
+            @memcpy(&fields, input_struct.fields);
+            for (&fields) |*field| {
+                field.default_value = null;
+                field.type = @TypeOf(&@field(input_val, field.name));
+            }
+
+            return @Type(.{ .Struct = .{
+                .layout = .auto,
+                .fields = &fields,
+                .decls = &[_]std.builtin.Type.Declaration{},
+                .is_tuple = input_struct.is_tuple,
+            } });
+        }
+    }
+};
+
+// represents a type of entity (a fixed sorted set of components)
+pub const Archetype = struct {
+    typ: Type,
+    // type erased block of components (same length and order as self.typ.components)
+    components: []std.ArrayListAligned(u8, 4),
+
+    fn from_type(typ: *const Type) !@This() {
+        const components = try allocator.alloc(std.ArrayListAligned(u8, 4), typ.components.len);
+        errdefer allocator.free(components);
+        for (components) |*comp| {
+            comp.* = std.ArrayListAligned(u8, 4).init(allocator);
+        }
+        return .{
+            .typ = .{ .components = try allocator.dupe(ComponentId, typ.components) },
+            .components = components,
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        for (self.components) |*comp| {
+            comp.deinit();
+        }
+        allocator.free(self.components);
+
+        self.edges.deinit();
+    }
+};
+
+// ECS lol
+pub const EntityComponentStore = struct {
+    // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
+
+    entities: std.AutoArrayHashMap(EntityId, ArchetypeId),
+    archetypes: std.ArrayList(Archetype),
+    // not all types are components. we register components so that we can do cooler comptime stuff
+    // another idea could be to have a fixed enum of all possible components, and having a fixed enum varient per component
+    // directly defined in the component as 'const component_type = .transform'
+    //   - note: these enums can be merged into 1
+    components: std.AutoArrayHashMap(TypeId, ComponentId),
+
+    archetype_map: ArchetypeMap,
+    component_map: std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)),
+
+    const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
+        pub fn hash(ctx: @This(), key: Type) u32 {
+            _ = ctx;
+            var hasher = std.hash.Wyhash.init(0);
+            for (key.components) |*comp| {
+                hasher.update(std.mem.asBytes(comp));
+            }
+            return @truncate(hasher.final());
+        }
+        pub fn eql(ctx: @This(), a: Type, b: Type, b_index: usize) bool {
+            _ = b_index;
+            _ = ctx;
+            return std.mem.eql(ComponentId, a.components, b.components);
+        }
+    }, true);
+
+    pub fn init() @This() {
+        return @This(){
+            .entities = std.AutoArrayHashMap(EntityId, ArchetypeId).init(allocator),
+            .archetypes = std.ArrayList(Archetype).init(allocator),
+            .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator),
+            .archetype_map = ArchetypeMap.init(allocator),
+            .component_map = std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.entities.deinit();
+        self.components.deinit();
+
+        for (self.archetypes.items) |*a| {
+            a.deinit();
+        }
+        self.archetypes.deinit();
+
+        // NOTE: these values are owned by self.archetypes[].typ
+        // for (self.archetype_map.keys()) |*k| {
+        //     k.deinit();
+        // }
+        self.archetype_map.deinit();
+
+        for (self.component_map.values()) |*list| {
+            list.deinit();
+        }
+        self.component_map.deinit();
+    }
+
+    pub fn register(self: *@This(), component: type) !ComponentId {
+        const type_id = TypeId.from(component);
+        const comp_id = self.components.count();
+        const comp = try self.components.getOrPut(type_id);
+        if (!comp.found_existing) {
+            comp.value_ptr.* = @intCast(comp_id);
+        }
+        return comp.value_ptr.*;
+    }
+
+    pub fn get_component_id(self: *@This(), component: type) !ComponentId {
+        const type_id = TypeId.from(component);
+        return self.components.get(type_id) orelse error.TypeNotAComponent;
+    }
+
+    fn component_ids_from(self: *@This(), typ: type) ![@typeInfo(typ).Struct.fields.len]ComponentId {
+        const fields = @typeInfo(typ).Struct.fields;
+        var components: [fields.len]ComponentId = undefined;
+
+        inline for (fields, 0..) |*field, i| {
+            const e = self.components.getEntry(TypeId.from(field.type));
+            if (e) |entry| {
+                components[i] = entry.value_ptr.*;
+            } else {
+                return error.FieldNotAComponent;
+            }
+        }
+
+        return components;
+    }
+
+    fn component_ids_sorted_from(self: *@This(), typ: type) ![@typeInfo(typ).Struct.fields.len]ComponentId {
+        var components = try self.component_ids_from(typ);
+        std.mem.sort(ComponentId, &components, {}, std.sort.asc(ComponentId));
+        return components;
+    }
+
+    pub fn insert(self: *@This(), components: anytype) !EntityId {
+        const component_ids = &try self.component_ids_sorted_from(@TypeOf(components));
+        const typ = Type{ .components = component_ids };
+
+        const archeid = self.archetype_map.get(typ) orelse blk: {
+            var archetype = try Archetype.from_type(&typ);
+            errdefer archetype.deinit();
+
+            const archeid = self.archetypes.items.len;
+            try self.archetypes.append(archetype);
+
+            try self.archetype_map.put(archetype.typ, archeid);
+
+            break :blk archeid;
+        };
+        const archetype = &self.archetypes.items[archeid];
+
+        var ei: u32 = undefined;
+        inline for (@typeInfo(@TypeOf(components)).Struct.fields) |field| {
+            const compid = try self.get_component_id(field.type);
+            const compi = typ.index(compid) orelse unreachable;
+            const f = @field(components, field.name);
+            const bytes = std.mem.asBytes(&f);
+            try archetype.components[compi].appendSlice(bytes);
+
+            ei = @intCast(archetype.components[compi].items.len / bytes.len);
+        }
+
+        const eid = EntityId{ .generation = 0, .index = ei - 1 };
+        try self.entities.put(eid, archeid);
+        errdefer self.entities.pop();
+
+        return eid;
+    }
+
+    pub fn get(self: *@This(), entity: EntityId, comptime T: type) !Type.pointer(T) {
+        const typ = Type{ .components = &try self.component_ids_sorted_from(T) };
+        var t: Type.pointer(T) = undefined;
+
+        const archeid = self.archetype_map.get(typ) orelse return error.ArchetypeNotFound;
+        const archetype = &self.archetypes.items[archeid];
+
+        inline for (@typeInfo(T).Struct.fields) |field| {
+            const compid = try self.get_component_id(field.type);
+            const compi = typ.index(compid) orelse unreachable;
+            const slice = std.mem.bytesAsSlice(field.type, archetype.components[compi].items);
+            @field(t, field.name) = &slice[entity.index];
+        }
+
+        return t;
+    }
 };
