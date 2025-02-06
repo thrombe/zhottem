@@ -622,4 +622,83 @@ pub const EntityComponentStore = struct {
 
         return t;
     }
+
+    pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(typ) {
+        const ids = try self.component_ids_from(typ);
+        var sorted_ids = ids;
+        std.mem.sort(ComponentId, &sorted_ids, {}, std.sort.asc(ComponentId));
+
+        return .{
+            .ids = ids,
+            .sorted_ids = sorted_ids,
+            .archetype_it = self.archetype_map.iterator(),
+            .archetypes = self.archetypes.items,
+            .current = null,
+        };
+    }
+
+    pub fn EntityIterator(typ: type) type {
+        return struct {
+            const fields = @typeInfo(typ).Struct.fields;
+            const len = fields.len;
+
+            // same order as that of fields
+            ids: [len]ComponentId,
+            sorted_ids: [len]ComponentId,
+            archetype_it: ArchetypeMap.Iterator,
+            archetypes: []Archetype,
+            current: ?struct {
+                archetype: ArchetypeId,
+                // indices into archetype.components
+                // same order as that of fields
+                ids: [len]usize,
+                // current index into archetype.components[].items
+                index: usize = 0,
+            },
+
+            pub fn next(self: *@This()) ?Type.pointer(typ) {
+                outer: while (true) {
+                    if (self.current) |*curr| inner: {
+                        var t: Type.pointer(typ) = undefined;
+                        inline for (fields, curr.ids) |field, ci| {
+                            const slice = std.mem.bytesAsSlice(field.type, self.archetypes[curr.archetype].components[ci].items);
+
+                            if (curr.index >= slice.len) {
+                                self.current = null;
+                                break :inner;
+                            }
+
+                            @field(t, field.name) = &slice[curr.index];
+                        }
+                        curr.index += 1;
+                        return t;
+                    }
+
+                    while (self.archetype_it.next()) |e| {
+                        if (!e.key_ptr.has_components(&self.sorted_ids)) {
+                            continue;
+                        }
+
+                        var ids: [len]usize = undefined;
+                        inline for (self.ids, 0..) |cid, i| {
+                            ids[i] = e.key_ptr.index(cid) orelse unreachable;
+                        }
+
+                        self.current = .{
+                            .archetype = e.value_ptr.*,
+                            .ids = ids,
+                        };
+                        continue :outer;
+                    }
+
+                    return null;
+                }
+            }
+
+            pub fn reset(self: *@This()) void {
+                self.archetypes.reset();
+                self.current_archetype = null;
+            }
+        };
+    }
 };
