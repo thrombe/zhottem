@@ -489,6 +489,8 @@ pub const EntityComponentStore = struct {
     // directly defined in the component as 'const component_type = .transform'
     //   - note: these enums can be merged into 1
     components: std.AutoArrayHashMap(TypeId, ComponentId),
+    // EntityId's component id
+    entityid_component_id: ComponentId,
 
     archetype_map: ArchetypeMap,
     component_map: std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)),
@@ -509,14 +511,20 @@ pub const EntityComponentStore = struct {
         }
     }, true);
 
-    pub fn init() @This() {
-        return @This(){
+    pub fn init() !@This() {
+        var self = @This(){
             .entities = std.AutoArrayHashMap(EntityId, ArchetypeEntity).init(allocator),
             .archetypes = std.ArrayList(Archetype).init(allocator),
             .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator),
             .archetype_map = ArchetypeMap.init(allocator),
             .component_map = std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)).init(allocator),
+            .entityid_component_id = undefined,
         };
+        errdefer self.deinit();
+
+        self.entityid_component_id = try self.register(EntityId);
+
+        return self;
     }
 
     pub fn deinit(self: *@This()) void {
@@ -579,7 +587,7 @@ pub const EntityComponentStore = struct {
 
     pub fn insert(self: *@This(), components: anytype) !EntityId {
         const component_ids = &try self.component_ids_sorted_from(@TypeOf(components));
-        const typ = Type{ .components = component_ids };
+        const typ = Type{ .components = [_]ComponentId{self.entityid_component_id} ++ component_ids };
 
         const archeid = self.archetype_map.get(typ) orelse blk: {
             var archetype = try Archetype.from_type(&typ);
@@ -594,20 +602,23 @@ pub const EntityComponentStore = struct {
         };
         const archetype = &self.archetypes.items[archeid];
 
-        var ei: u32 = undefined;
         inline for (@typeInfo(@TypeOf(components)).Struct.fields) |field| {
             const compid = try self.get_component_id(field.type);
             const compi = typ.index(compid) orelse unreachable;
             const f = @field(components, field.name);
             const bytes = std.mem.asBytes(&f);
             try archetype.components[compi].appendSlice(bytes);
-
-            ei = @intCast(archetype.components[compi].items.len / bytes.len);
         }
 
         const eid = EntityId{ .generation = 0, .index = @intCast(self.entities.count()) };
-        try self.entities.put(eid, .{ .archetype = archeid, .entity_index = ei - 1 });
-        errdefer self.entities.pop();
+
+        {
+            const compi = typ.index(self.entityid_component_id) orelse unreachable;
+            const bytes = std.mem.asBytes(&eid);
+            try archetype.components[compi].appendSlice(bytes);
+            const ei: u32 = @intCast(archetype.components[compi].items.len / bytes.len);
+            try self.entities.put(eid, .{ .archetype = archeid, .entity_index = ei - 1 });
+        }
 
         return eid;
     }
