@@ -473,8 +473,6 @@ pub const Archetype = struct {
             comp.deinit();
         }
         allocator.free(self.components);
-
-        self.edges.deinit();
     }
 };
 
