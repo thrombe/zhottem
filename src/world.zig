@@ -340,7 +340,7 @@ pub const Components = struct {
     pub const Rigidbody = struct {
         flags: packed struct {
             pinned: bool = false,
-        },
+        } = .{},
         vel: Vec4 = .{},
         force: Vec4 = .{},
         restitution: f32 = 1.0,
@@ -622,7 +622,6 @@ pub const EntityComponentStore = struct {
     }
 
     pub fn get(self: *@This(), entity: EntityId, comptime T: type) !Type.pointer(T) {
-        const typ = Type{ .components = &try self.component_ids_sorted_from(T) };
         var t: Type.pointer(T) = undefined;
 
         const ae = self.entities.get(entity) orelse return error.EntityNotFound;
@@ -630,7 +629,7 @@ pub const EntityComponentStore = struct {
 
         inline for (@typeInfo(T).Struct.fields) |field| {
             const compid = try self.get_component_id(field.type);
-            const compi = typ.index(compid) orelse unreachable;
+            const compi = archetype.typ.index(compid) orelse unreachable;
             const slice = std.mem.bytesAsSlice(field.type, archetype.components[compi].items);
             @field(t, field.name) = &slice[entity.index];
         }
