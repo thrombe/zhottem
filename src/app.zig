@@ -739,15 +739,36 @@ pub const AppState = struct {
 
         if (mouse.right.pressed()) {
             const dirs = self.camera.dirs();
+            const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
             _ = try app.world.ecs.insert(.{
                 .name = @as([]const u8, "bullet"),
-                .transform = Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(0.2) },
+                .transform = Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
                 .rigidbody = Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
                 .collider = Components.Collider{ .sphere = .{ .radius = 1.0 } },
                 .mesh = app.handles.mesh.sphere,
-                // .despawn_time = self.time + 5,
+                .despawn_time = Components.TimeDespawn{ .despawn_time = self.time + 10 },
             });
             _ = self.cmdbuf_fuse.fuse();
+        }
+
+        {
+            var to_remove = std.ArrayList(Entity).init(allocator);
+            defer to_remove.deinit();
+
+            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
+            while (it.next()) |e| {
+                if (e.ds.despawn_time < self.time) {
+                    try to_remove.append(e.id.*);
+                }
+            }
+
+            for (to_remove.items) |e| {
+                try app.world.ecs.remove(e);
+            }
+
+            if (to_remove.items.len > 0) {
+                _ = self.cmdbuf_fuse.fuse();
+            }
         }
 
         for (app.drawcalls.items) |*dc| {
@@ -770,20 +791,6 @@ pub const AppState = struct {
                 app.cpu_resources.instances.items[instance].transform = e.t.mat4();
             }
         }
-
-        // var i: usize = 0;
-        // while (app.world.entities.items.len > i) : (i += 1) {
-        //     const e = &app.world.entities.items[i];
-
-        //     if (e.despawn_time) |t| {
-        //         if (t < self.time) {
-        //             _ = app.world.entities.swapRemove(i);
-        //             i -= 1;
-        //             _ = self.cmdbuf_fuse.fuse();
-        //             continue;
-        //         }
-        //     }
-        // }
     }
 
     pub fn uniforms(self: *@This(), window: *Engine.Window) ![]u8 {

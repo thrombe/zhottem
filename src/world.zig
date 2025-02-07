@@ -26,6 +26,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.Transform);
         _ = try self.ecs.register(Components.Rigidbody);
         _ = try self.ecs.register(Components.Collider);
+        _ = try self.ecs.register(Components.TimeDespawn);
         _ = try self.ecs.register(GpuResourceManager.MeshResourceHandle);
 
         return self;
@@ -376,6 +377,10 @@ pub const Components = struct {
         mass: f32 = 1.0,
         static_friction: f32 = 0.5,
         dynamic_friction: f32 = 0.5,
+    };
+
+    pub const TimeDespawn = struct {
+        despawn_time: f32,
     };
 };
 
