@@ -351,22 +351,6 @@ pub const Components = struct {
 };
 
 pub const Entity = struct {
-    name: []const u8 = "none",
-    typ: packed struct {
-        player: bool = false,
-        cube: bool = false,
-        object: bool = false,
-    },
-
-    transform: Components.Transform = .{},
-    collider: Components.Collider = .{ .sphere = .{ .radius = 1 } },
-    rigidbody: Components.Rigidbody = .{ .flags = .{} },
-    despawn_time: ?f32 = null,
-
-    mesh: ?GpuResourceManager.MeshResourceHandle,
-};
-
-pub const EntityId = struct {
     generation: u32,
     index: u32,
 };
@@ -483,14 +467,14 @@ pub const Archetype = struct {
 pub const EntityComponentStore = struct {
     // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
 
-    entities: std.AutoArrayHashMap(EntityId, ArchetypeEntity),
+    entities: std.AutoArrayHashMap(Entity, ArchetypeEntity),
     archetypes: std.ArrayList(Archetype),
     // not all types are components. we register components so that we can do cooler comptime stuff
     // another idea could be to have a fixed enum of all possible components, and having a fixed enum varient per component
     // directly defined in the component as 'const component_type = .transform'
     //   - note: these enums can be merged into 1
     components: std.AutoArrayHashMap(TypeId, ComponentId),
-    // EntityId's component id
+    // Entity's component id
     entityid_component_id: ComponentId,
 
     archetype_map: ArchetypeMap,
@@ -514,7 +498,7 @@ pub const EntityComponentStore = struct {
 
     pub fn init() !@This() {
         var self = @This(){
-            .entities = std.AutoArrayHashMap(EntityId, ArchetypeEntity).init(allocator),
+            .entities = std.AutoArrayHashMap(Entity, ArchetypeEntity).init(allocator),
             .archetypes = std.ArrayList(Archetype).init(allocator),
             .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator),
             .archetype_map = ArchetypeMap.init(allocator),
@@ -523,7 +507,7 @@ pub const EntityComponentStore = struct {
         };
         errdefer self.deinit();
 
-        self.entityid_component_id = try self.register(EntityId);
+        self.entityid_component_id = try self.register(Entity);
 
         return self;
     }
@@ -586,7 +570,7 @@ pub const EntityComponentStore = struct {
         return components;
     }
 
-    pub fn insert(self: *@This(), components: anytype) !EntityId {
+    pub fn insert(self: *@This(), components: anytype) !Entity {
         const component_ids = &try self.component_ids_sorted_from(@TypeOf(components));
         const typ = Type{ .components = [_]ComponentId{self.entityid_component_id} ++ component_ids };
 
@@ -611,7 +595,7 @@ pub const EntityComponentStore = struct {
             try archetype.components[compi].appendSlice(bytes);
         }
 
-        const eid = EntityId{ .generation = 0, .index = @intCast(self.entities.count()) };
+        const eid = Entity{ .generation = 0, .index = @intCast(self.entities.count()) };
 
         {
             const compi = typ.index(self.entityid_component_id) orelse unreachable;
@@ -624,7 +608,7 @@ pub const EntityComponentStore = struct {
         return eid;
     }
 
-    pub fn get(self: *@This(), entity: EntityId, comptime T: type) !Type.pointer(T) {
+    pub fn get(self: *@This(), entity: Entity, comptime T: type) !Type.pointer(T) {
         var t: Type.pointer(T) = undefined;
 
         const ae = self.entities.get(entity) orelse return error.EntityNotFound;
