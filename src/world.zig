@@ -677,8 +677,8 @@ pub const EntityComponentStore = struct {
         inline for (@typeInfo(T).Struct.fields) |field| {
             const compid = try self.get_component_id(field.type);
             const compi = archetype.typ.index(compid) orelse unreachable;
-            const slice = std.mem.bytesAsSlice(field.type, archetype.components[compi].items);
-            @field(t, field.name) = &slice[ae.entity_index];
+            const val = std.mem.bytesAsValue(field.type, archetype.components[compi].items[ae.entity_index * compid.size ..][0..compid.size]);
+            @field(t, field.name) = @alignCast(val);
         }
 
         return t;
@@ -691,8 +691,8 @@ pub const EntityComponentStore = struct {
 
         if (archetype.count - 1 != ae.value.entity_index) {
             const entity_ci = archetype.typ.index(self.entityid_component_id) orelse unreachable;
-            const swapped = std.mem.bytesAsSlice(Entity, archetype.components[entity_ci].items)[archetype.count - 1];
-            self.entities.getEntry(swapped).?.value_ptr.entity_index = ae.value.entity_index;
+            const val = std.mem.bytesAsValue(Entity, archetype.components[entity_ci].items[(archetype.count - 1) * self.entityid_component_id.size ..]);
+            self.entities.getEntry(val.*).?.value_ptr.entity_index = ae.value.entity_index;
         }
     }
 
@@ -733,15 +733,16 @@ pub const EntityComponentStore = struct {
                 outer: while (true) {
                     if (self.current) |*curr| inner: {
                         var t: Type.pointer(typ) = undefined;
-                        inline for (fields, curr.ids) |field, ci| {
-                            const slice = std.mem.bytesAsSlice(field.type, self.archetypes[curr.archetype].components[ci].items);
+                        inline for (fields, curr.ids, self.ids) |field, ci, compid| {
+                            const slice = self.archetypes[curr.archetype].components[ci].items;
 
-                            if (curr.index >= slice.len) {
+                            if ((curr.index + 1) * compid.size > slice.len) {
                                 self.current = null;
                                 break :inner;
                             }
 
-                            @field(t, field.name) = &slice[curr.index];
+                            const val = std.mem.bytesAsValue(field.type, slice[curr.index * compid.size ..][0..compid.size]);
+                            @field(t, field.name) = @alignCast(val);
                         }
                         curr.index += 1;
                         return t;
