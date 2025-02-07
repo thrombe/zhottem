@@ -429,7 +429,7 @@ pub const Type = struct {
     // from a struct to a struct to the same struct but all fields are pointers
     pub fn pointer(comptime typ: type) type {
         const StructField = std.builtin.Type.StructField;
-        const input_val: typ = undefined;
+        var input_val: typ = undefined;
         const input_struct = @typeInfo(typ).Struct;
 
         comptime {
@@ -437,7 +437,8 @@ pub const Type = struct {
             @memcpy(&fields, input_struct.fields);
             for (&fields) |*field| {
                 field.default_value = null;
-                field.type = @TypeOf(&@field(input_val, field.name));
+                const t: *field.type = &@field(input_val, field.name);
+                field.type = @TypeOf(t);
             }
 
             return @Type(.{ .Struct = .{
@@ -469,6 +470,8 @@ pub const Archetype = struct {
     }
 
     pub fn deinit(self: *@This()) void {
+        self.typ.deinit();
+
         for (self.components) |*comp| {
             comp.deinit();
         }
@@ -710,8 +713,8 @@ pub const EntityComponentStore = struct {
             }
 
             pub fn reset(self: *@This()) void {
-                self.archetypes.reset();
-                self.current_archetype = null;
+                self.archetype_it.reset();
+                self.current = null;
             }
         };
     }
