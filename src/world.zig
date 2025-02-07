@@ -535,6 +535,7 @@ pub const EntityComponentStore = struct {
     components: std.AutoArrayHashMap(TypeId, ComponentId),
     // Entity's component id
     entityid_component_id: ComponentId,
+    entity_id: u32 = 0,
 
     archetype_map: ArchetypeMap,
     component_map: std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)),
@@ -656,7 +657,10 @@ pub const EntityComponentStore = struct {
             try archetype.components[compi].appendSlice(bytes);
         }
 
-        const eid = Entity{ .generation = archetype.generation, .index = @intCast(self.entities.count()) };
+        // TODO: think of a better way to generate unique entity ids?
+        // generation kida does not do anything rn.
+        const eid = Entity{ .generation = archetype.generation, .index = self.entity_id };
+        self.entity_id += 1;
 
         {
             const compi = typ.index(self.entityid_component_id) orelse unreachable;
