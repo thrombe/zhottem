@@ -32,6 +32,8 @@ const CmdBuffer = render_utils.CmdBuffer;
 
 const world_mod = @import("world.zig");
 const World = world_mod.World;
+const Components = world_mod.Components;
+const Entity = world_mod.Entity;
 
 const resources_mod = @import("resources.zig");
 const GpuResourceManager = resources_mod.GpuResourceManager;
@@ -61,6 +63,7 @@ texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
 
 handles: struct {
+    player: Entity,
     mesh: struct {
         sphere: GpuResourceManager.MeshResourceHandle,
     },
@@ -165,18 +168,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cpu = GpuResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
-    var world = World.init();
+    var world = try World.init();
     errdefer world.deinit();
-    try world.entities.append(.{
-        .name = "player",
-        .typ = .{ .player = true },
-        .transform = .{ .pos = .{} },
-        .rigidbody = .{
-            .flags = .{},
+    const player_id = try world.ecs.insert(.{
+        .name = @as([]const u8, "player"),
+        .transform = Components.Transform{ .pos = .{} },
+        .rigidbody = Components.Rigidbody{
+            .flags = .{ .player = true },
             .mass = 100,
         },
-        .collider = .{ .sphere = .{ .radius = 2 } },
-        .mesh = null,
+        // .collider = Components.Collider{ .sphere = .{ .radius = 2 } },
     });
 
     var drawcalls = std.ArrayList(DrawCallReserve).init(allocator);
@@ -185,18 +186,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const plane_mesh_handle = try cpu.add_mesh(&plane);
     const plane_instance_handle = try cpu.batch_reserve(1);
     try drawcalls.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
-    try world.entities.append(.{
-        .name = "floor",
-        .typ = .{},
-        .rigidbody = .{
+    _ = try world.ecs.insert(.{
+        .name = @as([]const u8, "floor"),
+        .rigidbody = Components.Rigidbody{
             .flags = .{ .pinned = true },
         },
-        // .transform = .{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
-        // .collider = .{ .plane = .{ .normal = .{ .y = 1 } } },
+        // .transform = Components.Transform{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
+        // .collider = Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         // .mesh = plane_mesh_handle,
-        .transform = .{ .pos = .{ .y = -3 } },
-        .collider = .{ .sphere = .{ .radius = -10 } },
-        .mesh = null,
+        .transform = Components.Transform{ .pos = .{ .y = -3 } },
+        .collider = Components.Collider{ .sphere = .{ .radius = -10 } },
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -217,11 +216,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     try drawcalls.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
     for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
         if (i > 2) break;
-        try world.entities.append(.{
-            .name = "persistent balls",
-            .typ = .{ .cube = true },
-            .transform = .{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
-            .mesh = sphere_mesh_handle,
+        _ = try world.ecs.insert(.{
+            .name = @as([]const u8, "persistent balls"),
+            .t = Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
+            .r = Components.Rigidbody{},
+            .c = Components.Collider{ .sphere = .{ .radius = 1 } },
+            .m = sphere_mesh_handle,
         });
     }
 
@@ -247,7 +247,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const stages = try ShaderStageManager.init();
     errdefer stages.deinit();
 
-    return .{
+    return @This(){
         .world = world,
         .uniforms = uniforms,
         .model_uniforms = model_uniform,
@@ -266,6 +266,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .texture = gpu_img,
 
         .handles = .{
+            .player = player_id,
             .mesh = .{
                 .sphere = sphere_mesh_handle,
             },
@@ -676,66 +677,75 @@ pub const AppState = struct {
         const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
         const right = rot.rotate_vector(self.camera.world_basis.right);
 
-        var t_min: ?f32 = null;
-        var closest: ?*world_mod.Entity = null;
-        for (app.world.entities.items) |*e| {
-            if (e.typ.player) {
-                var speed = self.camera.speed;
-                if (kb.shift.pressed()) {
-                    speed *= 2.0;
-                }
-                if (kb.ctrl.pressed()) {
-                    speed *= 0.1;
-                }
-
-                speed *= 10 * self.camera.speed;
-                speed = std.math.clamp(speed, -10, 10);
-                speed *= e.rigidbody.mass;
-
-                if (kb.w.pressed()) {
-                    e.rigidbody.force = fwd.scale(speed);
-                }
-                if (kb.a.pressed()) {
-                    e.rigidbody.force = right.scale(-speed);
-                }
-                if (kb.s.pressed()) {
-                    e.rigidbody.force = fwd.scale(-speed);
-                }
-                if (kb.d.pressed()) {
-                    e.rigidbody.force = right.scale(speed);
-                }
-
-                e.transform.pos = self.camera.pos;
-                e.transform.rotation = rot;
+        {
+            var player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform, r: Components.Rigidbody });
+            var speed = self.camera.speed;
+            if (kb.shift.pressed()) {
+                speed *= 2.0;
             }
-            if (e.typ.cube and mouse.left.pressed()) {
-                if (e.collider.raycast(&e.transform, self.camera.pos, fwd)) |t| {
-                    if (t_min == null) {
-                        t_min = t;
-                        closest = e;
-                    } else if (t_min.? > t) {
-                        t_min = t;
-                        closest = e;
+            if (kb.ctrl.pressed()) {
+                speed *= 0.1;
+            }
+
+            speed *= 10 * self.camera.speed;
+            speed = std.math.clamp(speed, -10, 10);
+            speed *= player.r.mass;
+
+            if (kb.w.pressed()) {
+                player.r.force = fwd.scale(speed);
+            }
+            if (kb.a.pressed()) {
+                player.r.force = right.scale(-speed);
+            }
+            if (kb.s.pressed()) {
+                player.r.force = fwd.scale(-speed);
+            }
+            if (kb.d.pressed()) {
+                player.r.force = right.scale(speed);
+            }
+            if (kb.space.pressed()) {
+                player.r.force = .{};
+                player.r.vel = .{};
+            }
+
+            player.t.pos = self.camera.pos;
+            player.t.rotation = rot;
+        }
+
+        {
+            const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
+            var t_min: ?f32 = null;
+            var closest: ?world_mod.Type.pointer(T) = null;
+            var it = try app.world.ecs.iterator(T);
+            while (it.next()) |e| {
+                if (!e.r.flags.player and !e.r.flags.pinned and mouse.left.pressed()) {
+                    if (e.c.raycast(e.t, self.camera.pos, fwd)) |t| {
+                        if (t_min == null) {
+                            t_min = t;
+                            closest = e;
+                        } else if (t_min.? > t) {
+                            t_min = t;
+                            closest = e;
+                        }
                     }
                 }
             }
-        }
-        if (closest) |e| {
-            e.rigidbody.vel = e.rigidbody.vel.add(fwd.scale(50));
+            if (closest) |e| {
+                e.r.vel = e.r.vel.add(fwd.scale(50));
+            }
         }
 
         try app.world.tick(self, delta);
 
         if (mouse.right.pressed()) {
             const dirs = self.camera.dirs();
-            try app.world.entities.append(.{
-                .name = "bullet",
-                .typ = .{ .cube = true },
-                .transform = .{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(0.2) },
-                .rigidbody = .{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
-                .collider = .{ .sphere = .{ .radius = 1.0 } },
+            _ = try app.world.ecs.insert(.{
+                .name = @as([]const u8, "bullet"),
+                .transform = Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(0.2) },
+                .rigidbody = Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
+                .collider = Components.Collider{ .sphere = .{ .radius = 1.0 } },
                 .mesh = app.handles.mesh.sphere,
-                .despawn_time = self.time + 5,
+                // .despawn_time = self.time + 5,
             });
             _ = self.cmdbuf_fuse.fuse();
         }
@@ -744,33 +754,36 @@ pub const AppState = struct {
             dc.reset();
         }
 
-        var i: usize = 0;
-        while (app.world.entities.items.len > i) : (i += 1) {
-            const e = &app.world.entities.items[i];
+        const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
+        self.camera.pos = player.t.pos;
 
-            if (e.typ.player) {
-                self.camera.pos = e.transform.pos;
+        {
+            var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: GpuResourceManager.MeshResourceHandle });
+            while (it.next()) |e| {
+                const instance = blk: {
+                    var count: u32 = 0;
+                    for (app.drawcalls.items) |*dc| {
+                        count += dc.maybe_reserve(e.m.*);
+                    }
+                    break :blk count;
+                };
+                app.cpu_resources.instances.items[instance].transform = e.t.mat4();
             }
-
-            if (e.despawn_time) |t| {
-                if (t < self.time) {
-                    _ = app.world.entities.swapRemove(i);
-                    i -= 1;
-                    _ = self.cmdbuf_fuse.fuse();
-                    continue;
-                }
-            }
-
-            const instance = blk: {
-                const mesh = e.mesh orelse break :blk 0;
-                var count: u32 = 0;
-                for (app.drawcalls.items) |*dc| {
-                    count += dc.maybe_reserve(mesh);
-                }
-                break :blk count;
-            };
-            app.cpu_resources.instances.items[instance].transform = e.transform.mat4();
         }
+
+        // var i: usize = 0;
+        // while (app.world.entities.items.len > i) : (i += 1) {
+        //     const e = &app.world.entities.items[i];
+
+        //     if (e.despawn_time) |t| {
+        //         if (t < self.time) {
+        //             _ = app.world.entities.swapRemove(i);
+        //             i -= 1;
+        //             _ = self.cmdbuf_fuse.fuse();
+        //             continue;
+        //         }
+        //     }
+        // }
     }
 
     pub fn uniforms(self: *@This(), window: *Engine.Window) ![]u8 {

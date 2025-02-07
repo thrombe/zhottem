@@ -16,50 +16,67 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 pub const World = struct {
-    entities: std.ArrayList(Entity),
+    ecs: EntityComponentStore,
 
-    pub fn init() @This() {
-        return .{ .entities = std.ArrayList(Entity).init(allocator) };
+    pub fn init() !@This() {
+        var self = @This(){ .ecs = try EntityComponentStore.init() };
+        errdefer self.deinit();
+
+        _ = try self.ecs.register([]const u8);
+        _ = try self.ecs.register(Components.Transform);
+        _ = try self.ecs.register(Components.Rigidbody);
+        _ = try self.ecs.register(Components.Collider);
+        _ = try self.ecs.register(GpuResourceManager.MeshResourceHandle);
+
+        return self;
     }
 
     pub fn deinit(self: *@This()) void {
-        self.entities.deinit();
+        self.ecs.deinit();
     }
 
     pub fn tick(self: *@This(), state: *AppState, delta: f32) !void {
-        for (self.entities.items) |*e| {
-            if (e.typ.player) {
-                // e.transform.pos = state.camera.pos;
-            } else if (!e.rigidbody.flags.pinned) {
-                e.rigidbody.force = state.camera.world_basis.up.scale(-e.rigidbody.mass * 9.8);
+        var it = try self.ecs.iterator(struct { r: Components.Rigidbody });
+        while (it.next()) |e| {
+            if (!e.r.flags.pinned and !e.r.flags.player) {
+                const g = state.camera.world_basis.up.scale(-e.r.mass * 9.8);
+                e.r.force = e.r.force.add(g);
             }
         }
 
         try self.step(delta);
 
-        for (self.entities.items) |*e| {
-            e.rigidbody.force = .{};
+        it.reset();
+        while (it.next()) |e| {
+            e.r.force = .{};
         }
     }
 
     pub fn step(self: *@This(), delta: f32) !void {
-        for (self.entities.items) |*e| {
-            const rb = &e.rigidbody;
-            if (rb.flags.pinned) continue;
-            rb.vel = rb.vel.add(rb.force.scale(1 / rb.mass).scale(delta));
+        {
+            var it = try self.ecs.iterator(struct { r: Components.Rigidbody });
+            while (it.next()) |e| {
+                if (e.r.flags.pinned) continue;
+                e.r.vel = e.r.vel.add(e.r.force.scale(1 / e.r.mass).scale(delta));
+            }
         }
 
         var collisions = std.ArrayList(EntityCollider.CollisionEntity).init(allocator);
         defer collisions.deinit();
 
-        for (self.entities.items) |*a| {
-            for (self.entities.items) |*b| {
-                if (a == b) {
-                    break;
-                }
-                const collision = EntityCollider.collide(a, b, .{}) orelse continue;
+        {
+            var it1 = try self.ecs.iterator(EntityCollider.RigidEntity);
+            var it2 = it1;
+            while (it1.next()) |a| {
+                it2.reset();
+                while (it2.next()) |b| {
+                    if (std.meta.eql(a.id, b.id)) {
+                        break;
+                    }
+                    const collision = EntityCollider.collide(a, b, .{}) orelse continue;
 
-                try collisions.append(.{ .a = a, .b = b, .collision = collision });
+                    try collisions.append(.{ .a = a, .b = b, .collision = collision });
+                }
             }
         }
 
@@ -80,10 +97,12 @@ pub const World = struct {
             PositionSolver.apply(e, delta);
         }
 
-        for (self.entities.items) |*e| {
-            const rb = &e.rigidbody;
-            if (rb.flags.pinned) continue;
-            e.transform.pos = e.transform.pos.add(rb.vel.scale(delta));
+        {
+            var it = try self.ecs.iterator(struct { r: Components.Rigidbody, t: Components.Transform });
+            while (it.next()) |e| {
+                if (e.r.flags.pinned) continue;
+                e.t.pos = e.t.pos.add(e.r.vel.scale(delta));
+            }
         }
     }
 };
@@ -98,14 +117,23 @@ pub const EntityCollider = struct {
     };
 
     pub const CollisionEntity = struct {
-        a: *Entity,
-        b: *Entity,
+        a: RigidEntity.p,
+        b: RigidEntity.p,
         collision: Collision,
     };
 
-    pub fn collide(a: *Entity, b: *Entity, v: struct { flip: bool = false }) ?Collision {
-        var ac = a.collider;
-        var bc = b.collider;
+    const RigidEntity = struct {
+        id: Entity,
+        transform: Components.Transform,
+        rigidbody: Components.Rigidbody,
+        collider: Components.Collider,
+
+        const p = Type.pointer(@This());
+    };
+
+    pub fn collide(a: RigidEntity.p, b: RigidEntity.p, v: struct { flip: bool = false }) ?Collision {
+        var ac = a.collider.*;
+        var bc = b.collider.*;
         switch (ac) {
             .sphere => |*sa| blk: {
                 // negative radius only supported for b
@@ -184,8 +212,8 @@ pub const ImpulseSolver = struct {
     pub fn solve(entity: *EntityCollider.CollisionEntity) void {
         // - [Inelastic collision - Wikipedia](https://en.wikipedia.org/wiki/Inelastic_collision)
 
-        const rba = &entity.a.rigidbody;
-        const rbb = &entity.b.rigidbody;
+        const rba = entity.a.rigidbody;
+        const rbb = entity.b.rigidbody;
 
         var vba = rbb.vel.sub(rba.vel);
         // normal velocity
@@ -248,9 +276,9 @@ pub const PositionSolver = struct {
     };
 
     pub fn solve(entity: *PositionEntity) void {
-        const rba = &entity.entity.a.rigidbody;
-        const rbb = &entity.entity.b.rigidbody;
-        const col = &entity.entity.collision;
+        const rba = entity.entity.a.rigidbody;
+        const rbb = entity.entity.b.rigidbody;
+        const col = entity.entity.collision;
 
         const del = col.normal.scale(@max(col.depth - constants.slop, 0));
 
@@ -340,6 +368,7 @@ pub const Components = struct {
     pub const Rigidbody = struct {
         flags: packed struct {
             pinned: bool = false,
+            player: bool = false,
         } = .{},
         vel: Vec4 = .{},
         force: Vec4 = .{},
