@@ -171,13 +171,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var world = try World.init();
     errdefer world.deinit();
     const player_id = try world.ecs.insert(.{
-        .name = @as([]const u8, "player"),
-        .transform = Components.Transform{ .pos = .{} },
-        .rigidbody = Components.Rigidbody{
+        @as([]const u8, "player"),
+        Components.Transform{ .pos = .{} },
+        Components.Rigidbody{
             .flags = .{ .player = true },
             .mass = 100,
         },
-        // .collider = Components.Collider{ .sphere = .{ .radius = 2 } },
+        // Components.Collider{ .sphere = .{ .radius = 2 } },
     });
 
     var drawcalls = std.ArrayList(DrawCallReserve).init(allocator);
@@ -187,15 +187,15 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const plane_instance_handle = try cpu.batch_reserve(1);
     try drawcalls.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
     _ = try world.ecs.insert(.{
-        .name = @as([]const u8, "floor"),
-        .rigidbody = Components.Rigidbody{
+        @as([]const u8, "floor"),
+        Components.Rigidbody{
             .flags = .{ .pinned = true },
         },
-        // .transform = Components.Transform{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
-        // .collider = Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        // .mesh = plane_mesh_handle,
-        .transform = Components.Transform{ .pos = .{ .y = -3 } },
-        .collider = Components.Collider{ .sphere = .{ .radius = -10 } },
+        // Components.Transform{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
+        // Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        // plane_mesh_handle,
+        Components.Transform{ .pos = .{ .y = -3 } },
+        Components.Collider{ .sphere = .{ .radius = -10 } },
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -217,11 +217,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
         if (i > 2) break;
         _ = try world.ecs.insert(.{
-            .name = @as([]const u8, "persistent balls"),
-            .t = Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
-            .r = Components.Rigidbody{},
-            .c = Components.Collider{ .sphere = .{ .radius = 1 } },
-            .m = sphere_mesh_handle,
+            @as([]const u8, "persistent balls"),
+            Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
+            Components.Rigidbody{},
+            Components.Collider{ .sphere = .{ .radius = 1 } },
+            sphere_mesh_handle,
         });
     }
 
@@ -741,12 +741,12 @@ pub const AppState = struct {
             const dirs = self.camera.dirs();
             const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
             _ = try app.world.ecs.insert(.{
-                .name = @as([]const u8, "bullet"),
-                .transform = Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
-                .rigidbody = Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
-                .collider = Components.Collider{ .sphere = .{ .radius = 1.0 } },
-                .mesh = app.handles.mesh.sphere,
-                .despawn_time = Components.TimeDespawn{ .despawn_time = self.time + 10 },
+                @as([]const u8, "bullet"),
+                Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
+                Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
+                Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                app.handles.mesh.sphere,
+                Components.TimeDespawn{ .despawn_time = self.time + 10 },
             });
             _ = self.cmdbuf_fuse.fuse();
         }
