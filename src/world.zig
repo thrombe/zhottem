@@ -394,7 +394,14 @@ pub const ArchetypeEntity = struct {
 pub const ArchetypeId = usize;
 
 // represents 1 component
-pub const ComponentId = u32;
+pub const ComponentId = packed struct {
+    id: u16,
+    size: u16,
+
+    pub fn lessThan(_: void, a: ComponentId, b: ComponentId) bool {
+        return a.id < b.id;
+    }
+};
 
 pub const Type = struct {
     components: []const ComponentId,
@@ -422,7 +429,7 @@ pub const Type = struct {
             const a = ids[j];
             const b = self.components[i];
 
-            switch (std.math.order(a, b)) {
+            switch (std.math.order(a.id, b.id)) {
                 .eq => {
                     i += 1;
                     j += 1;
@@ -469,8 +476,10 @@ pub const Archetype = struct {
     typ: Type,
     // type erased block of components (same length and order as self.typ.components)
     components: []std.ArrayListAligned(u8, 4),
+    count: u32 = 0,
+    generation: u32 = 0,
 
-    fn from_type(typ: *const Type) !@This() {
+    pub fn from_type(typ: *const Type) !@This() {
         const components = try allocator.alloc(std.ArrayListAligned(u8, 4), typ.components.len);
         errdefer allocator.free(components);
         for (components) |*comp| {
@@ -480,6 +489,22 @@ pub const Archetype = struct {
             .typ = .{ .components = try allocator.dupe(ComponentId, typ.components) },
             .components = components,
         };
+    }
+
+    pub fn swap_remove(self: *@This(), index: usize) void {
+        for (self.components, self.typ.components) |*comp, compid| {
+            if ((index + 1) * compid.size != comp.items.len) {
+                @memcpy(
+                    comp.items[index * compid.size ..][0..compid.size],
+                    comp.items[comp.items.len - compid.size ..],
+                );
+            }
+
+            // arraylist.pop() just does self.items.len -= 1
+            comp.items.len -= compid.size;
+        }
+        self.count -= 1;
+        self.generation += 1;
     }
 
     pub fn deinit(self: *@This()) void {
@@ -567,7 +592,8 @@ pub const EntityComponentStore = struct {
         const comp_id = self.components.count();
         const comp = try self.components.getOrPut(type_id);
         if (!comp.found_existing) {
-            comp.value_ptr.* = @intCast(comp_id);
+            comp.value_ptr.*.id = @intCast(comp_id);
+            comp.value_ptr.*.size = @intCast(@sizeOf(component));
         }
         return comp.value_ptr.*;
     }
@@ -595,7 +621,7 @@ pub const EntityComponentStore = struct {
 
     fn component_ids_sorted_from(self: *@This(), typ: type) ![@typeInfo(typ).Struct.fields.len]ComponentId {
         var components = try self.component_ids_from(typ);
-        std.mem.sort(ComponentId, &components, {}, std.sort.asc(ComponentId));
+        std.mem.sort(ComponentId, &components, {}, ComponentId.lessThan);
         return components;
     }
 
@@ -615,23 +641,23 @@ pub const EntityComponentStore = struct {
             break :blk archeid;
         };
         const archetype = &self.archetypes.items[archeid];
+        defer archetype.count += 1;
 
         inline for (@typeInfo(@TypeOf(components)).Struct.fields) |field| {
             const compid = try self.get_component_id(field.type);
-            const compi = typ.index(compid) orelse unreachable;
+            const compi = archetype.typ.index(compid) orelse unreachable;
             const f = @field(components, field.name);
             const bytes = std.mem.asBytes(&f);
             try archetype.components[compi].appendSlice(bytes);
         }
 
-        const eid = Entity{ .generation = 0, .index = @intCast(self.entities.count()) };
+        const eid = Entity{ .generation = archetype.generation, .index = @intCast(self.entities.count()) };
 
         {
             const compi = typ.index(self.entityid_component_id) orelse unreachable;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
-            const ei: u32 = @intCast(archetype.components[compi].items.len / bytes.len);
-            try self.entities.put(eid, .{ .archetype = archeid, .entity_index = ei - 1 });
+            try self.entities.put(eid, .{ .archetype = archeid, .entity_index = @intCast(archetype.count) });
         }
 
         return eid;
@@ -647,16 +673,28 @@ pub const EntityComponentStore = struct {
             const compid = try self.get_component_id(field.type);
             const compi = archetype.typ.index(compid) orelse unreachable;
             const slice = std.mem.bytesAsSlice(field.type, archetype.components[compi].items);
-            @field(t, field.name) = &slice[entity.index];
+            @field(t, field.name) = &slice[ae.entity_index];
         }
 
         return t;
     }
 
+    pub fn remove(self: *@This(), entity: Entity) !void {
+        const ae = self.entities.fetchSwapRemove(entity) orelse return error.EntityNotFound;
+        const archetype = &self.archetypes.items[ae.value.archetype];
+        defer archetype.swap_remove(ae.value.entity_index);
+
+        if (archetype.count - 1 != ae.value.entity_index) {
+            const entity_ci = archetype.typ.index(self.entityid_component_id) orelse unreachable;
+            const swapped = std.mem.bytesAsSlice(Entity, archetype.components[entity_ci].items)[archetype.count - 1];
+            self.entities.getEntry(swapped).?.value_ptr.entity_index = ae.value.entity_index;
+        }
+    }
+
     pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(typ) {
         const ids = try self.component_ids_from(typ);
         var sorted_ids = ids;
-        std.mem.sort(ComponentId, &sorted_ids, {}, std.sort.asc(ComponentId));
+        std.mem.sort(ComponentId, &sorted_ids, {}, ComponentId.lessThan);
 
         return .{
             .ids = ids,
