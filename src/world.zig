@@ -177,11 +177,10 @@ pub const EntityCollider = struct {
                         sa.center = sa.center.add(a.transform.pos);
                         sa.radius *= a.transform.scale.max_v3();
 
-                        const ba = b.transform.pos.sub(sa.center);
+                        const ba = sa.center.sub(b.transform.pos);
 
                         pb.normal.w = 0;
-                        pb.normal = b.transform.rotation.rotate_vector(pb.normal);
-                        pb.normal = pb.normal.abs().mul(ba.sign()).normalize3D();
+                        pb.normal = b.transform.rotation.rotate_vector(pb.normal).normalize3D();
 
                         const dist = ba.dot(pb.normal) - sa.radius;
 
@@ -190,7 +189,7 @@ pub const EntityCollider = struct {
                         }
 
                         return .{
-                            .normal = pb.normal,
+                            .normal = pb.normal.scale(-1),
                             .depth = @abs(dist),
                         };
                     },
