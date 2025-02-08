@@ -393,7 +393,7 @@ pub const ArchetypeEntity = struct {
 };
 
 // index into self.archetypes
-pub const ArchetypeId = usize;
+pub const ArchetypeId = u32;
 
 // represents 1 component
 pub const ComponentId = packed struct {
@@ -639,7 +639,7 @@ pub const EntityComponentStore = struct {
             const archeid = self.archetypes.items.len;
             try self.archetypes.append(archetype);
 
-            try self.archetype_map.put(archetype.typ, archeid);
+            try self.archetype_map.put(archetype.typ, @intCast(archeid));
 
             break :blk archeid;
         };
@@ -663,7 +663,7 @@ pub const EntityComponentStore = struct {
             const compi = typ.index(self.entityid_component_id) orelse unreachable;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
-            try self.entities.put(eid, .{ .archetype = archeid, .entity_index = @intCast(archetype.count) });
+            try self.entities.put(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
         }
 
         return eid;
