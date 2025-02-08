@@ -477,15 +477,15 @@ pub const Type = struct {
 pub const Archetype = struct {
     typ: Type,
     // type erased block of components (same length and order as self.typ.components)
-    components: []std.ArrayListAligned(u8, 4),
+    components: []std.ArrayListAligned(u8, 8),
     count: u32 = 0,
     generation: u32 = 0,
 
     pub fn from_type(typ: *const Type) !@This() {
-        const components = try allocator.alloc(std.ArrayListAligned(u8, 4), typ.components.len);
+        const components = try allocator.alloc(std.ArrayListAligned(u8, 8), typ.components.len);
         errdefer allocator.free(components);
         for (components) |*comp| {
-            comp.* = std.ArrayListAligned(u8, 4).init(allocator);
+            comp.* = std.ArrayListAligned(u8, 8).init(allocator);
         }
         return .{
             .typ = .{ .components = try allocator.dupe(ComponentId, typ.components) },
