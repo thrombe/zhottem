@@ -341,22 +341,19 @@ pub const Components = struct {
                     s.center = s.center.add(transform.pos);
                     s.radius *= transform.scale.max_v3();
 
-                    const oc = ro.sub(s.center);
-                    const a = 1.0; // assuming rd is normalized
-                    const b = 2.0 * oc.dot(rd);
-                    const c = oc.dot(oc) - s.radius * s.radius;
+                    const oc = s.center.sub(ro);
+                    const b = oc.dot(rd);
+                    const c = oc.dot(oc) - b * b;
 
-                    const d = b * b - 4 * a * c;
+                    if (c > s.radius * s.radius) return null;
 
-                    if (d < 0) {
-                        return null;
-                    }
+                    const d = @sqrt(s.radius * s.radius - c);
+                    const t0 = @min(b - d, b + d);
+                    const t1 = @max(b - d, b + d);
 
-                    if (-b - d > 0) {
-                        return (-b - d) / (2 * a);
-                    }
-
-                    return (-b + d) / (2 * a);
+                    if (t0 < 0 and t1 < 0) return null;
+                    if (t0 < 0) return t1;
+                    return t0;
                 },
                 .plane => |p| {
                     _ = p;
