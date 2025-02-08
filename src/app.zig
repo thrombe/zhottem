@@ -174,28 +174,74 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         @as([]const u8, "player"),
         Components.Transform{ .pos = .{} },
         Components.Rigidbody{
-            .flags = .{ .player = true },
-            .mass = 100,
+            .flags = .{ .player = false },
+            .mass = 2,
+            .dynamic_friction = 1.0,
         },
-        // Components.Collider{ .sphere = .{ .radius = 2 } },
+        Components.Collider{ .sphere = .{ .radius = 1 } },
     });
 
     var drawcalls = std.ArrayList(DrawCallReserve).init(allocator);
     errdefer drawcalls.deinit();
 
     const plane_mesh_handle = try cpu.add_mesh(&plane);
-    const plane_instance_handle = try cpu.batch_reserve(1);
+    const plane_instance_handle = try cpu.batch_reserve(10);
     try drawcalls.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
+    // _ = try world.ecs.insert(.{
+    //     Components.Rigidbody{
+    //         .flags = .{ .pinned = true },
+    //     },
+    //     Components.Transform{ .pos = .{ .y = -3 } },
+    //     Components.Collider{ .sphere = .{ .radius = -10 } },
+    // });
     _ = try world.ecs.insert(.{
-        @as([]const u8, "floor"),
-        Components.Rigidbody{
-            .flags = .{ .pinned = true },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .dynamic_friction = 1 },
+        Components.Transform{
+            .pos = .{ .y = -3 },
+            .scale = Vec4.splat3(50),
         },
-        // Components.Transform{ .pos = .{ .y = -3 }, .scale = Vec4.splat3(100) },
-        // Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        // plane_mesh_handle,
-        Components.Transform{ .pos = .{ .y = -3 } },
-        Components.Collider{ .sphere = .{ .radius = -10 } },
+        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        plane_mesh_handle,
+    });
+    _ = try world.ecs.insert(.{
+        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Transform{
+            .pos = .{ .y = 50, .x = 50 },
+            .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
+            .scale = Vec4.splat3(50),
+        },
+        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        plane_mesh_handle,
+    });
+    _ = try world.ecs.insert(.{
+        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Transform{
+            .pos = .{ .y = 50, .x = -50 },
+            .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
+            .scale = Vec4.splat3(50),
+        },
+        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        plane_mesh_handle,
+    });
+    _ = try world.ecs.insert(.{
+        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Transform{
+            .pos = .{ .y = 50, .z = 50 },
+            .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
+            .scale = Vec4.splat3(50),
+        },
+        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        plane_mesh_handle,
+    });
+    _ = try world.ecs.insert(.{
+        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Transform{
+            .pos = .{ .y = 50, .z = -50 },
+            .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
+            .scale = Vec4.splat3(50),
+        },
+        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        plane_mesh_handle,
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -687,8 +733,7 @@ pub const AppState = struct {
                 speed *= 0.1;
             }
 
-            speed *= 10 * self.camera.speed;
-            speed = std.math.clamp(speed, -10, 10);
+            speed *= 50 * self.camera.speed;
             speed *= player.r.mass;
 
             if (kb.w.pressed()) {
@@ -719,7 +764,7 @@ pub const AppState = struct {
             var it = try app.world.ecs.iterator(T);
             while (it.next()) |e| {
                 if (!e.r.flags.player and !e.r.flags.pinned and mouse.left.pressed()) {
-                    if (e.c.raycast(e.t, self.camera.pos, fwd)) |t| {
+                    if (e.c.raycast(e.t, self.camera.pos.add(fwd.scale(1.1)), fwd)) |t| {
                         if (t_min == null) {
                             t_min = t;
                             closest = e;
@@ -743,7 +788,7 @@ pub const AppState = struct {
             _ = try app.world.ecs.insert(.{
                 @as([]const u8, "bullet"),
                 Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
-                Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1 },
+                Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
                 Components.Collider{ .sphere = .{ .radius = 1.0 } },
                 app.handles.mesh.sphere,
                 Components.TimeDespawn{ .despawn_time = self.time + 10 },
@@ -771,14 +816,14 @@ pub const AppState = struct {
             }
         }
 
-        for (app.drawcalls.items) |*dc| {
-            dc.reset();
-        }
-
         const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
         self.camera.pos = player.t.pos;
 
         {
+            for (app.drawcalls.items) |*dc| {
+                dc.reset();
+            }
+
             var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: GpuResourceManager.MeshResourceHandle });
             while (it.next()) |e| {
                 const instance = blk: {
