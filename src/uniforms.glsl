@@ -41,8 +41,10 @@
  const int _bind_vertex = 0;
  const int _bind_instance = 1;
 
- const int _bind_instance_transform = 0;
- const int _bind_vertex_position = 4;
- const int _bind_normal = 5;
- const int _bind_uv = 6;
+ const int _bind_instance_bone_offset = 0;
+ const int _bind_vertex_position = 1;
+ const int _bind_normal = 2;
+ const int _bind_uv = 3;
+ const int _bind_bone_ids = 4;
+ const int _bind_bone_weights = 5;
 

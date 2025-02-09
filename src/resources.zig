@@ -44,11 +44,25 @@ pub const Vertex = extern struct {
             .format = .r32g32_sfloat,
             .offset = @offsetOf(Vertex, "uv"),
         },
+        .{
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.bone_ids.bind(),
+            .format = .r32g32b32a32_sint,
+            .offset = @offsetOf(Vertex, "bone_ids"),
+        },
+        .{
+            .binding = VertexBinds.vertex.bind(),
+            .location = VertexInputLocations.bone_weights.bind(),
+            .format = .r32g32b32a32_sfloat,
+            .offset = @offsetOf(Vertex, "bone_weights"),
+        },
     };
 
     pos: [4]f32,
     normal: [4]f32,
     uv: [4]f32,
+    bone_ids: [4]u32,
+    bone_weights: [4]f32,
 
     pub fn from_slices(vertices: [][3]f32, normals: [][3]f32, uvs: [][2]f32) ![]@This() {
         const buf = try allocator.alloc(@This(), vertices.len);
@@ -75,31 +89,13 @@ pub const Instance = extern struct {
     pub const attribute_desc = [_]vk.VertexInputAttributeDescription{
         .{
             .binding = VertexBinds.instance.bind(),
-            .location = VertexInputLocations.instance_transform.bind(),
-            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
-            .offset = @offsetOf(Instance, "transform"),
-        },
-        .{
-            .binding = VertexBinds.instance.bind(),
-            .location = VertexInputLocations.instance_transform.bind() + 1,
-            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
-            .offset = @offsetOf(Instance, "transform") + 4 * 4,
-        },
-        .{
-            .binding = VertexBinds.instance.bind(),
-            .location = VertexInputLocations.instance_transform.bind() + 2,
-            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
-            .offset = @offsetOf(Instance, "transform") + 8 * 4,
-        },
-        .{
-            .binding = VertexBinds.instance.bind(),
-            .location = VertexInputLocations.instance_transform.bind() + 3,
-            .format = .r32g32b32a32_sfloat, // there's no matrix type in here
-            .offset = @offsetOf(Instance, "transform") + 12 * 4,
+            .location = VertexInputLocations.instance_bone_offset.bind(),
+            .format = .r32_uint,
+            .offset = @offsetOf(Instance, "bone_offset"),
         },
     };
 
-    transform: math.Mat4x4,
+    bone_offset: u32,
 };
 
 pub const VertexBinds = enum(u32) {
@@ -113,10 +109,12 @@ pub const VertexBinds = enum(u32) {
 
 // so input locations are just numbers but you still have to reserve them if you want to store more than 4 floats worth of data? tf?
 pub const VertexInputLocations = enum(u32) {
-    instance_transform = 0,
-    vertex_position = 4,
-    normal = 5,
-    uv = 6,
+    instance_bone_offset,
+    vertex_position,
+    normal,
+    uv,
+    bone_ids,
+    bone_weights,
 
     pub fn bind(self: @This()) u32 {
         return @intFromEnum(self);
@@ -132,7 +130,56 @@ pub const UniformBinds = enum(u32) {
     }
 };
 
-pub const DrawCallReserve = struct {
+pub const InstanceManager = struct {
+    instances: std.ArrayList(InstanceAllocator),
+    bones: GpuResourceManager.BonesResourceHandle,
+    bone_count: u32 = 0,
+
+    pub fn init(bones: GpuResourceManager.BonesResourceHandle) @This() {
+        return .{
+            .instances = std.ArrayList(InstanceAllocator).init(allocator),
+            .bones = bones,
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.instances.deinit();
+    }
+
+    pub fn reserve_instance(self: *@This(), mesh: GpuResourceManager.MeshResourceHandle) ?u32 {
+        for (self.instances.items) |*item| {
+            if (item.maybe_reserve(mesh)) |index| {
+                return index;
+            }
+        }
+
+        return null;
+    }
+
+    // index of first. reserves first..first+num
+    pub fn reserve_bones(self: *@This(), num: u32) ?u32 {
+        if (self.bones.count < self.bone_count + num) {
+            return null;
+        }
+
+        defer self.bone_count += num;
+        return self.bones.first + self.bone_count;
+    }
+
+    pub fn reset(self: *@This()) void {
+        for (self.instances.items) |*item| {
+            item.reset();
+        }
+        self.bone_count = 0;
+    }
+};
+
+pub const InstanceAllocator = struct {
+    // we can only instance a contiguous chunk of instances (in gpu memory)
+    // but we might want to delete entities randomly
+    // so we have this abstraction that bump allocates instance buffer memory each frame
+    // for each type of instance we might want to render.
+
     mesh: GpuResourceManager.MeshResourceHandle,
     instances: GpuResourceManager.BatchedInstanceResourceHandle,
     count: u32 = 0,
@@ -146,12 +193,11 @@ pub const DrawCallReserve = struct {
         return self.count + self.instances.first - 1;
     }
 
-    pub fn maybe_reserve(self: *@This(), mesh: GpuResourceManager.MeshResourceHandle) u32 {
+    pub fn maybe_reserve(self: *@This(), mesh: GpuResourceManager.MeshResourceHandle) ?u32 {
         if (std.meta.eql(self.mesh, mesh)) {
-            _ = self.reserve();
-            return self.count + self.instances.first - 1;
+            return self.reserve();
         }
-        return 0;
+        return null;
     }
 
     pub fn draw(
@@ -200,20 +246,28 @@ pub const GpuResourceManager = struct {
         first: u32,
         count: u32,
     };
+    pub const BonesResourceHandle = struct {
+        first: u32,
+        count: u32,
+    };
+
     pub const CpuResources = struct {
         vertices: Vertices,
         triangles: Triangles,
         instances: Instances,
+        bones: Bones,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
         const Instances = std.ArrayList(Instance);
+        const Bones = std.ArrayList(math.Mat4x4);
 
         pub fn init() @This() {
             return .{
                 .vertices = Vertices.init(allocator),
                 .triangles = Triangles.init(allocator),
                 .instances = Instances.init(allocator),
+                .bones = Bones.init(allocator),
             };
         }
 
@@ -221,6 +275,7 @@ pub const GpuResourceManager = struct {
             self.vertices.deinit();
             self.triangles.deinit();
             self.instances.deinit();
+            self.bones.deinit();
         }
 
         pub fn add_mesh(self: *@This(), m: *mesh_mod.Mesh) !MeshResourceHandle {
@@ -278,6 +333,16 @@ pub const GpuResourceManager = struct {
             };
         }
 
+        pub fn reserve_bones(self: *@This(), num: usize) !BonesResourceHandle {
+            const first = self.instances.items.len;
+            try self.bones.appendNTimes(std.mem.zeroes(math.Mat4x4), num);
+
+            return .{
+                .first = @intCast(first),
+                .count = @intCast(num),
+            };
+        }
+
         pub fn upload(self: *@This(), engine: *Engine, pool: vk.CommandPool) !GpuResources {
             return try GpuResources.init(self, engine, pool);
         }
@@ -289,6 +354,7 @@ pub const GpuResourceManager = struct {
         vertex_buffer: Buffer,
         index_buffer: Buffer,
         instance_buffer: Buffer,
+        bone_buffer: Buffer,
 
         pub fn init(cpu: *CpuResources, engine: *Engine, pool: vk.CommandPool) !@This() {
             const ctx = &engine.graphics;
@@ -314,10 +380,21 @@ pub const GpuResourceManager = struct {
             }, cpu.instances.items, pool);
             errdefer instance_buffer.deinit(device);
 
+            var bone_buffer = try Buffer.new_from_slice(ctx, .{
+                .usage = .{ .storage_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, cpu.bones.items, pool);
+            errdefer bone_buffer.deinit(device);
+
             return .{
                 .vertex_buffer = vertex_buffer,
                 .index_buffer = index_buffer,
                 .instance_buffer = instance_buffer,
+                .bone_buffer = bone_buffer,
             };
         }
 
@@ -325,14 +402,23 @@ pub const GpuResourceManager = struct {
             const data = try device.mapMemory(self.instance_buffer.memory, 0, vk.WHOLE_SIZE, .{});
             defer device.unmapMemory(self.instance_buffer.memory);
 
-            const gpu_vertices: [*]Instance = @ptrCast(@alignCast(data));
-            @memcpy(gpu_vertices[0..instances.len], instances);
+            const gpu_items: [*]Instance = @ptrCast(@alignCast(data));
+            @memcpy(gpu_items[0..instances.len], instances);
+        }
+
+        pub fn update_bones(self: *@This(), device: *Device, bones: []math.Mat4x4) !void {
+            const data = try device.mapMemory(self.bone_buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(self.bone_buffer.memory);
+
+            const gpu_items: [*]math.Mat4x4 = @ptrCast(@alignCast(data));
+            @memcpy(gpu_items[0..bones.len], bones);
         }
 
         pub fn deinit(self: *@This(), device: *Device) void {
             self.vertex_buffer.deinit(device);
             self.index_buffer.deinit(device);
             self.instance_buffer.deinit(device);
+            self.bone_buffer.deinit(device);
         }
     };
 };

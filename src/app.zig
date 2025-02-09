@@ -37,7 +37,8 @@ const Entity = world_mod.Entity;
 
 const resources_mod = @import("resources.zig");
 const GpuResourceManager = resources_mod.GpuResourceManager;
-const DrawCallReserve = resources_mod.DrawCallReserve;
+const InstanceManager = resources_mod.InstanceManager;
+const InstanceAllocator = resources_mod.InstanceAllocator;
 
 const main = @import("main.zig");
 const allocator = main.allocator;
@@ -52,7 +53,7 @@ screen_image: Image,
 depth_image: Image,
 cpu_resources: GpuResourceManager.CpuResources,
 gpu_resources: GpuResourceManager.GpuResources,
-drawcalls: std.ArrayList(DrawCallReserve),
+instance_manager: InstanceManager,
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
@@ -146,27 +147,39 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var gltf = try mesh_mod.Gltf.parse_glb("./assets/well.glb");
+    var gltf = try mesh_mod.Gltf.parse_glb("./assets/dance.glb");
     defer gltf.deinit();
-    var object = try gltf.to_mesh();
-    defer object.deinit();
+    // const model = try gltf.to_model("Cube.015", "metarig");
 
     // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     // defer object.deinit();
 
-    // var cube = try mesh.Mesh.cube();
-    // defer cube.deinit();
+    var cube = try mesh_mod.Mesh.cube();
+    defer cube.deinit();
 
     var plane = try mesh_mod.Mesh.plane();
     defer plane.deinit();
 
     var sphere_gltf = try mesh_mod.Gltf.parse_glb("./assets/sphere.glb");
     defer sphere_gltf.deinit();
-    var sphere = try sphere_gltf.to_mesh();
-    defer sphere.deinit();
+    // var sphere = try sphere_gltf.to_mesh();
+    // defer sphere.deinit();
 
     var cpu = GpuResourceManager.CpuResources.init();
     errdefer cpu.deinit();
+
+    const bones_handle = try cpu.reserve_bones(1500);
+
+    var instance_manager = InstanceManager.init(bones_handle);
+    errdefer instance_manager.deinit();
+
+    const plane_mesh_handle = try cpu.add_mesh(&plane);
+    const plane_instance_handle = try cpu.batch_reserve(10);
+    try instance_manager.instances.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
+
+    const sphere_mesh_handle = try cpu.add_mesh(&cube);
+    const sphere_instance_handle = try cpu.batch_reserve(1000);
+    try instance_manager.instances.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
 
     var world = try World.init();
     errdefer world.deinit();
@@ -181,12 +194,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.Collider{ .sphere = .{ .radius = 1 } },
     });
 
-    var drawcalls = std.ArrayList(DrawCallReserve).init(allocator);
-    errdefer drawcalls.deinit();
-
-    const plane_mesh_handle = try cpu.add_mesh(&plane);
-    const plane_instance_handle = try cpu.batch_reserve(10);
-    try drawcalls.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
     // _ = try world.ecs.insert(.{
     //     Components.Rigidbody{
     //         .flags = .{ .pinned = true },
@@ -201,7 +208,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        plane_mesh_handle,
+        Components.AnimatedRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -211,7 +218,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        plane_mesh_handle,
+        Components.AnimatedRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -221,7 +228,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        plane_mesh_handle,
+        Components.AnimatedRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -231,7 +238,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        plane_mesh_handle,
+        Components.AnimatedRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -241,7 +248,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        plane_mesh_handle,
+        Components.AnimatedRender{ .mesh = plane_mesh_handle },
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -257,9 +264,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     .mesh = object_mesh_handle,
     // });
 
-    const sphere_mesh_handle = try cpu.add_mesh(&sphere);
-    const sphere_instance_handle = try cpu.batch_reserve(5000);
-    try drawcalls.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
     for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
         if (i > 2) break;
         _ = try world.ecs.insert(.{
@@ -267,7 +271,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
             Components.Rigidbody{},
             Components.Collider{ .sphere = .{ .radius = 1 } },
-            sphere_mesh_handle,
+            Components.AnimatedRender{ .mesh = sphere_mesh_handle },
         });
     }
 
@@ -287,6 +291,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     defer model_desc_set_builder.deinit();
     try model_desc_set_builder.add(&model_uniform);
     try model_desc_set_builder.add(&gpu_img);
+    try model_desc_set_builder.add(&gpu.bone_buffer);
     var model_desc_set = try model_desc_set_builder.build(device);
     errdefer model_desc_set.deinit(device);
 
@@ -301,7 +306,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .depth_image = depth,
         .gpu_resources = gpu,
         .cpu_resources = cpu,
-        .drawcalls = drawcalls,
+        .instance_manager = instance_manager,
         .descriptor_pool = desc_pool,
         .camera_descriptor_set = camera_desc_set,
         .model_descriptor_set = model_desc_set,
@@ -329,7 +334,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.depth_image.deinit(device);
     defer self.cpu_resources.deinit();
     defer self.gpu_resources.deinit(device);
-    defer self.drawcalls.deinit();
+    defer self.instance_manager.deinit();
     defer self.camera_descriptor_set.deinit(device);
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
@@ -351,6 +356,7 @@ pub fn present(
 
     try self.uniforms.upload(&ctx.device);
     try self.gpu_resources.update_instances(&ctx.device, self.cpu_resources.instances.items);
+    try self.gpu_resources.update_bones(&ctx.device, self.cpu_resources.bones.items);
 
     return dynamic_state.swapchain.present_end(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, current_si) catch |err| switch (err) {
         error.OutOfDateKHR => return .suboptimal,
@@ -486,7 +492,7 @@ pub const RendererState = struct {
         // these offsets are for each dynamic descriptor.
         // basically - you bind a buffer of objects in the desc set, and just tell
         // it what offset you want for that data here.
-        for (app.drawcalls.items) |call| {
+        for (app.instance_manager.instances.items) |call| {
             call.draw(
                 &self.pipeline,
                 &[_]vk.DescriptorSet{
@@ -790,7 +796,7 @@ pub const AppState = struct {
                 Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
                 Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
                 Components.Collider{ .sphere = .{ .radius = 1.0 } },
-                app.handles.mesh.sphere,
+                Components.AnimatedRender{ .mesh = app.handles.mesh.sphere },
                 Components.TimeDespawn{ .despawn_time = self.time + 10 },
             });
             _ = self.cmdbuf_fuse.fuse();
@@ -820,20 +826,21 @@ pub const AppState = struct {
         self.camera.pos = player.t.pos;
 
         {
-            for (app.drawcalls.items) |*dc| {
-                dc.reset();
-            }
+            app.instance_manager.reset();
 
-            var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: GpuResourceManager.MeshResourceHandle });
+            var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.AnimatedRender });
             while (it.next()) |e| {
-                const instance = blk: {
-                    var count: u32 = 0;
-                    for (app.drawcalls.items) |*dc| {
-                        count += dc.maybe_reserve(e.m.*);
+                const instance = app.instance_manager.reserve_instance(e.m.mesh);
+                if (instance) |instance_index| {
+                    const first_bone = app.instance_manager.reserve_bones(1);
+
+                    if (first_bone) |bone_index| {
+                        app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
+                        app.cpu_resources.bones.items[bone_index] = e.t.mat4();
+                    } else {
+                        app.cpu_resources.instances.items[instance_index].bone_offset = 0;
                     }
-                    break :blk count;
-                };
-                app.cpu_resources.instances.items[instance].transform = e.t.mat4();
+                }
             }
         }
     }

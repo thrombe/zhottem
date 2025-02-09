@@ -27,7 +27,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.Rigidbody);
         _ = try self.ecs.register(Components.Collider);
         _ = try self.ecs.register(Components.TimeDespawn);
-        _ = try self.ecs.register(GpuResourceManager.MeshResourceHandle);
+        _ = try self.ecs.register(Components.AnimatedRender);
 
         return self;
     }
@@ -377,6 +377,10 @@ pub const Components = struct {
 
     pub const TimeDespawn = struct {
         despawn_time: f32,
+    };
+
+    pub const AnimatedRender = struct {
+        mesh: GpuResourceManager.MeshResourceHandle,
     };
 };
 

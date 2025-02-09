@@ -15,11 +15,16 @@ void set_seed(int id) {
     layout(set = 1, binding = 0) uniform UboModel {
         mat4 model_mat;
     };
+    layout(set = 1, binding = 2) readonly buffer BoneBuffer {
+        mat4 bones[];
+    };
 
     layout(location = _bind_vertex_position) in vec3 vpos;
     layout(location = _bind_normal) in vec3 vnormal;
     layout(location = _bind_uv) in vec2 uv;
-    layout(location = _bind_instance_transform) in mat4 itransform;
+    layout(location = _bind_bone_ids) in uvec4 bone_ids;
+    layout(location = _bind_bone_weights) in vec4 bone_weights;
+    layout(location = _bind_instance_bone_offset) in uint bone_offset;
 
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
@@ -27,6 +32,7 @@ void set_seed(int id) {
     layout(location = 3) out float light;
     void main() {
         vec4 pos = vec4(vpos, 1.0);
+        mat4 itransform = bones[bone_offset];
         vec4 normal = itransform * vec4(vnormal, 0.0);
         normal = normalize(normal);
         vec4 light_dir = vec4(1.0, 1.0, 1.0, 0.0);
