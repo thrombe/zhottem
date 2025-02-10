@@ -47,7 +47,7 @@ pub const Vertex = extern struct {
         .{
             .binding = VertexBinds.vertex.bind(),
             .location = VertexInputLocations.bone_ids.bind(),
-            .format = .r32g32b32a32_sint,
+            .format = .r32g32b32a32_uint,
             .offset = @offsetOf(Vertex, "bone_ids"),
         },
         .{
@@ -250,17 +250,23 @@ pub const GpuResourceManager = struct {
         first: u32,
         count: u32,
     };
+    pub const ModelHandle = struct {
+        mesh: MeshResourceHandle,
+        index: u32,
+    };
 
     pub const CpuResources = struct {
         vertices: Vertices,
         triangles: Triangles,
         instances: Instances,
         bones: Bones,
+        models: Models,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
         const Instances = std.ArrayList(Instance);
         const Bones = std.ArrayList(math.Mat4x4);
+        const Models = std.ArrayList(mesh_mod.Model);
 
         pub fn init() @This() {
             return .{
@@ -268,6 +274,7 @@ pub const GpuResourceManager = struct {
                 .triangles = Triangles.init(allocator),
                 .instances = Instances.init(allocator),
                 .bones = Bones.init(allocator),
+                .models = Models.init(allocator),
             };
         }
 
@@ -276,9 +283,22 @@ pub const GpuResourceManager = struct {
             self.triangles.deinit();
             self.instances.deinit();
             self.bones.deinit();
+            self.models.deinit();
         }
 
-        pub fn add_mesh(self: *@This(), m: *mesh_mod.Mesh) !MeshResourceHandle {
+        pub fn add_model(self: *@This(), m: mesh_mod.Model) !ModelHandle {
+            const model_handle = self.models.items.len;
+
+            try self.models.append(m);
+            const mesh = try self.add_mesh(&m.mesh);
+
+            return .{
+                .mesh = mesh,
+                .index = @intCast(model_handle),
+            };
+        }
+
+        pub fn add_mesh(self: *@This(), m: *const mesh_mod.Mesh) !MeshResourceHandle {
             const handle = MeshResourceHandle{
                 .index = .{
                     .first = @intCast(self.triangles.items.len * 3),
@@ -290,11 +310,16 @@ pub const GpuResourceManager = struct {
                 },
             };
 
-            for (m.vertices, m.normals, m.uvs) |v, n, uv| {
+            for (m.vertices, m.normals, m.uvs, m.bones) |v, n, uv, bone| {
                 var vertex = std.mem.zeroes(Vertex);
                 vertex.pos = [4]f32{ v[0], v[1], v[2], 0 };
                 vertex.normal = [4]f32{ n[0], n[1], n[2], 0 };
                 vertex.uv = [4]f32{ uv[0], uv[1], 0, 0 };
+
+                for (bone[0..@min(4, bone.len)], 0..) |b, i| {
+                    vertex.bone_ids[i] = b.bone;
+                    vertex.bone_weights[i] = b.weight;
+                }
 
                 try self.vertices.append(vertex);
             }

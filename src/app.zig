@@ -65,8 +65,8 @@ texture: Image,
 
 handles: struct {
     player: Entity,
-    mesh: struct {
-        sphere: GpuResourceManager.MeshResourceHandle,
+    model: struct {
+        sphere: GpuResourceManager.ModelHandle,
     },
 },
 
@@ -148,8 +148,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer gpu_img.deinit(device);
 
     var gltf = try mesh_mod.Gltf.parse_glb("./assets/dance.glb");
-    defer gltf.deinit();
+    // defer gltf.deinit();
     // const model = try gltf.to_model("Cube.015", "metarig");
+    const sphere = try gltf.to_model("Cube.015", "metarig");
 
     // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     // defer object.deinit();
@@ -160,9 +161,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var plane = try mesh_mod.Mesh.plane();
     defer plane.deinit();
 
-    var sphere_gltf = try mesh_mod.Gltf.parse_glb("./assets/sphere.glb");
-    defer sphere_gltf.deinit();
-    // var sphere = try sphere_gltf.to_mesh();
+    // var sphere_gltf = try mesh_mod.Gltf.parse_glb("./assets/sphere.glb");
+    // defer sphere_gltf.deinit();
+    // const sphere = try sphere_gltf.to_model();
     // defer sphere.deinit();
 
     var cpu = GpuResourceManager.CpuResources.init();
@@ -177,7 +178,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const plane_instance_handle = try cpu.batch_reserve(10);
     try instance_manager.instances.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
 
-    const sphere_mesh_handle = try cpu.add_mesh(&cube);
+    const sphere_model_handle = try cpu.add_model(sphere);
+    const sphere_mesh_handle = sphere_model_handle.mesh;
     const sphere_instance_handle = try cpu.batch_reserve(1000);
     try instance_manager.instances.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
 
@@ -208,7 +210,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.AnimatedRender{ .mesh = plane_mesh_handle },
+        Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -218,7 +220,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.AnimatedRender{ .mesh = plane_mesh_handle },
+        Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -228,7 +230,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.AnimatedRender{ .mesh = plane_mesh_handle },
+        Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -238,7 +240,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.AnimatedRender{ .mesh = plane_mesh_handle },
+        Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
         Components.Rigidbody{ .flags = .{ .pinned = true } },
@@ -248,7 +250,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .scale = Vec4.splat3(50),
         },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.AnimatedRender{ .mesh = plane_mesh_handle },
+        Components.StaticRender{ .mesh = plane_mesh_handle },
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -264,16 +266,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     .mesh = object_mesh_handle,
     // });
 
-    for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
-        if (i > 2) break;
-        _ = try world.ecs.insert(.{
-            @as([]const u8, "persistent balls"),
-            Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
-            Components.Rigidbody{},
-            Components.Collider{ .sphere = .{ .radius = 1 } },
-            Components.AnimatedRender{ .mesh = sphere_mesh_handle },
-        });
-    }
+    // for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
+    //     if (i > 2) break;
+    //     _ = try world.ecs.insert(.{
+    //         @as([]const u8, "persistent balls"),
+    //         Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
+    //         Components.Rigidbody{},
+    //         Components.Collider{ .sphere = .{ .radius = 1 } },
+    //         Components.AnimatedRender{ .model = sphere_model_handle },
+    //     });
+    // }
 
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
@@ -318,8 +320,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
         .handles = .{
             .player = player_id,
-            .mesh = .{
-                .sphere = sphere_mesh_handle,
+            .model = .{
+                .sphere = sphere_model_handle,
             },
         },
     };
@@ -789,6 +791,13 @@ pub const AppState = struct {
         try app.world.tick(self, delta);
 
         if (mouse.right.pressed()) {
+            const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+            errdefer allocator.free(bones);
+            const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+            errdefer allocator.free(indices);
+            @memset(bones, .{});
+            @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+
             const dirs = self.camera.dirs();
             const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
             _ = try app.world.ecs.insert(.{
@@ -796,7 +805,7 @@ pub const AppState = struct {
                 Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
                 Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
                 Components.Collider{ .sphere = .{ .radius = 1.0 } },
-                Components.AnimatedRender{ .mesh = app.handles.mesh.sphere },
+                Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                 Components.TimeDespawn{ .despawn_time = self.time + 10 },
             });
             _ = self.cmdbuf_fuse.fuse();
@@ -806,9 +815,11 @@ pub const AppState = struct {
             var to_remove = std.ArrayList(Entity).init(allocator);
             defer to_remove.deinit();
 
-            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
+            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn, m: Components.AnimatedRender });
             while (it.next()) |e| {
                 if (e.ds.despawn_time < self.time) {
+                    allocator.free(e.m.bones);
+                    allocator.free(e.m.indices);
                     try to_remove.append(e.id.*);
                 }
             }
@@ -822,23 +833,127 @@ pub const AppState = struct {
             }
         }
 
+        {
+            const animate = struct {
+                fn animate(ar: *Components.AnimatedRender, model: *mesh_mod.Model, time: f32) bool {
+                    const animation = model.animations[0];
+                    const bones = model.bones;
+                    const indices = ar.indices;
+
+                    for (ar.bones) |*t| {
+                        t.* = math.Mat4x4.scaling_mat(Vec4.splat3(1));
+                    }
+
+                    var updated = false;
+                    for (ar.bones, 0..) |*arb, i| {
+                        var out_t = math.Vec4{ .w = 1 };
+                        if (get_lerped(&out_t, animation.bones[i].translation_keyframes.items, &indices[i].translation, time)) {
+                            updated = true;
+                        }
+                        var out_r = math.Vec4.quat_identity_rot();
+                        if (get_lerped(&out_r, animation.bones[i].rotation_keyframes.items, &indices[i].rotation, time)) {
+                            updated = true;
+                        }
+                        var out_s = math.Vec4.splat4(1);
+                        if (get_lerped(&out_s, animation.bones[i].scale_keyframes.items, &indices[i].scale, time)) {
+                            updated = true;
+                        }
+
+                        arb.* = math.Mat4x4.translation_mat(out_t).mul_mat(math.Mat4x4.rot_mat_from_quat(out_r)).mul_mat(math.Mat4x4.scaling_mat(out_s));
+                    }
+
+                    for (bones, 0..) |*b, i| {
+                        if (b.parent == null) {
+                            apply(ar, b.children, bones, ar.bones[i]);
+                        }
+                    }
+
+                    return updated;
+                }
+
+                fn get_lerped(out: *math.Vec4, keyframes: []mesh_mod.Keyframe, curr: *u32, time: f32) bool {
+                    // check if i have to increment keyframe index
+                    // calculate dt for this keyframe
+                    // lerp
+                    // store
+
+                    if (keyframes.len <= curr.*) return false;
+                    if (time > keyframes[curr.*].time and keyframes.len > curr.* + 1) curr.* += 1;
+
+                    const curr_v = keyframes[curr.*];
+
+                    if (keyframes.len == curr.* + 1) {
+                        out.* = curr_v.value;
+                        return false;
+                    }
+                    const next_v = keyframes[curr.* + 1];
+
+                    const t = (time - curr_v.time) / (next_v.time - curr_v.time);
+
+                    out.* = curr_v.value.mix(next_v.value, std.math.clamp(t, 0, 1));
+                    return true;
+                }
+
+                fn apply(ar: *Components.AnimatedRender, ids: []const mesh_mod.BoneId, bones: []mesh_mod.Bone, t: math.Mat4x4) void {
+                    for (ids) |bone_id| {
+                        ar.bones[bone_id] = t.mul_mat(ar.bones[bone_id]);
+                        apply(ar, bones[bone_id].children, bones, ar.bones[bone_id]);
+                    }
+                }
+            }.animate;
+
+            var it = try app.world.ecs.iterator(struct { m: Components.AnimatedRender });
+            while (it.next()) |e| {
+                const model = &app.cpu_resources.models.items[app.handles.model.sphere.index];
+                const a: *Components.AnimatedRender = e.m;
+                a.time += delta;
+
+                if (!animate(a, model, a.time)) {
+                    a.time = 0;
+                    @memset(a.indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+                }
+            }
+        }
+
         const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
         self.camera.pos = player.t.pos;
 
         {
             app.instance_manager.reset();
 
-            var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.AnimatedRender });
-            while (it.next()) |e| {
-                const instance = app.instance_manager.reserve_instance(e.m.mesh);
-                if (instance) |instance_index| {
-                    const first_bone = app.instance_manager.reserve_bones(1);
+            {
+                var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.StaticRender });
+                while (it.next()) |e| {
+                    const instance = app.instance_manager.reserve_instance(e.m.mesh);
+                    if (instance) |instance_index| {
+                        const first_bone = app.instance_manager.reserve_bones(1);
 
-                    if (first_bone) |bone_index| {
-                        app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
-                        app.cpu_resources.bones.items[bone_index] = e.t.mat4();
-                    } else {
-                        app.cpu_resources.instances.items[instance_index].bone_offset = 0;
+                        if (first_bone) |bone_index| {
+                            app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
+                            app.cpu_resources.bones.items[bone_index] = e.t.mat4();
+                        } else {
+                            app.cpu_resources.instances.items[instance_index].bone_offset = 0;
+                        }
+                    }
+                }
+            }
+
+            {
+                var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.AnimatedRender });
+                while (it.next()) |e| {
+                    const instance = app.instance_manager.reserve_instance(e.m.model.mesh);
+                    const model = &app.cpu_resources.models.items[e.m.model.index];
+                    if (instance) |instance_index| {
+                        const first_bone = app.instance_manager.reserve_bones(@intCast(model.bones.len));
+
+                        if (first_bone) |bone_index| {
+                            app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
+                            for (0..model.bones.len) |index| {
+                                app.cpu_resources.bones.items[bone_index + index] = e.t.mat4().mul_mat(e.m.bones[index]).mul_mat(model.bones[index].inverse_bind_matrix);
+                            }
+                        } else {
+                            app.cpu_resources.instances.items[instance_index].bone_offset = 0;
+                        }
                     }
                 }
             }

@@ -32,7 +32,10 @@ void set_seed(int id) {
     layout(location = 3) out float light;
     void main() {
         vec4 pos = vec4(vpos, 1.0);
-        mat4 itransform = bones[bone_offset];
+        mat4 itransform = mat4(0.0);
+        for (int i=0;i<4;i++) {
+            itransform += bones[bone_offset + bone_ids[i]] * bone_weights[i];
+        }
         vec4 normal = itransform * vec4(vnormal, 0.0);
         normal = normalize(normal);
         vec4 light_dir = vec4(1.0, 1.0, 1.0, 0.0);

@@ -27,6 +27,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.Rigidbody);
         _ = try self.ecs.register(Components.Collider);
         _ = try self.ecs.register(Components.TimeDespawn);
+        _ = try self.ecs.register(Components.StaticRender);
         _ = try self.ecs.register(Components.AnimatedRender);
 
         return self;
@@ -379,8 +380,26 @@ pub const Components = struct {
         despawn_time: f32,
     };
 
-    pub const AnimatedRender = struct {
+    pub const StaticRender = struct {
         mesh: GpuResourceManager.MeshResourceHandle,
+    };
+
+    pub const AnimatedRender = struct {
+        model: GpuResourceManager.ModelHandle,
+
+        // relative to the start of this animation
+        // += dt each frame
+        time: f32 = 0,
+        bones: []math.Mat4x4 = &[_]math.Mat4x4{},
+
+        // animation indices for
+        indices: []AnimationIndices = &[_]AnimationIndices{},
+
+        pub const AnimationIndices = struct {
+            translation: u32,
+            rotation: u32,
+            scale: u32,
+        };
     };
 };
 

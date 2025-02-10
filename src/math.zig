@@ -115,6 +115,15 @@ pub const Vec4 = extern struct {
         };
     }
 
+    pub fn clamp(self: *const @This(), low: f32, high: f32) @This() {
+        return .{
+            .x = std.math.clamp(self.x, low, high),
+            .y = std.math.clamp(self.y, low, high),
+            .z = std.math.clamp(self.z, low, high),
+            .w = std.math.clamp(self.w, low, high),
+        };
+    }
+
     pub fn splat3(t: f32) @This() {
         return .{ .x = t, .y = t, .z = t };
     }
@@ -231,7 +240,7 @@ pub const Vec4 = extern struct {
         return .{ .w = self.w, .x = -self.x, .y = -self.y, .z = -self.z };
     }
 
-    pub fn rotate_vector(self: *const @This(), v: Vec4) Vec4 {
+    pub fn rotate_vector(self: *const @This(), v: Vec4) @This() {
         const qv = .{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
         const q_conjugate = self.quat_conjugate();
         const q_result = self.quat_mul(qv).quat_mul(q_conjugate);
@@ -451,6 +460,46 @@ pub const Mat4x4 = extern struct {
             .{ .x = z.x, .y = z.y, .z = 1 },
             .{ .w = 1 },
         } }).transpose();
+    }
+
+    pub fn decompose_rot_trans(self: *const @This()) struct { translation: Vec4, rotation: Vec4 } {
+        var translate = self.data[3];
+        translate.w = 0;
+
+        var rot = Vec4.quat_identity_rot();
+        var t: f32 = 0;
+        const m00 = self.data[0].x;
+        const m01 = self.data[0].y;
+        const m10 = self.data[1].x;
+        const m11 = self.data[1].y;
+        const m02 = self.data[0].z;
+        const m20 = self.data[2].x;
+        const m12 = self.data[1].z;
+        const m21 = self.data[2].y;
+        const m22 = self.data[2].z;
+        if (m22 < 0) {
+            if (m00 > m11) {
+                t = 1 + m00 - m11 - m22;
+                rot = .{ .x = t, .y = m01 + m10, .z = m20 + m02, .w = m12 - m21 };
+            } else {
+                t = 1 - m00 + m11 - m22;
+                rot = .{ .x = m01 + m10, .y = t, .z = m12 + m21, .w = m20 - m02 };
+            }
+        } else {
+            if (m00 < -m11) {
+                t = 1 - m00 - m11 + m22;
+                rot = .{ .x = m20 + m02, .y = m12 + m21, .z = t, .w = m01 - m10 };
+            } else {
+                t = 1 + m00 + m11 + m22;
+                rot = .{ .x = m12 - m21, .y = m20 - m02, .z = m01 - m10, .w = t };
+            }
+        }
+        rot = rot.scale(0.5 / @sqrt(t));
+
+        return .{
+            .translation = translate,
+            .rotation = rot,
+        };
     }
 
     pub const random = struct {
