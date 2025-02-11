@@ -671,12 +671,13 @@ pub const AppState = struct {
         var mouse = input.mouse;
         var kb = input.keys;
 
-        if (c.ImGui_GetIO().*.WantCaptureMouse) {
+        const imgui_io = &c.ImGui_GetIO()[0];
+        if (imgui_io.WantCaptureMouse) {
             mouse = std.mem.zeroes(@TypeOf(mouse));
             mouse.x = input.mouse.x;
             mouse.y = input.mouse.y;
         }
-        if (c.ImGui_GetIO().*.WantCaptureKeyboard) {
+        if (imgui_io.WantCaptureKeyboard) {
             kb = std.mem.zeroes(@TypeOf(kb));
         }
 
@@ -692,6 +693,7 @@ pub const AppState = struct {
 
         if (mouse.left.just_pressed() and !self.focus) {
             self.focus = true;
+            imgui_io.ConfigFlags |= c.ImGuiConfigFlags_NoMouse;
             window.hide_cursor(true);
         }
         if (kb.escape.just_pressed() and !self.focus) {
@@ -699,6 +701,7 @@ pub const AppState = struct {
         }
         if (kb.escape.just_pressed() and self.focus) {
             self.focus = false;
+            imgui_io.ConfigFlags &= ~c.ImGuiConfigFlags_NoMouse;
             window.hide_cursor(false);
         }
 
