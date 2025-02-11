@@ -400,6 +400,11 @@ pub const Components = struct {
             rotation: u32,
             scale: u32,
         };
+
+        pub fn deinit(self: *@This()) void {
+            allocator.free(self.bones);
+            allocator.free(self.indices);
+        }
     };
 };
 
@@ -515,13 +520,15 @@ pub const Archetype = struct {
         };
     }
 
-    pub fn swap_remove(self: *@This(), index: usize) void {
+    pub fn swap_remove(self: *@This(), vtables: *EntityComponentStore.Vtables, index: usize) void {
         for (self.components, self.typ.components) |*comp, compid| {
             if ((index + 1) * compid.size != comp.items.len) {
-                @memcpy(
-                    comp.items[index * compid.size ..][0..compid.size],
-                    comp.items[comp.items.len - compid.size ..],
-                );
+                const to_delete = comp.items[index * compid.size ..][0..compid.size];
+                const last = comp.items[comp.items.len - compid.size ..];
+
+                vtables.get(compid).?.maybe_deinit(@ptrCast(to_delete.ptr));
+
+                @memcpy(to_delete, last);
             }
 
             // arraylist.pop() just does self.items.len -= 1
@@ -531,13 +538,17 @@ pub const Archetype = struct {
         self.generation += 1;
     }
 
-    pub fn deinit(self: *@This()) void {
-        self.typ.deinit();
-
-        for (self.components) |*comp| {
+    pub fn deinit(self: *@This(), vtables: *EntityComponentStore.Vtables) void {
+        for (self.components, self.typ.components) |*comp, compid| {
+            var i: usize = 0;
+            while ((i + 1) * compid.size < comp.items.len) : (i += 1) {
+                vtables.get(compid).?.maybe_deinit(comp.items[i * compid.size ..][0..compid.size].ptr);
+            }
             comp.deinit();
         }
         allocator.free(self.components);
+
+        self.typ.deinit();
     }
 };
 
@@ -552,6 +563,7 @@ pub const EntityComponentStore = struct {
     // directly defined in the component as 'const component_type = .transform'
     //   - note: these enums can be merged into 1
     components: std.AutoArrayHashMap(TypeId, ComponentId),
+    vtables: Vtables,
     // Entity's component id
     entityid_component_id: ComponentId,
     entity_id: u32 = 0,
@@ -559,6 +571,25 @@ pub const EntityComponentStore = struct {
     archetype_map: ArchetypeMap,
     component_map: std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)),
 
+    const Vtables = std.AutoArrayHashMap(ComponentId, ComponentVtable);
+    const ComponentVtable = struct {
+        deinit: ?*const fn (ptr: *anyopaque) void,
+
+        fn from(component: type) @This() {
+            switch (component) {
+                []const u8 => return .{ .deinit = null },
+                else => return .{
+                    .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
+                },
+            }
+        }
+
+        fn maybe_deinit(self: *const @This(), ptr: *anyopaque) void {
+            if (self.deinit) |deinitfn| {
+                deinitfn(ptr);
+            }
+        }
+    };
     const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
         pub fn hash(ctx: @This(), key: Type) u32 {
             _ = ctx;
@@ -582,6 +613,7 @@ pub const EntityComponentStore = struct {
             .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator),
             .archetype_map = ArchetypeMap.init(allocator),
             .component_map = std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)).init(allocator),
+            .vtables = Vtables.init(allocator),
             .entityid_component_id = undefined,
         };
         errdefer self.deinit();
@@ -593,12 +625,14 @@ pub const EntityComponentStore = struct {
 
     pub fn deinit(self: *@This()) void {
         self.entities.deinit();
-        self.components.deinit();
 
         for (self.archetypes.items) |*a| {
-            a.deinit();
+            a.deinit(&self.vtables);
         }
         self.archetypes.deinit();
+
+        self.components.deinit();
+        self.vtables.deinit();
 
         // NOTE: these values are owned by self.archetypes[].typ
         // for (self.archetype_map.keys()) |*k| {
@@ -616,11 +650,15 @@ pub const EntityComponentStore = struct {
         const type_id = TypeId.from(component);
         const comp_id = self.components.count();
         const comp = try self.components.getOrPut(type_id);
+        const compid = ComponentId{
+            .id = @intCast(comp_id),
+            .size = @intCast(@sizeOf(component)),
+        };
         if (!comp.found_existing) {
-            comp.value_ptr.*.id = @intCast(comp_id);
-            comp.value_ptr.*.size = @intCast(@sizeOf(component));
+            comp.value_ptr.* = compid;
+            try self.vtables.put(compid, ComponentVtable.from(component));
         }
-        return comp.value_ptr.*;
+        return compid;
     }
 
     pub fn get_component_id(self: *@This(), component: type) !ComponentId {
@@ -656,7 +694,7 @@ pub const EntityComponentStore = struct {
 
         const archeid = self.archetype_map.get(typ) orelse blk: {
             var archetype = try Archetype.from_type(&typ);
-            errdefer archetype.deinit();
+            errdefer archetype.deinit(&self.vtables);
 
             const archeid = self.archetypes.items.len;
             try self.archetypes.append(archetype);
@@ -710,7 +748,7 @@ pub const EntityComponentStore = struct {
     pub fn remove(self: *@This(), entity: Entity) !void {
         const ae = self.entities.fetchSwapRemove(entity) orelse return error.EntityNotFound;
         const archetype = &self.archetypes.items[ae.value.archetype];
-        defer archetype.swap_remove(ae.value.entity_index);
+        defer archetype.swap_remove(&self.vtables, ae.value.entity_index);
 
         if (archetype.count - 1 != ae.value.entity_index) {
             const entity_ci = archetype.typ.index(self.entityid_component_id) orelse unreachable;

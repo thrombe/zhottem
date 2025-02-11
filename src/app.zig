@@ -821,8 +821,6 @@ pub const AppState = struct {
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn, m: Components.AnimatedRender });
             while (it.next()) |e| {
                 if (e.ds.despawn_time < self.time) {
-                    allocator.free(e.m.bones);
-                    allocator.free(e.m.indices);
                     try to_remove.append(e.id.*);
                 }
             }
