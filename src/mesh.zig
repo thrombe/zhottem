@@ -54,6 +54,14 @@ pub const Transform = struct {
     rotation: math.Vec4 = math.Vec4.quat_identity_rot(),
     scale: math.Vec4 = math.Vec4.splat3(1.0),
 
+    pub fn apply_global(self: *const @This(), transform: @This()) @This() {
+        return .{
+            .translation = transform.translation.add(transform.rotation.rotate_vector(self.translation)),
+            .rotation = transform.rotation.quat_local_rot(self.rotation),
+            .scale = transform.scale.mul(self.scale),
+        };
+    }
+
     // NOTE: returns matrix with column vectors (vulkan => opengl.transpose())
     pub fn transform_mat(self: *const @This()) math.Mat4x4 {
         const rot = self.rotation orelse [4]f32{ 0, 0, 0, 1 };

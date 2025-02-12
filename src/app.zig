@@ -68,6 +68,9 @@ handles: struct {
     model: struct {
         sphere: GpuResourceManager.ModelHandle,
     },
+    mesh: struct {
+        cube: GpuResourceManager.MeshResourceHandle,
+    },
 },
 
 var matrices = std.mem.zeroes([2]math.Mat4x4);
@@ -173,6 +176,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var instance_manager = InstanceManager.init(bones_handle);
     errdefer instance_manager.deinit();
+
+    const cube_instance_handle = try cpu.batch_reserve(10);
+    const cube_mesh_handle = try cpu.add_mesh(&cube);
+    try instance_manager.instances.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
 
     const plane_mesh_handle = try cpu.add_mesh(&plane);
     const plane_instance_handle = try cpu.batch_reserve(10);
@@ -322,6 +329,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .player = player_id,
             .model = .{
                 .sphere = sphere_model_handle,
+            },
+            .mesh = .{
+                .cube = cube_mesh_handle,
             },
         },
     };
@@ -916,6 +926,9 @@ pub const AppState = struct {
 
         {
             app.instance_manager.reset();
+            defer if (app.instance_manager.update()) {
+                _ = self.cmdbuf_fuse.fuse();
+            };
 
             {
                 var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.StaticRender });
@@ -952,10 +965,6 @@ pub const AppState = struct {
                         }
                     }
                 }
-            }
-
-            if (app.instance_manager.update()) {
-                _ = self.cmdbuf_fuse.fuse();
             }
         }
     }

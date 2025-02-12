@@ -526,6 +526,12 @@ pub const VulkanContext = struct {
                     .dynamic_rendering = vk.TRUE,
                     .synchronization_2 = vk.TRUE,
                 }),
+                // .p_next = @ptrCast(&vk.PhysicalDeviceSynchronization2Features{
+                //     .synchronization_2 = vk.TRUE,
+                //     .p_next = @ptrCast(@constCast(&vk.PhysicalDeviceDynamicRenderingFeatures{
+                //         .dynamic_rendering = vk.TRUE,
+                //     })),
+                // }),
                 .queue_create_info_count = queue_count,
                 .p_queue_create_infos = &qci,
                 .enabled_extension_count = required_device_extensions.len,
