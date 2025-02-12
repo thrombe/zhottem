@@ -134,6 +134,7 @@ pub const InstanceManager = struct {
     instances: std.ArrayList(InstanceAllocator),
     bones: GpuResourceManager.BonesResourceHandle,
     bone_count: u32 = 0,
+    hash: u64 = 0,
 
     pub fn init(bones: GpuResourceManager.BonesResourceHandle) @This() {
         return .{
@@ -171,6 +172,16 @@ pub const InstanceManager = struct {
             item.reset();
         }
         self.bone_count = 0;
+    }
+
+    pub fn update(self: *@This()) bool {
+        var hasher = std.hash.Wyhash.init(0);
+        for (self.instances.items) |instance| {
+            hasher.update(std.mem.asBytes(&instance.count));
+        }
+        const hash = hasher.final();
+        defer self.hash = hash;
+        return self.hash == hash;
     }
 };
 

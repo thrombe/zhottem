@@ -811,7 +811,6 @@ pub const AppState = struct {
                 Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                 Components.TimeDespawn{ .despawn_time = self.time + 10 },
             });
-            _ = self.cmdbuf_fuse.fuse();
         }
 
         {
@@ -827,10 +826,6 @@ pub const AppState = struct {
 
             for (to_remove.items) |e| {
                 try app.world.ecs.remove(e);
-            }
-
-            if (to_remove.items.len > 0) {
-                _ = self.cmdbuf_fuse.fuse();
             }
         }
 
@@ -957,6 +952,10 @@ pub const AppState = struct {
                         }
                     }
                 }
+            }
+
+            if (app.instance_manager.update()) {
+                _ = self.cmdbuf_fuse.fuse();
             }
         }
     }
