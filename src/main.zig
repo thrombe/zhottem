@@ -22,9 +22,14 @@ const GuiState = application.GuiState;
 const RendererState = application.RendererState;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-pub const allocator = gpa.allocator();
+var _allocator: std.mem.Allocator = undefined;
+
+// pub const is required so that this can directly be imported and used in other files
+pub const allocator: *std.mem.Allocator = &_allocator;
 
 pub fn main() !void {
+    allocator.* = gpa.allocator();
+
     {
         var engine = try Engine.init();
         defer engine.deinit();

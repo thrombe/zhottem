@@ -113,15 +113,15 @@ pub const Mesh = struct {
     bones: [][]VertexBone,
 
     pub fn cube() !@This() {
-        var vertices = std.ArrayList([3]f32).init(allocator);
+        var vertices = std.ArrayList([3]f32).init(allocator.*);
         errdefer vertices.deinit();
-        var normals = std.ArrayList([3]f32).init(allocator);
+        var normals = std.ArrayList([3]f32).init(allocator.*);
         errdefer normals.deinit();
-        var uvs = std.ArrayList([2]f32).init(allocator);
+        var uvs = std.ArrayList([2]f32).init(allocator.*);
         errdefer uvs.deinit();
-        var bones = std.ArrayList([]VertexBone).init(allocator);
+        var bones = std.ArrayList([]VertexBone).init(allocator.*);
         errdefer bones.deinit();
-        var faces = std.ArrayList([3]u32).init(allocator);
+        var faces = std.ArrayList([3]u32).init(allocator.*);
         errdefer faces.deinit();
 
         try vertices.appendSlice(&[_][3]f32{
@@ -186,15 +186,15 @@ pub const Mesh = struct {
     }
 
     pub fn plane() !@This() {
-        var vertices = std.ArrayList([3]f32).init(allocator);
+        var vertices = std.ArrayList([3]f32).init(allocator.*);
         errdefer vertices.deinit();
-        var normals = std.ArrayList([3]f32).init(allocator);
+        var normals = std.ArrayList([3]f32).init(allocator.*);
         errdefer normals.deinit();
-        var uvs = std.ArrayList([2]f32).init(allocator);
+        var uvs = std.ArrayList([2]f32).init(allocator.*);
         errdefer uvs.deinit();
-        var bones = std.ArrayList([]VertexBone).init(allocator);
+        var bones = std.ArrayList([]VertexBone).init(allocator.*);
         errdefer bones.deinit();
-        var faces = std.ArrayList([3]u32).init(allocator);
+        var faces = std.ArrayList([3]u32).init(allocator.*);
         errdefer faces.deinit();
 
         try vertices.appendSlice(&[_][3]f32{
@@ -265,7 +265,7 @@ pub const Gltf = struct {
 
     pub fn parse_glb(path: []const u8) !@This() {
         var arena = try allocator.create(std.heap.ArenaAllocator);
-        arena.* = std.heap.ArenaAllocator.init(allocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator.*);
         errdefer allocator.destroy(arena);
         errdefer arena.deinit();
         const alloc = arena.allocator();
@@ -323,17 +323,17 @@ pub const Gltf = struct {
     }
 
     fn parse_mesh(self: *@This(), mesh: *Info.MeshInfo) !Mesh {
-        var vertices = std.ArrayList([3]f32).init(allocator);
+        var vertices = std.ArrayList([3]f32).init(allocator.*);
         errdefer vertices.deinit();
-        var normals = std.ArrayList([3]f32).init(allocator);
+        var normals = std.ArrayList([3]f32).init(allocator.*);
         errdefer normals.deinit();
-        var uvs = std.ArrayList([2]f32).init(allocator);
+        var uvs = std.ArrayList([2]f32).init(allocator.*);
         errdefer uvs.deinit();
-        var weights = std.ArrayList([4]f32).init(allocator);
+        var weights = std.ArrayList([4]f32).init(allocator.*);
         defer weights.deinit();
-        var joints = std.ArrayList([4]u32).init(allocator);
+        var joints = std.ArrayList([4]u32).init(allocator.*);
         defer joints.deinit();
-        var faces = std.ArrayList([3]u32).init(allocator);
+        var faces = std.ArrayList([3]u32).init(allocator.*);
         errdefer faces.deinit();
 
         for (mesh.primitives) |prim| {
@@ -440,7 +440,7 @@ pub const Gltf = struct {
                 return error.BadIndexType;
             }
         }
-        var bones = std.ArrayList([]VertexBone).init(allocator);
+        var bones = std.ArrayList([]VertexBone).init(allocator.*);
         errdefer bones.deinit();
 
         for (joints.items, weights.items) |b, w| {
@@ -529,9 +529,9 @@ pub const Gltf = struct {
             const name = anim.name orelse continue;
             const bone_keyframes = try self.alloc.alloc(BoneAnimation, joint_to_bone.count());
             @memset(bone_keyframes, BoneAnimation{
-                .translation_keyframes = std.ArrayList(Keyframe).init(allocator),
-                .rotation_keyframes = std.ArrayList(Keyframe).init(allocator),
-                .scale_keyframes = std.ArrayList(Keyframe).init(allocator),
+                .translation_keyframes = std.ArrayList(Keyframe).init(allocator.*),
+                .rotation_keyframes = std.ArrayList(Keyframe).init(allocator.*),
+                .scale_keyframes = std.ArrayList(Keyframe).init(allocator.*),
             });
 
             for (anim.channels) |channel| {
@@ -986,7 +986,7 @@ pub const Gltf = struct {
         buf: []const u8,
 
         fn read_json(self: *@This(), typ: type) !std.json.Parsed(typ) {
-            return try std.json.parseFromSlice(typ, allocator, self.buf, .{
+            return try std.json.parseFromSlice(typ, allocator.*, self.buf, .{
                 .ignore_unknown_fields = true,
                 .allocate = .alloc_always,
             });
@@ -1008,7 +1008,7 @@ pub const Gltf = struct {
 
         fn load(path: []const u8) !@This() {
             const buf = try std.fs.cwd().readFileAllocOptions(
-                allocator,
+                allocator.*,
                 path,
                 100 * 1000 * 1000,
                 null,

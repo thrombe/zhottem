@@ -619,7 +619,7 @@ pub const VulkanContext = struct {
             instance: Api.Instance,
             surface: vk.SurfaceKHR,
         ) !DeviceCandidate {
-            const pdevs = try instance.enumeratePhysicalDevicesAlloc(allocator);
+            const pdevs = try instance.enumeratePhysicalDevicesAlloc(allocator.*);
             defer allocator.free(pdevs);
 
             for (pdevs) |pdev| {
@@ -641,7 +641,7 @@ pub const VulkanContext = struct {
             pdev: vk.PhysicalDevice,
             surface: vk.SurfaceKHR,
         ) !?DeviceCandidate {
-            const propsv = try instance.enumerateDeviceExtensionPropertiesAlloc(pdev, null, allocator);
+            const propsv = try instance.enumerateDeviceExtensionPropertiesAlloc(pdev, null, allocator.*);
             defer allocator.free(propsv);
             for (required_device_extensions) |ext| {
                 for (propsv) |props| {
@@ -661,7 +661,7 @@ pub const VulkanContext = struct {
                 return null;
             }
 
-            const families = try instance.getPhysicalDeviceQueueFamilyPropertiesAlloc(pdev, allocator);
+            const families = try instance.getPhysicalDeviceQueueFamilyPropertiesAlloc(pdev, allocator.*);
             defer allocator.free(families);
 
             var graphics_family: ?u32 = null;

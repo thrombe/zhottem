@@ -63,7 +63,7 @@ pub const World = struct {
             }
         }
 
-        var collisions = std.ArrayList(EntityCollider.CollisionEntity).init(allocator);
+        var collisions = std.ArrayList(EntityCollider.CollisionEntity).init(allocator.*);
         defer collisions.deinit();
 
         {
@@ -82,7 +82,7 @@ pub const World = struct {
             }
         }
 
-        var positions = std.ArrayList(PositionSolver.PositionEntity).init(allocator);
+        var positions = std.ArrayList(PositionSolver.PositionEntity).init(allocator.*);
         defer positions.deinit();
 
         for (collisions.items) |*e| {
@@ -512,7 +512,7 @@ pub const Archetype = struct {
         const components = try allocator.alloc(std.ArrayListAligned(u8, 8), typ.components.len);
         errdefer allocator.free(components);
         for (components) |*comp| {
-            comp.* = std.ArrayListAligned(u8, 8).init(allocator);
+            comp.* = std.ArrayListAligned(u8, 8).init(allocator.*);
         }
         return .{
             .typ = .{ .components = try allocator.dupe(ComponentId, typ.components) },
@@ -608,12 +608,12 @@ pub const EntityComponentStore = struct {
 
     pub fn init() !@This() {
         var self = @This(){
-            .entities = std.AutoArrayHashMap(Entity, ArchetypeEntity).init(allocator),
-            .archetypes = std.ArrayList(Archetype).init(allocator),
-            .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator),
-            .archetype_map = ArchetypeMap.init(allocator),
-            .component_map = std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)).init(allocator),
-            .vtables = Vtables.init(allocator),
+            .entities = std.AutoArrayHashMap(Entity, ArchetypeEntity).init(allocator.*),
+            .archetypes = std.ArrayList(Archetype).init(allocator.*),
+            .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator.*),
+            .archetype_map = ArchetypeMap.init(allocator.*),
+            .component_map = std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)).init(allocator.*),
+            .vtables = Vtables.init(allocator.*),
             .entityid_component_id = undefined,
         };
         errdefer self.deinit();

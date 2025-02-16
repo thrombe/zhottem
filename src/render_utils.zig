@@ -80,15 +80,15 @@ pub const DescriptorSet = struct {
         desc_set_update: std.ArrayListUnmanaged(vk.WriteDescriptorSet) = .{},
 
         pub fn add(self: *@This(), binding: anytype) !void {
-            try self.layout_binding.appendSlice(allocator, &binding.layout_binding());
+            try self.layout_binding.appendSlice(allocator.*, &binding.layout_binding());
 
             // NOTE: undefined is written to in .build()
-            try self.desc_set_update.appendSlice(allocator, &binding.write_desc_set());
+            try self.desc_set_update.appendSlice(allocator.*, &binding.write_desc_set());
         }
 
         pub fn deinit(self: *@This()) void {
-            self.layout_binding.deinit(allocator);
-            self.desc_set_update.deinit(allocator);
+            self.layout_binding.deinit(allocator.*);
+            self.desc_set_update.deinit(allocator.*);
         }
 
         pub fn build(self: *@This(), device: *Device) !DescriptorSet {
@@ -1728,7 +1728,7 @@ pub const Swapchain = struct {
                 .color_space = .srgb_nonlinear_khr,
             };
 
-            const surface_formats = try ctx.instance.getPhysicalDeviceSurfaceFormatsAllocKHR(ctx.pdev, ctx.surface, allocator);
+            const surface_formats = try ctx.instance.getPhysicalDeviceSurfaceFormatsAllocKHR(ctx.pdev, ctx.surface, allocator.*);
             defer allocator.free(surface_formats);
 
             for (surface_formats) |sfmt| {
@@ -1740,7 +1740,7 @@ pub const Swapchain = struct {
             break :blk surface_formats[0]; // There must always be at least one supported surface format
         };
         const present_mode = blk: {
-            const present_modes = try ctx.instance.getPhysicalDeviceSurfacePresentModesAllocKHR(ctx.pdev, ctx.surface, allocator);
+            const present_modes = try ctx.instance.getPhysicalDeviceSurfacePresentModesAllocKHR(ctx.pdev, ctx.surface, allocator.*);
             defer allocator.free(present_modes);
 
             if (args.prefer_present_mode) |mode| {
@@ -1799,7 +1799,7 @@ pub const Swapchain = struct {
         }
 
         const swap_images = blk: {
-            const images = try ctx.device.getSwapchainImagesAllocKHR(handle, allocator);
+            const images = try ctx.device.getSwapchainImagesAllocKHR(handle, allocator.*);
             defer allocator.free(images);
 
             const swap_images = try allocator.alloc(SwapImage, images.len);
@@ -2211,12 +2211,12 @@ pub fn dump_image_to_file(
     defer allocator.free(blob);
 
     const ts = std.time.timestamp();
-    const filename = try std.fmt.allocPrint(allocator, "{d}.png", .{ts});
+    const filename = try std.fmt.allocPrint(allocator.*, "{d}.png", .{ts});
     defer allocator.free(filename);
 
     try std.fs.cwd().makePath(path);
 
-    const joined_path = try std.fs.path.join(allocator, &[_][]const u8{ path, filename });
+    const joined_path = try std.fs.path.join(allocator.*, &[_][]const u8{ path, filename });
     defer allocator.free(joined_path);
 
     const file = try std.fs.cwd().createFile(joined_path, .{});

@@ -138,7 +138,7 @@ pub const InstanceManager = struct {
 
     pub fn init(bones: GpuResourceManager.BonesResourceHandle) @This() {
         return .{
-            .instances = std.ArrayList(InstanceAllocator).init(allocator),
+            .instances = std.ArrayList(InstanceAllocator).init(allocator.*),
             .bones = bones,
         };
     }
@@ -281,11 +281,11 @@ pub const GpuResourceManager = struct {
 
         pub fn init() @This() {
             return .{
-                .vertices = Vertices.init(allocator),
-                .triangles = Triangles.init(allocator),
-                .instances = Instances.init(allocator),
-                .bones = Bones.init(allocator),
-                .models = Models.init(allocator),
+                .vertices = Vertices.init(allocator.*),
+                .triangles = Triangles.init(allocator.*),
+                .instances = Instances.init(allocator.*),
+                .bones = Bones.init(allocator.*),
+                .models = Models.init(allocator.*),
             };
         }
 

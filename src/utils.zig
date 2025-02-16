@@ -317,7 +317,7 @@ pub const FsFuse = struct {
     thread: std.Thread,
 
     pub fn init(path: [:0]const u8) !@This() {
-        const rpath = try std.fs.cwd().realpathAlloc(allocator, path);
+        const rpath = try std.fs.cwd().realpathAlloc(allocator.*, path);
         defer allocator.free(rpath);
         const pathZ = try allocator.dupeZ(u8, rpath);
 
@@ -358,7 +358,7 @@ pub const FsFuse = struct {
 
         const ctxt = try allocator.create(Ctx);
         ctxt.* = .{
-            .channel = try Chan.init(allocator),
+            .channel = try Chan.init(allocator.*),
             .handle = null,
             .path = path,
         };
@@ -411,7 +411,7 @@ pub const FsFuse = struct {
                         // std.debug.print("Event Type: {s}\n", .{std.mem.span(name)});
 
                         if (ctx) |cctx| {
-                            const stripped = std.fs.path.relative(allocator, cctx.path, std.mem.span(event.path)) catch unreachable;
+                            const stripped = std.fs.path.relative(allocator.*, cctx.path, std.mem.span(event.path)) catch unreachable;
                             cctx.channel.send(.{
                                 .file = stripped,
                                 .real = allocator.dupe(u8, std.mem.span(event.path)) catch unreachable,
@@ -424,7 +424,7 @@ pub const FsFuse = struct {
             }
         };
 
-        const t = try std.Thread.spawn(.{ .allocator = allocator }, Callbacks.spawn, .{ctxt});
+        const t = try std.Thread.spawn(.{ .allocator = allocator.* }, Callbacks.spawn, .{ctxt});
         return .{
             .ctx = ctxt,
             .thread = t,
@@ -487,7 +487,7 @@ pub const ImageMagick = struct {
         var file = try std.fs.cwd().openFile(path, .{});
         defer file.close();
 
-        const buf = try file.readToEndAlloc(allocator, 50 * 1000 * 1000);
+        const buf = try file.readToEndAlloc(allocator.*, 50 * 1000 * 1000);
         defer allocator.free(buf);
 
         return decode_img(buf, typ);
@@ -677,8 +677,8 @@ pub const ShaderUtils = struct {
 
         pub fn init() !@This() {
             var self = @This(){
-                .shader = std.ArrayList(u8).init(allocator),
-                .known_types = std.AutoHashMap(TypeId, void).init(allocator),
+                .shader = std.ArrayList(u8).init(allocator.*),
+                .known_types = std.AutoHashMap(TypeId, void).init(allocator.*),
             };
             errdefer self.deinit();
 
@@ -887,7 +887,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                 } };
                 if (ctx.dump_assembly) blk: {
                     // TODO: print this on screen instead of console
-                    const res = ctx.comp.dump_assembly(allocator, &shader, self.stage) catch {
+                    const res = ctx.comp.dump_assembly(allocator.*, &shader, self.stage) catch {
                         break :blk;
                     };
                     switch (res) {
@@ -902,7 +902,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                 }
                 const frag_bytes = blk: {
                     const res = try ctx.comp.compile(
-                        allocator,
+                        allocator.*,
                         &shader,
                         .spirv,
                         self.stage,
@@ -1035,12 +1035,12 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                     .comp = comp,
                     .shaders = shaders,
                     .shader_fuse = shader_fuse,
-                    .err_chan = try Channel(?[]const u8).init(allocator),
-                    .compiled = try Channel(Compiled).init(allocator),
+                    .err_chan = try Channel(?[]const u8).init(allocator.*),
+                    .compiled = try Channel(Compiled).init(allocator.*),
                 };
                 errdefer ctxt.deinit();
 
-                var set = std.StringHashMap(void).init(allocator);
+                var set = std.StringHashMap(void).init(allocator.*);
                 defer set.deinit();
                 for (shaders) |s| {
                     if (!set.contains(s.path)) {
@@ -1051,7 +1051,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                 var it = set.iterator();
                 while (it.next()) |s| {
                     const real = try allocator.dupe(u8, s.key_ptr.*);
-                    const stripped = try std.fs.path.relative(allocator, ctxt.shader_fuse.ctx.path, real);
+                    const stripped = try std.fs.path.relative(allocator.*, ctxt.shader_fuse.ctx.path, real);
                     try ctxt.shader_fuse.ctx.channel.send(.{
                         .file = stripped,
                         .real = real,
@@ -1065,7 +1065,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                                 break;
                             }
                             ctx.update() catch |e| {
-                                const err = std.fmt.allocPrint(allocator, "{any}", .{e}) catch continue;
+                                const err = std.fmt.allocPrint(allocator.*, "{any}", .{e}) catch continue;
                                 ctx.err_chan.send(err) catch continue;
                             };
 
@@ -1073,7 +1073,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                         }
                     }
                 };
-                const thread = try std.Thread.spawn(.{ .allocator = allocator }, Callbacks.spawn, .{ctxt});
+                const thread = try std.Thread.spawn(.{ .allocator = allocator.* }, Callbacks.spawn, .{ctxt});
 
                 return .{
                     .ctx = ctxt,
@@ -1253,7 +1253,7 @@ pub const Glslc = struct {
 
             // similar to child.collectOutput
             const max_output_bytes = 1000 * 1000;
-            var poller = std.io.poll(allocator, enum { stdout, stderr }, .{
+            var poller = std.io.poll(allocator.*, enum { stdout, stderr }, .{
                 .stdout = stdout,
                 .stderr = stderr,
             });
@@ -1298,7 +1298,7 @@ pub const Glslc = struct {
             }
 
             const fifo = poller.fifo(.stdout);
-            var aligned = std.ArrayListAligned(u8, 4).init(allocator);
+            var aligned = std.ArrayListAligned(u8, 4).init(allocator.*);
             try aligned.appendSlice(fifo.buf[fifo.head..][0..fifo.count]);
             const bytes = try aligned.toOwnedSlice();
             return .{ .Ok = switch (output_type) {
