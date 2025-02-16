@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const options = @import("build-options");
+
 const vk = @import("vulkan");
 
 const utils = @import("utils.zig");
@@ -27,9 +29,51 @@ var _allocator: std.mem.Allocator = undefined;
 // pub const is required so that this can directly be imported and used in other files
 pub const allocator: *std.mem.Allocator = &_allocator;
 
+const ReloadAction = enum { nothing };
+
 pub fn main() !void {
     allocator.* = gpa.allocator();
 
+    switch (options.mode) {
+        .exe => {
+            std.debug.print("not hot\n", .{});
+            try hot_main();
+        },
+        .hotexe => {
+            std.debug.print("hot\n", .{});
+            var dyn = try std.DynLib.open("./zig-out/lib/" ++ options.hotlib_name);
+
+            if (dyn.lookup(*const fn () ReloadAction, "hot")) |hotfn| {
+                const res = hotfn();
+                switch (res) {
+                    .nothing => {},
+                }
+            }
+        },
+        .hotlib => {},
+    }
+}
+
+export fn hot() ReloadAction {
+    switch (options.mode) {
+        .hotlib => {
+            const alloc = gpa.allocator();
+            allocator.* = alloc;
+
+            hot_main() catch |e| {
+                std.debug.print("error: {any}\n", .{e});
+                if (@errorReturnTrace()) |trace| {
+                    std.debug.dumpStackTrace(trace.*);
+                }
+            };
+        },
+        .exe, .hotexe => {},
+    }
+
+    return .nothing;
+}
+
+fn hot_main() !void {
     {
         var engine = try Engine.init();
         defer engine.deinit();
@@ -115,5 +159,5 @@ pub fn main() !void {
     }
 
     // no defer cuz we don't want to print leaks when we error out
-    _ = gpa.deinit();
+    // _ = gpa.deinit();
 }
