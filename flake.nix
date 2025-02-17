@@ -105,12 +105,17 @@
 
       env-packages = pkgs:
         (with pkgs; [
+          (python312.withPackages (ps: with ps; [
+            ply
+          ]))
+
           pkg-config
           # curl
           fswatch
           imagemagick
           glslang
           shaderc
+          glfw
 
           vulkan-headers
           vulkan-validation-layers

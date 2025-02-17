@@ -7,8 +7,8 @@ pub const c = @cImport({
     @cInclude("GLFW/glfw3native.h");
 
     @cInclude("dcimgui.h");
-    @cInclude("cimgui_impl_glfw.h");
-    @cInclude("cimgui_impl_vulkan.h");
+    @cInclude("dcimgui_impl_glfw.h");
+    @cInclude("dcimgui_impl_vulkan.h");
 });
 
 const vk = @import("vulkan");

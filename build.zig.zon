@@ -18,9 +18,13 @@
             .url = "https://github.com/Snektron/vulkan-zig/archive/zig-0.13-compat.tar.gz",
             .hash = "1220ed8dbf35b9391f2d11c984493f80ecef1287bf07c9e29fba967c6912e54bb9b3",
         },
-        .cimgui = .{
-            .url = "https://github.com/tiawl/cimgui.zig/archive/refs/tags/v1.91.5.tar.gz",
-            .hash = "12200647346469870ce79c32a69d3888f3ae0eaf21426663db023b35bbf7ac9cf19e",
+        .imgui = .{
+            .url = "https://github.com/ocornut/imgui/archive/refs/tags/v1.91.8.tar.gz",
+            .hash = "122008fc93d2a565a333ec120399fa8904d42a3b2e4307d54af50dade393207f8f06",
+        },
+        .dear_bindings = .{
+            .url = "https://github.com/dearimgui/dear_bindings/archive/f6e8ea713405914b16f8bf018ee7abaccdbae283.tar.gz",
+            .hash = "122036b555e00c1dbb1addc3eb8e1bf80baf1c72266577f245340bac9648523bfaab",
         },
     },
 
