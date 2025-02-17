@@ -9,7 +9,8 @@ const allocator = main.allocator;
 pub const TypeId = struct {
     id: u64,
 
-    pub inline fn from(comptime T: type) @This() {
+    // unique even across dylib loads. (loading same lib multiple times will create different ids)
+    pub inline fn unique(comptime T: type) @This() {
         const Phantom = *const struct {
             _: u8,
         };
@@ -21,6 +22,12 @@ pub const TypeId = struct {
         }.id;
 
         return .{ .id = @intCast(@intFromPtr(ptr)) };
+    }
+
+    pub inline fn from_name(comptime T: type) @This() {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(@typeName(T));
+        return .{ .id = hasher.final() };
     }
 };
 
@@ -725,7 +732,7 @@ pub const ShaderUtils = struct {
         }
 
         fn remember(self: *@This(), t: type) !bool {
-            const id = TypeId.from(t);
+            const id = TypeId.from_name(t);
             if (self.known_types.contains(id)) {
                 return true;
             } else {
