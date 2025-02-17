@@ -406,7 +406,7 @@ pub const FsFuse = struct {
                 // flags |= c.OwnerModified;
                 // flags |= c.AttributeModified;
                 // flags |= c.MovedFrom;
-                // flags |= c.MovedTo;
+                flags |= c.MovedTo;
 
                 for (events[0..@intCast(num)]) |event| {
                     for (event.flags[0..event.flags_num]) |f| {

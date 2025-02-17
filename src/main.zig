@@ -34,10 +34,13 @@ const HotVtable = struct {
     }
 };
 
+// NOTE: global state breaks when hot reloading is turned on.
+// things that use global state must be separated into another dylib (like glfw)
 const HotReloader = struct {
     const utils = @import("utils.zig");
 
     path: [:0]const u8,
+    hot_cache: [:0]const u8,
     libpath: [:0]const u8,
 
     dylib: std.DynLib,
@@ -46,9 +49,14 @@ const HotReloader = struct {
     fs: utils.FsFuse,
     count: u32 = 0,
 
-    fn init(comptime path: [:0]const u8) !@This() {
+    fn init(comptime path: [:0]const u8, comptime hotcache_path: [:0]const u8) !@This() {
         const libpath = path ++ options.hotlib_name;
-        var dyn = try std.DynLib.open(libpath);
+        const hot_cache = hotcache_path ++ options.hotlib_name;
+
+        const cwd = std.fs.cwd();
+        try cwd.copyFile(libpath, cwd, hot_cache, .{});
+
+        var dyn = try std.DynLib.open(hot_cache);
         errdefer dyn.close();
 
         const vtable = try HotVtable.from_dyn(&dyn);
@@ -57,14 +65,13 @@ const HotReloader = struct {
         const app = vtable.init() orelse return error.CouldNotInitApp;
         errdefer _ = vtable.deinit(app);
 
-        // TODO: updating this as soon as there's some update to the file is not good. it updates before the file updates fully.
-        // overwriting the .so file is also bad, so copying it to some other place is safer
-        var fs = try utils.FsFuse.init("./zig-out/bin/"); // TODO: init(path)
+        var fs = try utils.FsFuse.init(path);
         errdefer fs.deinit();
 
         return .{
             .libpath = libpath,
             .path = path,
+            .hot_cache = hot_cache,
             .dylib = dyn,
             .vtable = vtable,
             .app = app,
@@ -81,41 +88,40 @@ const HotReloader = struct {
     fn tick(self: *@This()) !bool {
         {
             // we don't actually care about the exact event in this case.
-            defer while (self.fs.try_recv()) |e| {
-                std.debug.print("event: {s}\n", .{e.file});
-                e.deinit();
-            };
+            while (self.fs.try_recv()) |event| {
+                defer event.deinit();
 
-            if (self.fs.can_recv()) {
-                std.debug.print("reloading\n", .{});
+                if (std.mem.eql(u8, options.hotlib_name, event.file)) {
+                    std.debug.print("reloading\n", .{});
 
-                // dlopen() caches library loads.
-                // passing diff paths defeats this caching.
-                const new_path = try std.fmt.allocPrint(allocator.*, "{s}{d}", .{ self.libpath, self.count });
-                std.debug.print("loading: {s}\n", .{new_path});
-                defer self.count += 1;
-                defer allocator.free(new_path);
-                const cwd = std.fs.cwd();
-                try cwd.copyFile(self.libpath, cwd, new_path, .{});
+                    // dlopen() caches library loads.
+                    // passing diff paths defeats this caching.
+                    const new_path = try std.fmt.allocPrint(allocator.*, "{s}{d}", .{ self.hot_cache, self.count });
+                    std.debug.print("loading: {s}\n", .{new_path});
+                    defer self.count += 1;
+                    defer allocator.free(new_path);
+                    const cwd = std.fs.cwd();
+                    try cwd.copyFile(self.libpath, cwd, new_path, .{});
 
-                // _ = self.vtable.deinit(self.app);
-                self.dylib.close();
-                var dyn = try std.DynLib.open(new_path);
-                errdefer dyn.close();
+                    // _ = self.vtable.deinit(self.app);
+                    self.dylib.close();
+                    var dyn = try std.DynLib.open(new_path);
+                    errdefer dyn.close();
 
-                const vtable = HotVtable.from_dyn(&dyn) catch |e| {
-                    std.debug.print("error: {any}\n", .{e});
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
-                    }
+                    const vtable = HotVtable.from_dyn(&dyn) catch |e| {
+                        std.debug.print("error: {any}\n", .{e});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
 
-                    return true;
-                };
+                        return true;
+                    };
 
-                self.dylib = dyn;
-                self.vtable = vtable;
-                self.vtable.set_alloc(allocator);
-                // self.app = self.vtable.init() orelse unreachable;
+                    self.dylib = dyn;
+                    self.vtable = vtable;
+                    self.vtable.set_alloc(allocator);
+                    // self.app = self.vtable.init() orelse unreachable;
+                }
             }
         }
 
@@ -144,10 +150,7 @@ pub fn main() !void {
             while (try app.tick()) {}
         },
         .hotexe => {
-            // TODO: this still fails as glfw has global state, which is not preserved when
-            // updating the dylib as it's statically linkedin into that dylib.
-            // probably linking glfw dynamically will solve the issue.
-            var app = try HotReloader.init("./zig-out/lib/");
+            var app = try HotReloader.init("./zig-out/lib/", "./zig-out/hot-cache/");
             defer app.deinit();
             while (try app.tick()) {}
         },
