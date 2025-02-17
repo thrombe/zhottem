@@ -13,6 +13,7 @@ fn step(b: *std.Build, v: struct {
     vulkan_zig: *std.Build.Module,
     cimgui: *std.Build.Step.Compile,
     imgui_dep: *std.Build.Dependency,
+    dcimgui_generated: *std.Build.Step.WriteFile,
 }) *std.Build.Step.Compile {
     // see b.addSharedLibrary()
     // see b.addStaticLibrary()
@@ -48,14 +49,15 @@ fn step(b: *std.Build, v: struct {
 
     switch (v.mode) {
         .exe, .hotlib => {
-            compile_step.step.dependOn(&v.cimgui.step);
-
             compile_step.root_module.addImport("vulkan", v.vulkan_zig);
 
-            compile_step.addIncludePath(b.path("./bindings"));
+            compile_step.addIncludePath(v.dcimgui_generated.getDirectory());
             compile_step.addIncludePath(v.imgui_dep.path("./"));
             compile_step.addIncludePath(v.imgui_dep.path("./backends"));
-            compile_step.linkLibrary(v.cimgui);
+
+            // compile_step.linkLibrary(v.cimgui);
+            compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
+            compile_step.addLibraryPath(b.path("./zig-out/lib"));
 
             compile_step.linkSystemLibrary("glfw");
             compile_step.linkSystemLibrary("fswatch");
@@ -69,8 +71,6 @@ fn step(b: *std.Build, v: struct {
             compile_step.linkLibC();
         },
     }
-
-    b.installArtifact(compile_step);
 
     return compile_step;
 }
@@ -92,43 +92,40 @@ pub fn build(b: *std.Build) void {
     const dear = b.dependency("dear_bindings", .{}).path("dear_bindings.py");
     const imgui = b.dependency("imgui", .{});
 
-    const dcimgui = b.addSystemCommand(&[_][]const u8{
-        "python",
-        dear.getPath(b),
-        "-o",
-        b.path("./bindings/dcimgui").getPath(b),
-        imgui.path("imgui.h").getPath(b),
-    });
-    const dcimgui_glfw = b.addSystemCommand(&[_][]const u8{
-        "python",
-        dear.getPath(b),
-        "-o",
-        b.path("./bindings/dcimgui_impl_glfw").getPath(b),
-        "--backend",
-        "--include",
-        imgui.path("./imgui.h").getPath(b),
-        imgui.path("backends/imgui_impl_glfw.h").getPath(b),
-    });
-    const dcimgui_vulkan = b.addSystemCommand(&[_][]const u8{
-        "python",
-        dear.getPath(b),
-        "-o",
-        b.path("./bindings/dcimgui_impl_vulkan").getPath(b),
-        "--backend",
-        "--include",
-        imgui.path("./imgui.h").getPath(b),
-        imgui.path("backends/imgui_impl_vulkan.h").getPath(b),
-    });
-    dcimgui_vulkan.step.dependOn(&dcimgui.step);
-    dcimgui_glfw.step.dependOn(&dcimgui.step);
-
     const cimgui = b.addSharedLibrary(.{
         .name = "cimgui",
         .target = target,
         .optimize = optimize,
     });
-    cimgui.step.dependOn(&dcimgui_vulkan.step);
+
+    const dcimgui_generated = b.addWriteFiles();
+    cimgui.step.dependOn(&dcimgui_generated.step);
+
+    const dcimgui = b.addSystemCommand(&[_][]const u8{"python"});
+    dcimgui.addFileArg(dear);
+    dcimgui.addArgs(&[_][]const u8{ "-o", "dcimgui" });
+    dcimgui.addFileArg(imgui.path("imgui.h"));
+    dcimgui.setCwd(dcimgui_generated.getDirectory());
+    cimgui.step.dependOn(&dcimgui.step);
+
+    const dcimgui_glfw = b.addSystemCommand(&[_][]const u8{"python"});
+    dcimgui_glfw.addFileArg(dear);
+    dcimgui_glfw.addArgs(&[_][]const u8{ "-o", "dcimgui_impl_glfw", "--backend", "--include" });
+    dcimgui_glfw.addFileArg(imgui.path("imgui.h"));
+    dcimgui_glfw.addFileArg(imgui.path("backends/imgui_impl_glfw.h"));
+    dcimgui_glfw.step.dependOn(&dcimgui.step);
+    dcimgui_glfw.setCwd(dcimgui_generated.getDirectory());
     cimgui.step.dependOn(&dcimgui_glfw.step);
+
+    const dcimgui_vulkan = b.addSystemCommand(&[_][]const u8{"python"});
+    dcimgui_vulkan.addFileArg(dear);
+    dcimgui_vulkan.addArgs(&[_][]const u8{ "-o", "dcimgui_impl_vulkan", "--backend", "--include" });
+    dcimgui_vulkan.addFileArg(imgui.path("imgui.h"));
+    dcimgui_vulkan.addFileArg(imgui.path("backends/imgui_impl_vulkan.h"));
+    dcimgui_vulkan.step.dependOn(&dcimgui.step);
+    dcimgui_vulkan.setCwd(dcimgui_generated.getDirectory());
+    cimgui.step.dependOn(&dcimgui_vulkan.step);
+
     cimgui.addCSourceFiles(.{ .root = imgui.path("./"), .files = &[_][]const u8{
         "imgui.cpp",
         "imgui_draw.cpp",
@@ -138,7 +135,7 @@ pub fn build(b: *std.Build) void {
         "backends/imgui_impl_glfw.cpp",
         "backends/imgui_impl_vulkan.cpp",
     }, .flags = &[_][]const u8{} });
-    cimgui.addCSourceFiles(.{ .root = b.path("./bindings"), .files = &[_][]const u8{
+    cimgui.addCSourceFiles(.{ .root = dcimgui_generated.getDirectory(), .files = &[_][]const u8{
         "dcimgui.cpp",
         "dcimgui_impl_glfw.cpp",
         "dcimgui_impl_vulkan.cpp",
@@ -146,7 +143,7 @@ pub fn build(b: *std.Build) void {
     cimgui.addIncludePath(imgui.path("./"));
     cimgui.addIncludePath(imgui.path("./backends"));
     cimgui.addIncludePath(vulkan_headers.path("./include"));
-    cimgui.addIncludePath(b.path("./bindings"));
+    cimgui.addIncludePath(dcimgui_generated.getDirectory());
     cimgui.linkSystemLibrary("vulkan");
     cimgui.linkSystemLibrary("glfw");
     cimgui.linkLibC();
@@ -159,6 +156,7 @@ pub fn build(b: *std.Build) void {
         .vulkan_zig = vulkan_zig,
         .cimgui = cimgui,
         .imgui_dep = imgui,
+        .dcimgui_generated = dcimgui_generated,
     });
     const hotlib = step(b, .{
         .target = target,
@@ -167,6 +165,7 @@ pub fn build(b: *std.Build) void {
         .vulkan_zig = vulkan_zig,
         .cimgui = cimgui,
         .imgui_dep = imgui,
+        .dcimgui_generated = dcimgui_generated,
     });
     const hotexe = step(b, .{
         .target = target,
@@ -175,16 +174,20 @@ pub fn build(b: *std.Build) void {
         .vulkan_zig = vulkan_zig,
         .cimgui = cimgui,
         .imgui_dep = imgui,
+        .dcimgui_generated = dcimgui_generated,
     });
 
-    hotexe.step.dependOn(&hotlib.step);
+    const build_libs_step = b.step("build-libs", "Build the libs required for the app");
+    build_libs_step.dependOn(&cimgui.step);
+    build_libs_step.dependOn(&b.addInstallArtifact(cimgui, .{}).step);
 
     const hot_build_step = b.step("build-hot", "Build the hot app");
-    hot_build_step.dependOn(&hotlib.step);
+    hot_build_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     hot_build_step.dependOn(b.getInstallStep());
 
     const hot_run_cmd = b.addRunArtifact(hotexe);
-    hot_run_cmd.step.dependOn(b.getInstallStep());
+    hot_run_cmd.step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
+    hot_run_cmd.step.dependOn(&b.addInstallArtifact(hotexe, .{}).step);
     if (b.args) |args| {
         hot_run_cmd.addArgs(args);
     }
@@ -192,7 +195,7 @@ pub fn build(b: *std.Build) void {
     hot_run_step.dependOn(&hot_run_cmd.step);
 
     const exe_run_cmd = b.addRunArtifact(exe);
-    exe_run_cmd.step.dependOn(b.getInstallStep());
+    exe_run_cmd.step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     if (b.args) |args| {
         exe_run_cmd.addArgs(args);
     }
