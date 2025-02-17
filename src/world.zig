@@ -647,7 +647,7 @@ pub const EntityComponentStore = struct {
     }
 
     pub fn register(self: *@This(), component: type) !ComponentId {
-        const type_id = TypeId.from_name(component);
+        const type_id = TypeId.from_type(component);
         const comp_id = self.components.count();
         const comp = try self.components.getOrPut(type_id);
         const compid = ComponentId{
@@ -662,7 +662,7 @@ pub const EntityComponentStore = struct {
     }
 
     pub fn get_component_id(self: *@This(), component: type) !ComponentId {
-        const type_id = TypeId.from_name(component);
+        const type_id = TypeId.from_type(component);
         return self.components.get(type_id) orelse error.TypeNotAComponent;
     }
 
@@ -671,7 +671,7 @@ pub const EntityComponentStore = struct {
         var components: [fields.len]ComponentId = undefined;
 
         inline for (fields, 0..) |*field, i| {
-            const e = self.components.getEntry(TypeId.from_name(field.type));
+            const e = self.components.getEntry(TypeId.from_type(field.type));
             if (e) |entry| {
                 components[i] = entry.value_ptr.*;
             } else {

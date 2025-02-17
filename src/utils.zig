@@ -29,6 +29,63 @@ pub const TypeId = struct {
         hasher.update(@typeName(T));
         return .{ .id = hasher.final() };
     }
+
+    pub inline fn from_type(comptime T: type) @This() {
+        const Ti = @typeInfo(T);
+
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(@typeName(T));
+        hasher.update(@tagName(std.meta.activeTag(Ti)));
+
+        switch (Ti) {
+            .Struct => |t| {
+                inline for (t.fields) |field| {
+                    hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
+                    hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
+                }
+            },
+            .Int => |t| {
+                hasher.update(@tagName(t.signedness));
+                hasher.update(std.mem.asBytes(&t.bits));
+            },
+            .Float => |t| {
+                hasher.update(std.mem.asBytes(&t.bits));
+            },
+            .Enum => |t| {
+                inline for (t.fields) |field| {
+                    hasher.update(field.name);
+                    hasher.update(std.mem.asBytes(&@as(u32, field.value)));
+                }
+            },
+            .Union => |t| {
+                hasher.update(@tagName(t.layout));
+                inline for (t.fields) |field| {
+                    hasher.update(field.name);
+                    hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
+                    hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
+                }
+            },
+            .Optional => |t| {
+                hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+            },
+            .Pointer => |t| {
+                // not sure what to do here :/
+                // might have cycles
+                hasher.update(@tagName(t.size));
+                hasher.update(@tagName(t.address_space));
+                hasher.update(std.mem.asBytes(&@as(u32, t.alignment)));
+                hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+            },
+            .Array => |t| {
+                hasher.update(std.mem.asBytes(&t.len));
+                hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+            },
+            .Bool, .Void => {},
+            else => @compileLog("can't do TypeIds on this type yet: " ++ @typeName(T)),
+        }
+
+        return .{ .id = hasher.final() };
+    }
 };
 
 // assumes ok has ok.deinit()
@@ -732,7 +789,7 @@ pub const ShaderUtils = struct {
         }
 
         fn remember(self: *@This(), t: type) !bool {
-            const id = TypeId.from_name(t);
+            const id = TypeId.unique(t);
             if (self.known_types.contains(id)) {
                 return true;
             } else {
