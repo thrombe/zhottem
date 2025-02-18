@@ -641,6 +641,11 @@ pub const AppState = struct {
     deltatime: f32 = 0,
     fps_cap: u32 = 60,
 
+    physics: struct {
+        step: f32 = 1.0 / 100.0,
+        time: f32 = 0,
+    } = .{},
+
     rng: std.Random.Xoshiro256,
     resize_fuse: Fuse = .{},
     cmdbuf_fuse: Fuse = .{},
@@ -731,6 +736,7 @@ pub const AppState = struct {
 
         self.frame += 1;
         self.time += delta;
+        self.physics.time += delta;
         self.deltatime = delta;
 
         // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
@@ -801,7 +807,10 @@ pub const AppState = struct {
             }
         }
 
-        try app.world.tick(self, delta);
+        while (self.physics.time > self.physics.step) {
+            try app.world.tick(self, self.physics.step);
+            self.physics.time -= self.physics.step;
+        }
 
         if (mouse.right.pressed()) {
             const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
