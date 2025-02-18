@@ -323,13 +323,12 @@ const HotApp = struct {
         }
 
         const lap = self.timer.lap();
-        try self.app_state.tick(lap, &self.engine, &self.app);
 
         self.gui_renderer.render_start();
-        self.gui_state.tick(&self.app_state, lap);
+        try self.gui_state.tick(&self.app, &self.app_state, lap);
         try self.gui_renderer.render_end(&self.engine.graphics.device, &self.renderer_state.swapchain);
 
-        self.app.uniforms.uniform_buffer = try self.app_state.uniforms(self.engine.window);
+        try self.app_state.tick(lap, &self.engine, &self.app);
 
         // multiple framebuffers => multiple descriptor sets => different buffers
         // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad

@@ -594,12 +594,6 @@ pub const ColorParse = struct {
 };
 
 pub const Camera = struct {
-    pos: Vec4,
-    pitch: f32 = 0,
-    yaw: f32 = 0,
-    speed: f32 = 1.0,
-    sensitivity: f32 = 1.0,
-    sensitivity_scale: f32 = 0.003,
     renderer_basis: struct {
         fwd: Vec4,
         right: Vec4,
@@ -631,9 +625,8 @@ pub const Camera = struct {
     };
 
     // right handed basis only (this file is right handed)
-    pub fn init(pos: Vec4, renderer_basis: anytype, world_basis: anytype) @This() {
+    pub fn init(renderer_basis: anytype, world_basis: anytype) @This() {
         return .{
-            .pos = pos,
             .renderer_basis = .{
                 .fwd = renderer_basis.fwd,
                 .right = renderer_basis.right,
@@ -650,37 +643,40 @@ pub const Camera = struct {
     pub fn world_to_screen_mat(self: *const @This(), v: struct {
         width: u32,
         height: u32,
+        pos: Vec4,
+        pitch: f32,
+        yaw: f32,
         near: f32 = 0.1,
         far: f32 = 10000.0,
         fov: f32 = std.math.pi / 3.0,
     }) Mat4x4 {
-        const rot = self.rot_quat();
+        const rot = self.rot_quat(v.pitch, v.yaw);
         const up = rot.rotate_vector(self.renderer_basis.up);
         const fwd = rot.rotate_vector(self.renderer_basis.fwd);
         const left = rot.rotate_vector(self.renderer_basis.right.scale(-1));
 
         const projection_matrix = Mat4x4.perspective_projection(v.height, v.width, v.near, v.far, v.fov);
-        const view_matrix = Mat4x4.view(self.pos, fwd, left, up);
+        const view_matrix = Mat4x4.view(v.pos, fwd, left, up);
         const world_to_screen = projection_matrix.mul_mat(view_matrix);
 
         return world_to_screen;
     }
 
-    pub fn rot_quat(self: *const @This()) Vec4 {
+    pub fn rot_quat(self: *const @This(), pitch: f32, yaw: f32) Vec4 {
         var rot = Vec4.quat_identity_rot();
-        rot = rot.quat_mul(Vec4.quat_angle_axis(self.pitch, self.world_basis.right));
-        rot = rot.quat_mul(Vec4.quat_angle_axis(self.yaw, self.world_basis.up));
+        rot = rot.quat_mul(Vec4.quat_angle_axis(pitch, self.world_basis.right));
+        rot = rot.quat_mul(Vec4.quat_angle_axis(yaw, self.world_basis.up));
         rot = rot.quat_conjugate();
         return rot;
     }
 
-    pub fn dirs(self: *const @This()) struct {
+    pub fn dirs(self: *const @This(), pitch: f32, yaw: f32) struct {
         rot: Vec4,
         fwd: Vec4,
         up: Vec4,
         right: Vec4,
     } {
-        const rot = self.rot_quat();
+        const rot = self.rot_quat(pitch, yaw);
         const up = rot.rotate_vector(self.world_basis.up);
         const fwd = rot.rotate_vector(self.world_basis.fwd);
         const right = rot.rotate_vector(self.world_basis.right);

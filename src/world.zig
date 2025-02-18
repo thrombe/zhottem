@@ -23,6 +23,8 @@ pub const World = struct {
         errdefer self.deinit();
 
         _ = try self.ecs.register([]const u8);
+        _ = try self.ecs.register(math.Camera);
+        _ = try self.ecs.register(Components.Controller);
         _ = try self.ecs.register(Components.Transform);
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.Rigidbody);
@@ -36,23 +38,6 @@ pub const World = struct {
 
     pub fn deinit(self: *@This()) void {
         self.ecs.deinit();
-    }
-
-    pub fn tick(self: *@This(), state: *AppState, delta: f32) !void {
-        var it = try self.ecs.iterator(struct { r: Components.Rigidbody });
-        while (it.next()) |e| {
-            if (!e.r.flags.pinned) {
-                const g = state.camera.world_basis.up.scale(-e.r.mass * 9.8);
-                e.r.force = e.r.force.add(g);
-            }
-        }
-
-        try self.step(delta);
-
-        it.reset();
-        while (it.next()) |e| {
-            e.r.force = .{};
-        }
     }
 
     pub fn step(self: *@This(), delta: f32) !void {
@@ -320,16 +305,27 @@ pub const Components = struct {
 
     // maybe just put 2 transforms (last and current) inside rigidbody and store the interpolated transform in the
     // Transform component. that way it's easy to just use the interpolated transform for everything else.
+    // but maybe it's better to keep it framerate independent?
     pub const LastTransform = struct {
         t: Transform = .{},
 
-        pub fn lerp(self: *const @This(), new: *Transform, t: f32) Transform {
+        pub fn lerp(self: *const @This(), new: *const Transform, t: f32) Transform {
             return .{
                 .pos = self.t.pos.mix(new.pos, t),
                 .rotation = self.t.rotation.mix(new.rotation, t),
                 .scale = self.t.scale.mix(new.scale, t),
             };
         }
+    };
+
+    pub const Controller = struct {
+        pitch: f32 = 0,
+        yaw: f32 = 0,
+        speed: f32 = 1.0,
+        sensitivity: f32 = 1.0,
+        sensitivity_scale: f32 = 0.003,
+        did_rotate: bool = false,
+        did_move: bool = false,
     };
 
     pub const Collider = union(enum) {

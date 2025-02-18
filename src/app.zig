@@ -88,9 +88,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, null);
     errdefer device.destroyCommandPool(cmd_pool, null);
 
-    var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window), ctx);
-    errdefer uniforms.deinit(device);
-
     var model_uniform = try ModelUniformBuffer.new(&matrices, ctx);
     errdefer model_uniform.deinit(device);
     model_uniform.uniform_buffer[0] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.3)).mul_mat(math.Mat4x4.translation_mat(.{ .x = 1.5 }));
@@ -194,6 +191,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer world.deinit();
     const player_id = try world.ecs.insert(.{
         @as([]const u8, "player"),
+        math.Camera.init(
+            math.Camera.constants.basis.vulkan,
+            math.Camera.constants.basis.opengl,
+        ),
+        Components.Controller{},
         Components.Transform{ .pos = .{} },
         Components.LastTransform{},
         Components.Rigidbody{
@@ -290,6 +292,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //         Components.AnimatedRender{ .model = sphere_model_handle },
     //     });
     // }
+
+    const player = try world.ecs.get(player_id, struct { transform: Components.Transform, camera: math.Camera, controller: Components.Controller });
+    var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
+    errdefer uniforms.deinit(device);
 
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
@@ -640,8 +646,6 @@ const ShaderStageManager = struct {
 pub const AppState = struct {
     monitor_rez: struct { width: u32, height: u32 },
     mouse: extern struct { x: i32 = 0, y: i32 = 0, left: bool = false, right: bool = false } = .{},
-    camera: math.Camera,
-    camera_meta: ShaderUtils.Camera.CameraMeta = .{},
 
     frame: u32 = 0,
     time: f32 = 0,
@@ -652,6 +656,10 @@ pub const AppState = struct {
         step: f32 = 1.0 / 30.0,
         acctime: f32 = 0,
         interpolation_acctime: f32 = 0,
+
+        fn interpolated(self: *const @This(), lt: *const Components.LastTransform, t: *const Components.Transform) Components.Transform {
+            return lt.lerp(t, self.interpolation_acctime / self.step);
+        }
     } = .{},
 
     rng: std.Random.Xoshiro256,
@@ -670,11 +678,6 @@ pub const AppState = struct {
 
         return .{
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
-            .camera = math.Camera.init(
-                Vec4{ .z = -4 },
-                math.Camera.constants.basis.vulkan,
-                math.Camera.constants.basis.opengl,
-            ),
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = rng,
             .uniform_buffer = try allocator.alloc(u8, 0),
@@ -728,40 +731,34 @@ pub const AppState = struct {
             window.hide_cursor(false);
         }
 
-        var dx: i32 = 0;
-        var dy: i32 = 0;
-        if (self.focus) {
-            dx = @intFromFloat(mouse.dx);
-            dy = @intFromFloat(mouse.dy);
-        }
-        self.camera_meta.did_move = @intCast(@intFromBool(kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed()));
-        self.camera_meta.did_rotate = @intCast(@intFromBool((dx | dy) != 0));
-        self.camera_meta.did_change = @intCast(@intFromBool((self.camera_meta.did_move | self.camera_meta.did_rotate) > 0));
-
         self.mouse.left = mouse.left.pressed();
         self.mouse.x = @intFromFloat(mouse.x);
         self.mouse.y = @intFromFloat(mouse.y);
 
         self.frame += 1;
         self.time += delta;
-        self.physics.acctime += delta;
-        self.physics.interpolation_acctime += delta;
         self.deltatime = delta;
 
-        // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
-        if (self.camera_meta.did_rotate > 0) {
-            self.camera.yaw += mouse.dx * self.camera.sensitivity_scale * self.camera.sensitivity;
-            self.camera.pitch += mouse.dy * self.camera.sensitivity_scale * self.camera.sensitivity;
-            self.camera.pitch = std.math.clamp(self.camera.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
-        }
-
-        const rot = self.camera.rot_quat();
-        const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
-        const right = rot.rotate_vector(self.camera.world_basis.right);
-
         {
-            var player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform, r: Components.Rigidbody });
-            var speed = self.camera.speed;
+            var player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, t: Components.Transform, r: Components.Rigidbody, lt: Components.LastTransform });
+
+            player.controller.did_move = kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed();
+            player.controller.did_rotate = @abs(mouse.dx) + @abs(mouse.dy) > 0.0001 and self.focus;
+
+            // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
+            if (player.controller.did_rotate) {
+                player.controller.yaw += mouse.dx * player.controller.sensitivity_scale * player.controller.sensitivity;
+                player.controller.pitch += mouse.dy * player.controller.sensitivity_scale * player.controller.sensitivity;
+                player.controller.pitch = std.math.clamp(player.controller.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+            }
+
+            const rot = player.camera.rot_quat(player.controller.pitch, player.controller.yaw);
+            const fwd = rot.rotate_vector(player.camera.world_basis.fwd);
+            const right = rot.rotate_vector(player.camera.world_basis.right);
+
+            player.t.rotation = rot;
+
+            var speed = player.controller.speed;
             if (kb.shift.pressed()) {
                 speed *= 2.0;
             }
@@ -769,7 +766,7 @@ pub const AppState = struct {
                 speed *= 0.1;
             }
 
-            speed *= 50 * self.camera.speed;
+            speed *= 50 * player.controller.speed;
             speed *= player.r.mass;
 
             if (kb.w.pressed()) {
@@ -789,66 +786,87 @@ pub const AppState = struct {
                 player.r.vel = .{};
             }
 
-            player.t.rotation = rot;
-        }
-
-        {
-            const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
-            var t_min: ?f32 = null;
-            var closest: ?world_mod.Type.pointer(T) = null;
-            var it = try app.world.ecs.iterator(T);
-            while (it.next()) |e| {
-                if (!e.r.flags.player and !e.r.flags.pinned and mouse.left.pressed()) {
-                    if (e.c.raycast(e.t, self.camera.pos.add(fwd.scale(1.1)), fwd)) |t| {
-                        if (t_min == null) {
-                            t_min = t;
-                            closest = e;
-                        } else if (t_min.? > t) {
-                            t_min = t;
-                            closest = e;
+            {
+                const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
+                var t_min: ?f32 = null;
+                var closest: ?world_mod.Type.pointer(T) = null;
+                var it = try app.world.ecs.iterator(T);
+                while (it.next()) |e| {
+                    if (!e.r.flags.player and !e.r.flags.pinned and mouse.left.pressed()) {
+                        if (e.c.raycast(e.t, self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(1.1)), fwd)) |t| {
+                            if (t_min == null) {
+                                t_min = t;
+                                closest = e;
+                            } else if (t_min.? > t) {
+                                t_min = t;
+                                closest = e;
+                            }
                         }
                     }
                 }
-            }
-            if (closest) |e| {
-                e.r.vel = e.r.vel.add(fwd.scale(50));
-            }
-        }
-
-        if (mouse.right.pressed()) {
-            // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
-            // errdefer allocator.free(bones);
-            // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
-            // errdefer allocator.free(indices);
-            // @memset(bones, .{});
-            // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
-
-            const dirs = self.camera.dirs();
-            const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
-            _ = try app.world.ecs.insert(.{
-                @as([]const u8, "bullet"),
-                Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
-                Components.LastTransform{},
-                Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
-                Components.Collider{ .sphere = .{ .radius = 1.0 } },
-                // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                Components.TimeDespawn{ .despawn_time = self.time + 20 },
-            });
-        }
-
-        while (self.physics.acctime > self.physics.step) {
-            self.physics.acctime -= self.physics.step;
-
-            if (self.physics.acctime < self.physics.step) {
-                self.physics.interpolation_acctime = self.physics.acctime;
-                var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
-                while (it.next()) |e| {
-                    e.ft.t = e.t.*;
+                if (closest) |e| {
+                    e.r.vel = e.r.vel.add(fwd.scale(50));
                 }
             }
 
-            try app.world.tick(self, self.physics.step);
+            if (mouse.right.pressed()) {
+                // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                // errdefer allocator.free(bones);
+                // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                // errdefer allocator.free(indices);
+                // @memset(bones, .{});
+                // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+
+                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
+                const t = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
+                _ = try app.world.ecs.insert(.{
+                    @as([]const u8, "bullet"),
+                    t,
+                    Components.LastTransform{ .t = t },
+                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
+                    Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                    // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                    Components.StaticRender{ .mesh = app.handles.mesh.cube },
+                    Components.TimeDespawn{ .despawn_time = self.time + 20 },
+                });
+            }
+        }
+
+        {
+            self.physics.acctime += delta;
+            self.physics.interpolation_acctime += delta;
+
+            const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera });
+            {
+                var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
+                while (it.next()) |e| {
+                    if (!e.r.flags.pinned) {
+                        const g = player.camera.world_basis.up.scale(-e.r.mass * 9.8);
+                        e.r.force = e.r.force.add(g);
+                    }
+                }
+            }
+
+            while (self.physics.acctime >= self.physics.step) {
+                self.physics.acctime -= self.physics.step;
+
+                if (self.physics.acctime < self.physics.step) {
+                    self.physics.interpolation_acctime = self.physics.acctime;
+                    var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
+                    while (it.next()) |e| {
+                        e.ft.t = e.t.*;
+                    }
+                }
+
+                try app.world.step(self.physics.step);
+            }
+
+            {
+                var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
+                while (it.next()) |e| {
+                    e.r.force = .{};
+                }
+            }
         }
 
         {
@@ -956,11 +974,6 @@ pub const AppState = struct {
             };
 
             {
-                const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform, lt: Components.LastTransform });
-                self.camera.pos = player.lt.t.pos.mix(player.t.pos, self.physics.interpolation_acctime / self.physics.step);
-            }
-
-            {
                 var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform, m: Components.StaticRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.mesh);
@@ -969,7 +982,7 @@ pub const AppState = struct {
 
                         if (first_bone) |bone_index| {
                             app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
-                            app.cpu_resources.bones.items[bone_index] = e.ft.lerp(e.t, self.physics.interpolation_acctime / self.physics.step).mat4();
+                            app.cpu_resources.bones.items[bone_index] = self.physics.interpolated(e.ft, e.t).mat4();
                         } else {
                             app.cpu_resources.instances.items[instance_index].bone_offset = 0;
                         }
@@ -988,7 +1001,7 @@ pub const AppState = struct {
                         if (first_bone) |bone_index| {
                             app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
                             for (0..model.bones.len) |index| {
-                                app.cpu_resources.bones.items[bone_index + index] = e.ft.lerp(e.t, self.physics.interpolation_acctime / self.physics.step).mat4().mul_mat(e.m.bones[index]).mul_mat(model.bones[index].inverse_bind_matrix);
+                                app.cpu_resources.bones.items[bone_index + index] = self.physics.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(model.bones[index].inverse_bind_matrix);
                             }
                         } else {
                             app.cpu_resources.instances.items[instance_index].bone_offset = 0;
@@ -997,15 +1010,26 @@ pub const AppState = struct {
                 }
             }
         }
+
+        {
+            const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, lt: Components.LastTransform, transform: Components.Transform });
+            app.uniforms.uniform_buffer = try self.uniforms(window, &self.physics.interpolated(player.lt, player.transform), player.camera, player.controller);
+        }
     }
 
-    pub fn uniforms(self: *@This(), window: *Engine.Window) ![]u8 {
-        const rot = self.camera.rot_quat();
+    fn uniforms(
+        self: *@This(),
+        window: *Engine.Window,
+        transform: *const Components.Transform,
+        camera: *const math.Camera,
+        controller: *const Components.Controller,
+    ) ![]u8 {
+        const rot = camera.rot_quat(controller.pitch, controller.yaw);
 
-        const fwd = rot.rotate_vector(self.camera.world_basis.fwd);
-        const right = rot.rotate_vector(self.camera.world_basis.right);
-        const up = rot.rotate_vector(self.camera.world_basis.up);
-        const eye = self.camera.pos;
+        const fwd = rot.rotate_vector(camera.world_basis.fwd);
+        const right = rot.rotate_vector(camera.world_basis.right);
+        const up = rot.rotate_vector(camera.world_basis.up);
+        const eye = transform.pos;
 
         const uniform = .{
             .camera = ShaderUtils.Camera{
@@ -1013,7 +1037,11 @@ pub const AppState = struct {
                 .fwd = fwd,
                 .right = right,
                 .up = up,
-                .meta = self.camera_meta,
+                .meta = .{
+                    .did_move = @intCast(@intFromBool(controller.did_move)),
+                    .did_rotate = @intCast(@intFromBool(controller.did_rotate)),
+                    .did_change = @intCast(@intFromBool(controller.did_rotate or controller.did_move)),
+                },
             },
             .mouse = ShaderUtils.Mouse{
                 .x = self.mouse.x,
@@ -1021,7 +1049,13 @@ pub const AppState = struct {
                 .left = @intCast(@intFromBool(self.mouse.left)),
                 .right = @intCast(@intFromBool(self.mouse.right)),
             },
-            .world_to_screen = self.camera.world_to_screen_mat(.{ .width = window.extent.width, .height = window.extent.height }),
+            .world_to_screen = camera.world_to_screen_mat(.{
+                .width = window.extent.width,
+                .height = window.extent.height,
+                .pos = eye,
+                .pitch = controller.pitch,
+                .yaw = controller.yaw,
+            }),
             .frame = self.frame,
             .time = self.time,
             .deltatime = self.deltatime,
@@ -1067,8 +1101,10 @@ pub const GuiState = struct {
     frame_times: [10]f32 = std.mem.zeroes([10]f32),
     frame_times_i: usize = 10,
 
-    pub fn tick(self: *@This(), state: *AppState, lap: u64) void {
+    pub fn tick(self: *@This(), app: *App, state: *AppState, lap: u64) !void {
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+
+        const player = try app.world.ecs.get(app.handles.player, struct { controller: Components.Controller });
 
         self.frame_times_i += 1;
         self.frame_times_i = @rem(self.frame_times_i, self.frame_times.len);
@@ -1081,17 +1117,17 @@ pub const GuiState = struct {
             c.ImGui_Text("Application average %.3f ms/frame (%.1f FPS)", frametime, std.time.ms_per_s / frametime);
 
             c.ImGui_Text("State");
-            self.editState(state);
+            self.editState(state, player.controller);
         }
     }
 
-    fn editState(self: *@This(), state: *AppState) void {
+    fn editState(self: *@This(), state: *AppState, controller: *Components.Controller) void {
         _ = self;
 
         var reset = false;
 
-        _ = c.ImGui_SliderFloat("Speed", &state.camera.speed, 0.1, 10.0);
-        _ = c.ImGui_SliderFloat("Sensitivity", &state.camera.sensitivity, 0.001, 2.0);
+        _ = c.ImGui_SliderFloat("Speed", &controller.speed, 0.1, 10.0);
+        _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
 
         reset = reset or c.ImGui_Button("Reset render state");
