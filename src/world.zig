@@ -24,6 +24,7 @@ pub const World = struct {
 
         _ = try self.ecs.register([]const u8);
         _ = try self.ecs.register(Components.Transform);
+        _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.Rigidbody);
         _ = try self.ecs.register(Components.Collider);
         _ = try self.ecs.register(Components.TimeDespawn);
@@ -40,7 +41,7 @@ pub const World = struct {
     pub fn tick(self: *@This(), state: *AppState, delta: f32) !void {
         var it = try self.ecs.iterator(struct { r: Components.Rigidbody });
         while (it.next()) |e| {
-            if (!e.r.flags.pinned and !e.r.flags.player) {
+            if (!e.r.flags.pinned) {
                 const g = state.camera.world_basis.up.scale(-e.r.mass * 9.8);
                 e.r.force = e.r.force.add(g);
             }
@@ -314,6 +315,20 @@ pub const Components = struct {
             const rot = math.Mat4x4.rot_mat_from_quat(self.rotation);
             const scale = math.Mat4x4.scaling_mat(self.scale);
             return translate.mul_mat(rot).mul_mat(scale);
+        }
+    };
+
+    // maybe just put 2 transforms (last and current) inside rigidbody and store the interpolated transform in the
+    // Transform component. that way it's easy to just use the interpolated transform for everything else.
+    pub const LastTransform = struct {
+        t: Transform = .{},
+
+        pub fn lerp(self: *const @This(), new: *Transform, t: f32) Transform {
+            return .{
+                .pos = self.t.pos.mix(new.pos, t),
+                .rotation = self.t.rotation.mix(new.rotation, t),
+                .scale = self.t.scale.mix(new.scale, t),
+            };
         }
     };
 

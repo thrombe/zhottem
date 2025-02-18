@@ -177,7 +177,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var instance_manager = InstanceManager.init(bones_handle);
     errdefer instance_manager.deinit();
 
-    const cube_instance_handle = try cpu.batch_reserve(10);
+    const cube_instance_handle = try cpu.batch_reserve(1000);
     const cube_mesh_handle = try cpu.add_mesh(&cube);
     try instance_manager.instances.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
 
@@ -187,7 +187,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     const sphere_model_handle = try cpu.add_model(sphere);
     const sphere_mesh_handle = sphere_model_handle.mesh;
-    const sphere_instance_handle = try cpu.batch_reserve(1000);
+    const sphere_instance_handle = try cpu.batch_reserve(100);
     try instance_manager.instances.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
 
     var world = try World.init();
@@ -195,8 +195,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const player_id = try world.ecs.insert(.{
         @as([]const u8, "player"),
         Components.Transform{ .pos = .{} },
+        Components.LastTransform{},
         Components.Rigidbody{
-            .flags = .{ .player = false },
+            .flags = .{ .player = true },
             .mass = 2,
             .dynamic_friction = 1.0,
         },
@@ -208,6 +209,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //         .flags = .{ .pinned = true },
     //     },
     //     Components.Transform{ .pos = .{ .y = -3 } },
+    //     Components.LastTransform{},
     //     Components.Collider{ .sphere = .{ .radius = -10 } },
     // });
     _ = try world.ecs.insert(.{
@@ -216,6 +218,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .pos = .{ .y = -3 },
             .scale = Vec4.splat3(50),
         },
+        Components.LastTransform{},
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
@@ -226,6 +229,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
             .scale = Vec4.splat3(50),
         },
+        Components.LastTransform{},
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
@@ -236,6 +240,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
             .scale = Vec4.splat3(50),
         },
+        Components.LastTransform{},
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
@@ -246,6 +251,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
             .scale = Vec4.splat3(50),
         },
+        Components.LastTransform{},
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
@@ -256,6 +262,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
             .scale = Vec4.splat3(50),
         },
+        Components.LastTransform{},
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
@@ -642,8 +649,9 @@ pub const AppState = struct {
     fps_cap: u32 = 60,
 
     physics: struct {
-        step: f32 = 1.0 / 100.0,
-        time: f32 = 0,
+        step: f32 = 1.0 / 30.0,
+        acctime: f32 = 0,
+        interpolation_acctime: f32 = 0,
     } = .{},
 
     rng: std.Random.Xoshiro256,
@@ -736,7 +744,8 @@ pub const AppState = struct {
 
         self.frame += 1;
         self.time += delta;
-        self.physics.time += delta;
+        self.physics.acctime += delta;
+        self.physics.interpolation_acctime += delta;
         self.deltatime = delta;
 
         // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
@@ -780,7 +789,6 @@ pub const AppState = struct {
                 player.r.vel = .{};
             }
 
-            player.t.pos = self.camera.pos;
             player.t.rotation = rot;
         }
 
@@ -807,29 +815,40 @@ pub const AppState = struct {
             }
         }
 
-        while (self.physics.time > self.physics.step) {
-            try app.world.tick(self, self.physics.step);
-            self.physics.time -= self.physics.step;
-        }
-
         if (mouse.right.pressed()) {
-            const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
-            errdefer allocator.free(bones);
-            const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
-            errdefer allocator.free(indices);
-            @memset(bones, .{});
-            @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+            // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+            // errdefer allocator.free(bones);
+            // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+            // errdefer allocator.free(indices);
+            // @memset(bones, .{});
+            // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
 
             const dirs = self.camera.dirs();
             const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
             _ = try app.world.ecs.insert(.{
                 @as([]const u8, "bullet"),
                 Components.Transform{ .pos = self.camera.pos.add(dirs.fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) },
+                Components.LastTransform{},
                 Components.Rigidbody{ .flags = .{}, .vel = dirs.fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
                 Components.Collider{ .sphere = .{ .radius = 1.0 } },
-                Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                Components.TimeDespawn{ .despawn_time = self.time + 10 },
+                // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                Components.StaticRender{ .mesh = app.handles.mesh.cube },
+                Components.TimeDespawn{ .despawn_time = self.time + 20 },
             });
+        }
+
+        while (self.physics.acctime > self.physics.step) {
+            self.physics.acctime -= self.physics.step;
+
+            if (self.physics.acctime < self.physics.step) {
+                self.physics.interpolation_acctime = self.physics.acctime;
+                var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
+                while (it.next()) |e| {
+                    e.ft.t = e.t.*;
+                }
+            }
+
+            try app.world.tick(self, self.physics.step);
         }
 
         {
@@ -930,9 +949,6 @@ pub const AppState = struct {
             }
         }
 
-        const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
-        self.camera.pos = player.t.pos;
-
         {
             app.instance_manager.reset();
             defer if (app.instance_manager.update()) {
@@ -940,7 +956,12 @@ pub const AppState = struct {
             };
 
             {
-                var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.StaticRender });
+                const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform, lt: Components.LastTransform });
+                self.camera.pos = player.lt.t.pos.mix(player.t.pos, self.physics.interpolation_acctime / self.physics.step);
+            }
+
+            {
+                var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform, m: Components.StaticRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.mesh);
                     if (instance) |instance_index| {
@@ -948,7 +969,7 @@ pub const AppState = struct {
 
                         if (first_bone) |bone_index| {
                             app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
-                            app.cpu_resources.bones.items[bone_index] = e.t.mat4();
+                            app.cpu_resources.bones.items[bone_index] = e.ft.lerp(e.t, self.physics.interpolation_acctime / self.physics.step).mat4();
                         } else {
                             app.cpu_resources.instances.items[instance_index].bone_offset = 0;
                         }
@@ -957,7 +978,7 @@ pub const AppState = struct {
             }
 
             {
-                var it = try app.world.ecs.iterator(struct { t: Components.Transform, m: Components.AnimatedRender });
+                var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform, m: Components.AnimatedRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.model.mesh);
                     const model = &app.cpu_resources.models.items[e.m.model.index];
@@ -967,7 +988,7 @@ pub const AppState = struct {
                         if (first_bone) |bone_index| {
                             app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
                             for (0..model.bones.len) |index| {
-                                app.cpu_resources.bones.items[bone_index + index] = e.t.mat4().mul_mat(e.m.bones[index]).mul_mat(model.bones[index].inverse_bind_matrix);
+                                app.cpu_resources.bones.items[bone_index + index] = e.ft.lerp(e.t, self.physics.interpolation_acctime / self.physics.step).mat4().mul_mat(e.m.bones[index]).mul_mat(model.bones[index].inverse_bind_matrix);
                             }
                         } else {
                             app.cpu_resources.instances.items[instance_index].bone_offset = 0;
