@@ -181,7 +181,7 @@ pub const InstanceManager = struct {
         }
         const hash = hasher.final();
         defer self.hash = hash;
-        return self.hash == hash;
+        return self.hash != hash;
     }
 };
 

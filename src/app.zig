@@ -827,7 +827,7 @@ pub const AppState = struct {
             var to_remove = std.ArrayList(Entity).init(allocator.*);
             defer to_remove.deinit();
 
-            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn, m: Components.AnimatedRender });
+            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
             while (it.next()) |e| {
                 if (e.ds.despawn_time < self.time) {
                     try to_remove.append(e.id.*);
