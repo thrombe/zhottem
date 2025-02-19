@@ -116,6 +116,7 @@
           glslang
           shaderc
           glfw
+          portaudio
 
           vulkan-headers
           vulkan-validation-layers

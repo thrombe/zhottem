@@ -59,6 +59,7 @@ camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
 command_pool: vk.CommandPool,
 stages: ShaderStageManager,
+audio: AudioPlayer,
 
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
@@ -72,6 +73,21 @@ handles: struct {
         cube: GpuResourceManager.MeshResourceHandle,
     },
 },
+
+const AudioPlayer = Engine.AudioPlayer.OutputStream(struct {
+    phase: f64 = 0,
+    pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
+        _ = flags;
+        _ = timeinfo;
+
+        for (output) |*frame| {
+            frame[0] = @floatCast(@sin(self.ctx.phase));
+            frame[1] = @floatCast(@sin(self.ctx.phase));
+
+            self.ctx.phase += 440.0 * 2.0 * std.math.pi / self.args.sample_rate;
+        }
+    }
+});
 
 var matrices = std.mem.zeroes([2]math.Mat4x4);
 const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
@@ -317,8 +333,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var model_desc_set = try model_desc_set_builder.build(device);
     errdefer model_desc_set.deinit(device);
 
-    const stages = try ShaderStageManager.init();
+    var stages = try ShaderStageManager.init();
     errdefer stages.deinit();
+
+    var audio = try AudioPlayer.init(.{}, .{});
+    errdefer audio.deinit() catch |e| utils.dump_error(e);
+    try audio.start();
 
     return @This(){
         .world = world,
@@ -334,6 +354,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .model_descriptor_set = model_desc_set,
         .command_pool = cmd_pool,
         .stages = stages,
+        .audio = audio,
 
         .texture_img = image,
         .texture = gpu_img,
@@ -364,6 +385,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
     defer self.stages.deinit();
+    defer self.audio.deinit() catch |e| utils.dump_error(e);
     defer self.texture_img.deinit();
     defer self.texture.deinit(device);
 }

@@ -9,18 +9,21 @@ pub const c = @cImport({
     @cInclude("dcimgui.h");
     @cInclude("dcimgui_impl_glfw.h");
     @cInclude("dcimgui_impl_vulkan.h");
+
+    @cInclude("portaudio.h");
 });
 
 const vk = @import("vulkan");
 
-const utils = @import("utils.zig");
-const Fuse = utils.Fuse;
+const utils_mod = @import("utils.zig");
+const Fuse = utils_mod.Fuse;
 
 const main = @import("main.zig");
 const allocator = main.allocator;
 
 const Engine = @This();
 
+audio: AudioPlayer,
 window: *Window,
 graphics: VulkanContext,
 
@@ -28,19 +31,139 @@ pub fn init() !@This() {
     var window = try Window.init();
     errdefer window.deinit();
 
+    var audio = try AudioPlayer.init();
+    errdefer audio.deinit() catch |e| utils_mod.dump_error(e);
+
     var ctx = try VulkanContext.init(window);
     errdefer ctx.deinit();
 
     return .{
         .window = window,
         .graphics = ctx,
+        .audio = audio,
     };
 }
 
 pub fn deinit(self: *@This()) void {
     self.graphics.deinit();
+    self.audio.deinit() catch |e| utils_mod.dump_error(e);
     self.window.deinit();
 }
+
+pub const AudioPlayer = struct {
+    pub fn init() !@This() {
+        if (c.Pa_Initialize() != c.paNoError) {
+            return error.CouldNotInitializePA;
+        }
+        errdefer _ = c.Pa_Terminate();
+
+        return .{};
+    }
+
+    pub fn deinit(_: *@This()) !void {
+        if (c.Pa_Terminate() != c.paNoError) {
+            return error.CouldNotTerminatePA;
+        }
+    }
+
+    pub fn output_stream(_: *@This(), ctx: anytype, v: OutputStream(@TypeOf(ctx)).Args) !OutputStream(@TypeOf(ctx)) {
+        var stream = try OutputStream(@TypeOf(ctx)).init(ctx, v);
+        errdefer _ = stream.deinit();
+        return stream;
+    }
+
+    pub fn OutputStream(Ctxt: type) type {
+        return struct {
+            pub const Ctx = Ctxt;
+            pub const Args = struct {
+                sample_rate: f64 = 48000,
+                frames_per_buffer: u32 = 256,
+            };
+
+            pub const CallbackContext = struct {
+                ctx: Ctx,
+                args: Args,
+                stream: *c.PaStream,
+                paused: bool = true,
+            };
+
+            ctx: *CallbackContext,
+
+            fn callback(
+                input: *const anyopaque,
+                output_: *anyopaque,
+                frames: u64,
+                timeinfo: *c.PaStreamCallbackTimeInfo,
+                flags: c.PaStreamCallbackFlags,
+                ctxt: *anyopaque,
+            ) callconv(.C) c_int {
+                const ctx: *CallbackContext = @ptrCast(@alignCast(ctxt));
+                _ = input;
+
+                var output: [*c][2]f32 = @ptrCast(@alignCast(output_));
+
+                Ctx.callback(ctx, output[0..frames], timeinfo, flags) catch |e| {
+                    utils_mod.dump_error(e);
+                    return c.paError;
+                };
+
+                return c.paContinue;
+            }
+
+            pub fn init(ctx: Ctx, v: Args) !@This() {
+                const ctxt = try allocator.create(CallbackContext);
+                errdefer allocator.destroy(ctxt);
+                ctxt.ctx = ctx;
+                ctxt.args = v;
+
+                if (c.Pa_OpenDefaultStream(
+                    @ptrCast(&ctxt.stream),
+                    0,
+                    2,
+                    c.paFloat32,
+                    v.sample_rate,
+                    v.frames_per_buffer,
+                    @ptrCast(&@This().callback),
+                    ctxt,
+                ) != c.paNoError) {
+                    return error.CouldNotOpenStream;
+                }
+                errdefer _ = c.Pa_CloseStream(ctxt.stream);
+
+                return .{ .ctx = ctxt };
+            }
+
+            pub fn start(self: *@This()) !void {
+                if (c.Pa_StartStream(self.ctx.stream) != c.paNoError) {
+                    return error.CouldNotstartStream;
+                }
+                errdefer _ = c.Pa_StopStream(self.ctx.stream);
+
+                self.ctx.paused = false;
+            }
+
+            pub fn stop(self: *@This()) !void {
+                if (c.Pa_StopStream(self.ctx.stream) != c.paNoError) {
+                    return error.CouldNotStopStream;
+                }
+
+                self.ctx.paused = true;
+            }
+
+            pub fn deinit(self: *@This()) !void {
+                if (!self.ctx.paused) {
+                    try self.stop();
+                }
+
+                if (c.Pa_CloseStream(self.ctx.stream) != c.paNoError) {
+                    return error.CouldNotCloseStream;
+                }
+
+                allocator.destroy(self.ctx);
+            }
+        };
+    }
+};
 
 pub const Window = struct {
     // last known size

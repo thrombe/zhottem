@@ -60,6 +60,7 @@ fn step(b: *std.Build, v: struct {
             compile_step.addLibraryPath(b.path("./zig-out/lib"));
 
             compile_step.linkSystemLibrary("glfw");
+            compile_step.linkSystemLibrary("portaudio");
             compile_step.linkSystemLibrary("fswatch");
             compile_step.linkSystemLibrary2("ImageMagick", .{});
             compile_step.linkSystemLibrary2("MagickWand", .{});
