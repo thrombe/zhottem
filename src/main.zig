@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const options = @import("build-options");
+const utils_mod = @import("utils.zig");
 
 var _allocator: std.mem.Allocator = undefined;
 
@@ -109,11 +110,7 @@ const HotReloader = struct {
                     errdefer dyn.close();
 
                     const vtable = HotVtable.from_dyn(&dyn) catch |e| {
-                        std.debug.print("error: {any}\n", .{e});
-                        if (@errorReturnTrace()) |trace| {
-                            std.debug.dumpStackTrace(trace.*);
-                        }
-
+                        utils_mod.dump_error(e);
                         return true;
                     };
 
@@ -142,10 +139,7 @@ pub fn main() !void {
         .exe => {
             var app = try HotApp.init();
             defer app.deinit() catch |e| {
-                std.debug.print("error: {any}\n", .{e});
-                if (@errorReturnTrace()) |trace| {
-                    std.debug.dumpStackTrace(trace.*);
-                }
+                utils_mod.dump_error(e);
             };
             while (try app.tick()) {}
         },
@@ -175,11 +169,7 @@ export fn hot_init() ?*anyopaque {
         .exe, .hotexe => return null,
         .hotlib => {
             const app = HotApp.init() catch |e| {
-                std.debug.print("error: {any}\n", .{e});
-                if (@errorReturnTrace()) |trace| {
-                    std.debug.dumpStackTrace(trace.*);
-                }
-
+                utils_mod.dump_error(e);
                 return null;
             };
 
@@ -197,11 +187,7 @@ export fn hot_tick(_app: *anyopaque) HotAction {
             const app: *HotApp = @ptrCast(@alignCast(_app));
 
             const res = app.tick() catch |e| {
-                std.debug.print("error: {any}\n", .{e});
-                if (@errorReturnTrace()) |trace| {
-                    std.debug.dumpStackTrace(trace.*);
-                }
-
+                utils_mod.dump_error(e);
                 return .errored;
             };
 
@@ -219,11 +205,7 @@ export fn hot_deinit(_app: *anyopaque) HotAction {
             const app: *HotApp = @ptrCast(@alignCast(_app));
 
             app.deinit() catch |e| {
-                std.debug.print("error: {any}\n", .{e});
-                if (@errorReturnTrace()) |trace| {
-                    std.debug.dumpStackTrace(trace.*);
-                }
-
+                utils_mod.dump_error(e);
                 return .errored;
             };
 

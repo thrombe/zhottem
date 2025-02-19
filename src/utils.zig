@@ -88,6 +88,13 @@ pub const TypeId = struct {
     }
 };
 
+pub inline fn dump_error(err: anyerror) void {
+    std.debug.print("error: {any}\n", .{err});
+    if (@errorReturnTrace()) |trace| {
+        std.debug.dumpStackTrace(trace.*);
+    }
+}
+
 // assumes ok has ok.deinit()
 pub fn Result(ok: type, err_typ: type) type {
     return union(enum) {
