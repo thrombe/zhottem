@@ -23,7 +23,7 @@ const allocator = main.allocator;
 
 const Engine = @This();
 
-audio: AudioPlayer,
+audio: Audio,
 window: *Window,
 graphics: VulkanContext,
 
@@ -31,7 +31,7 @@ pub fn init() !@This() {
     var window = try Window.init();
     errdefer window.deinit();
 
-    var audio = try AudioPlayer.init();
+    var audio = try Audio.init();
     errdefer audio.deinit() catch |e| utils_mod.dump_error(e);
 
     var ctx = try VulkanContext.init(window);
@@ -50,7 +50,7 @@ pub fn deinit(self: *@This()) void {
     self.window.deinit();
 }
 
-pub const AudioPlayer = struct {
+pub const Audio = struct {
     pub fn init() !@This() {
         if (c.Pa_Initialize() != c.paNoError) {
             return error.CouldNotInitializePA;
@@ -66,13 +66,19 @@ pub const AudioPlayer = struct {
         }
     }
 
-    pub fn output_stream(_: *@This(), ctx: anytype, v: OutputStream(@TypeOf(ctx)).Args) !OutputStream(@TypeOf(ctx)) {
-        var stream = try OutputStream(@TypeOf(ctx)).init(ctx, v);
+    pub fn output_stream(_: *@This(), ctx: anytype, v: Stream(@TypeOf(ctx)).Args) !Stream(@TypeOf(ctx), .output) {
+        var stream = try Stream(@TypeOf(ctx), .output).init(ctx, v);
         errdefer _ = stream.deinit();
         return stream;
     }
 
-    pub fn OutputStream(Ctxt: type) type {
+    pub fn input_stream(_: *@This(), ctx: anytype, v: Stream(@TypeOf(ctx)).Args) !Stream(@TypeOf(ctx), .input) {
+        var stream = try Stream(@TypeOf(ctx), .input).init(ctx, v);
+        errdefer _ = stream.deinit();
+        return stream;
+    }
+
+    pub fn Stream(Ctxt: type, comptime typ: enum { output, input }) type {
         return struct {
             pub const Ctx = Ctxt;
             pub const Args = struct {
@@ -90,7 +96,7 @@ pub const AudioPlayer = struct {
             ctx: *CallbackContext,
 
             fn callback(
-                input: *const anyopaque,
+                input_: *const anyopaque,
                 output_: *anyopaque,
                 frames: u64,
                 timeinfo: *c.PaStreamCallbackTimeInfo,
@@ -98,14 +104,25 @@ pub const AudioPlayer = struct {
                 ctxt: *anyopaque,
             ) callconv(.C) c_int {
                 const ctx: *CallbackContext = @ptrCast(@alignCast(ctxt));
-                _ = input;
 
-                var output: [*c][2]f32 = @ptrCast(@alignCast(output_));
+                switch (typ) {
+                    .output => {
+                        var output: [*c][2]f32 = @ptrCast(@alignCast(output_));
 
-                Ctx.callback(ctx, output[0..frames], timeinfo, flags) catch |e| {
-                    utils_mod.dump_error(e);
-                    return c.paError;
-                };
+                        Ctx.callback(ctx, output[0..frames], timeinfo, flags) catch |e| {
+                            utils_mod.dump_error(e);
+                            return c.paAbort;
+                        };
+                    },
+                    .input => {
+                        var input: [*c]const f32 = @ptrCast(@alignCast(input_));
+
+                        Ctx.callback(ctx, input[0..frames], timeinfo, flags) catch |e| {
+                            utils_mod.dump_error(e);
+                            return c.paAbort;
+                        };
+                    },
+                }
 
                 return c.paContinue;
             }
@@ -118,8 +135,14 @@ pub const AudioPlayer = struct {
 
                 if (c.Pa_OpenDefaultStream(
                     @ptrCast(&ctxt.stream),
-                    0,
-                    2,
+                    switch (typ) {
+                        .output => 0,
+                        .input => 1,
+                    },
+                    switch (typ) {
+                        .output => 2,
+                        .input => 0,
+                    },
                     c.paFloat32,
                     v.sample_rate,
                     v.frames_per_buffer,
@@ -157,6 +180,10 @@ pub const AudioPlayer = struct {
 
                 if (c.Pa_CloseStream(self.ctx.stream) != c.paNoError) {
                     return error.CouldNotCloseStream;
+                }
+
+                if (comptime @hasDecl(Ctx, "deinit")) {
+                    self.ctx.ctx.deinit();
                 }
 
                 allocator.destroy(self.ctx);

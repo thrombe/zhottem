@@ -59,6 +59,7 @@ camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
 command_pool: vk.CommandPool,
 stages: ShaderStageManager,
+recorder: AudioRecorder,
 audio: AudioPlayer,
 
 texture_img: utils.ImageMagick.UnormImage,
@@ -74,20 +75,40 @@ handles: struct {
     },
 },
 
-const AudioPlayer = Engine.AudioPlayer.OutputStream(struct {
-    phase: f64 = 0,
+const AudioPlayer = Engine.Audio.Stream(struct {
+    recorded: *utils.Channel([256]f32),
+
     pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
         _ = flags;
         _ = timeinfo;
 
-        for (output) |*frame| {
-            frame[0] = @floatCast(@sin(self.ctx.phase));
-            frame[1] = @floatCast(@sin(self.ctx.phase));
-
-            self.ctx.phase += 440.0 * 2.0 * std.math.pi / self.args.sample_rate;
+        if (self.ctx.recorded.try_recv()) |rec| {
+            for (output, 0..) |*frame, i| {
+                frame[0] = rec[i];
+                frame[1] = rec[i];
+            }
+        } else {
+            @memset(output, [2]f32{ 0, 0 });
         }
     }
-});
+}, .output);
+
+const AudioRecorder = Engine.Audio.Stream(struct {
+    recorded: utils.Channel([256]f32),
+
+    pub fn callback(self: *AudioRecorder.CallbackContext, input: []const f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
+        _ = flags;
+        _ = timeinfo;
+
+        var buf: [256]f32 = undefined;
+        @memcpy(&buf, input);
+        try self.ctx.recorded.send(buf);
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.recorded.deinit();
+    }
+}, .input);
 
 var matrices = std.mem.zeroes([2]math.Mat4x4);
 const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
@@ -336,7 +357,15 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var stages = try ShaderStageManager.init();
     errdefer stages.deinit();
 
-    var audio = try AudioPlayer.init(.{}, .{});
+    var recorder = try AudioRecorder.init(.{
+        .recorded = try utils.Channel([256]f32).init(allocator.*),
+    }, .{});
+    errdefer recorder.deinit() catch |e| utils.dump_error(e);
+    try recorder.start();
+
+    var audio = try AudioPlayer.init(.{
+        .recorded = &recorder.ctx.ctx.recorded,
+    }, .{});
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
@@ -354,6 +383,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .model_descriptor_set = model_desc_set,
         .command_pool = cmd_pool,
         .stages = stages,
+        .recorder = recorder,
         .audio = audio,
 
         .texture_img = image,
@@ -385,6 +415,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
     defer self.stages.deinit();
+    defer self.recorder.deinit() catch |e| utils.dump_error(e);
     defer self.audio.deinit() catch |e| utils.dump_error(e);
     defer self.texture_img.deinit();
     defer self.texture.deinit(device);
