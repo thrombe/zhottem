@@ -256,6 +256,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.Controller{},
         Components.Transform{ .pos = .{} },
         Components.LastTransform{},
+        Components.Shooter{
+            .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
+            .hold = true,
+        },
         Components.Rigidbody{
             .flags = .{ .player = true },
             .mass = 2,
@@ -821,7 +825,7 @@ pub const AppState = struct {
         self.deltatime = delta;
 
         {
-            var player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, t: Components.Transform, r: Components.Rigidbody, lt: Components.LastTransform });
+            var player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, t: Components.Transform, r: Components.Rigidbody, lt: Components.LastTransform, shooter: Components.Shooter });
 
             player.controller.did_move = kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed();
             player.controller.did_rotate = @abs(mouse.dx) + @abs(mouse.dy) > 0.0001 and self.focus;
@@ -890,7 +894,7 @@ pub const AppState = struct {
                 }
             }
 
-            if (mouse.right.pressed()) {
+            if (player.shooter.try_shoot(mouse.right)) {
                 // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
                 // errdefer allocator.free(bones);
                 // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);

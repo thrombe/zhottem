@@ -95,6 +95,27 @@ pub inline fn dump_error(err: anyerror) void {
     }
 }
 
+pub const Ticker = struct {
+    timer: std.time.Timer,
+    step: u64,
+
+    pub fn init(step: u46) !@This() {
+        return .{
+            .step = step,
+            .timer = try std.time.Timer.start(),
+        };
+    }
+
+    pub fn tick(self: *@This()) bool {
+        if (self.timer.read() > self.step) {
+            self.timer.reset();
+            return true;
+        } else {
+            return false;
+        }
+    }
+};
+
 // assumes ok has ok.deinit()
 pub fn Result(ok: type, err_typ: type) type {
     return union(enum) {

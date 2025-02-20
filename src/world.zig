@@ -6,6 +6,8 @@ const Vec4 = math.Vec4;
 const utils_mod = @import("utils.zig");
 const TypeId = utils_mod.TypeId;
 
+const Engine = @import("engine.zig");
+
 const app = @import("app.zig");
 const AppState = app.AppState;
 
@@ -25,6 +27,7 @@ pub const World = struct {
         _ = try self.ecs.register([]const u8);
         _ = try self.ecs.register(math.Camera);
         _ = try self.ecs.register(Components.Controller);
+        _ = try self.ecs.register(Components.Shooter);
         _ = try self.ecs.register(Components.Transform);
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.Rigidbody);
@@ -328,6 +331,15 @@ pub const Components = struct {
         did_move: bool = false,
     };
 
+    pub const Shooter = struct {
+        ticker: utils_mod.Ticker,
+        hold: bool,
+
+        pub fn try_shoot(self: *@This(), action: Engine.Window.Action) bool {
+            return ((action.pressed() and self.hold) or (action.just_pressed() and !self.hold)) and self.ticker.tick();
+        }
+    };
+
     pub const Collider = union(enum) {
         sphere: Sphere,
         plane: Plane,
@@ -590,6 +602,10 @@ pub const EntityComponentStore = struct {
             switch (component) {
                 []const u8 => return .{ .deinit = null },
                 else => return .{
+                    // TODO: these will not update when hot reloaded.
+                    // tho maybe unloading earlier dylib might invalidate these ptrs? not sure.
+                    // are new dylibs loaded in the similar memory locations as the older ones?
+                    //  - this will also break these ptrs.
                     .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
                 },
             }
