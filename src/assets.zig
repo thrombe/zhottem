@@ -1050,7 +1050,7 @@ pub const Gltf = struct {
 
 pub const Wav = struct {
     header: Header,
-    data: []f32,
+    data: [][2]f32,
 
     const Header = extern struct {
         riff: [4]u8,
@@ -1067,6 +1067,10 @@ pub const Wav = struct {
         data: [4]u8,
         subchunk2Size: u32,
     };
+
+    pub fn deinit(self: *@This()) void {
+        allocator.free(self.data);
+    }
 
     pub fn parse_wav(path: []const u8) !@This() {
         var reader = try Reader.load(path);
@@ -1091,12 +1095,27 @@ pub const Wav = struct {
             return error.InvalidWAVFile;
         }
 
-        const raw = std.mem.bytesAsSlice(i16, reader.buf[reader.head..][0..header.subchunk2Size]);
-        const floats = try allocator.alloc(f32, raw.len);
+        // there's no real reason to restrict to these other than for convenience.
+        // i just want all audio to be same for the game to play.
+        // any assets that don't match these can be converted to support this using ffmpeg.
+        // maybe in future we can just convert to match these values at runtime.
+        if (header.numChannels != 2) {
+            return error.UnsupportedNumChannels;
+        }
+        if (header.sampleRate != 48000) {
+            return error.UnsupportedSampleRate;
+        }
+        if (header.bitsPerSample != 16) {
+            return error.UnsupportedBitsPerSample;
+        }
+
+        const raw = std.mem.bytesAsSlice([2]i16, reader.buf[reader.head..][0..header.subchunk2Size]);
+        const floats = try allocator.alloc([2]f32, raw.len);
         errdefer allocator.free(floats);
 
         for (raw, floats) |r, *f| {
-            f.* = @as(f32, @floatFromInt(r)) / 32768.0;
+            f[0] = @as(f32, @floatFromInt(r[0])) / 32768.0;
+            f[1] = @as(f32, @floatFromInt(r[1])) / 32768.0;
         }
 
         return .{

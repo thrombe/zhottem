@@ -265,6 +265,9 @@ pub const ResourceManager = struct {
         mesh: MeshResourceHandle,
         index: u32,
     };
+    pub const AudioHandle = struct {
+        index: u32,
+    };
 
     pub const CpuResources = struct {
         vertices: Vertices,
@@ -272,12 +275,14 @@ pub const ResourceManager = struct {
         instances: Instances,
         bones: Bones,
         models: Models,
+        audio: AudioSamples,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
         const Instances = std.ArrayList(Instance);
         const Bones = std.ArrayList(math.Mat4x4);
         const Models = std.ArrayList(assets_mod.Model);
+        const AudioSamples = std.ArrayList(assets_mod.Wav);
 
         pub fn init() @This() {
             return .{
@@ -286,6 +291,7 @@ pub const ResourceManager = struct {
                 .instances = Instances.init(allocator.*),
                 .bones = Bones.init(allocator.*),
                 .models = Models.init(allocator.*),
+                .audio = AudioSamples.init(allocator.*),
             };
         }
 
@@ -295,6 +301,17 @@ pub const ResourceManager = struct {
             self.instances.deinit();
             self.bones.deinit();
             self.models.deinit();
+
+            for (self.audio.items) |*sample| {
+                sample.deinit();
+            }
+            self.audio.deinit();
+        }
+
+        pub fn add_audio(self: *@This(), w: assets_mod.Wav) !AudioHandle {
+            const handle = AudioHandle{ .index = @intCast(self.audio.items.len) };
+            try self.audio.append(w);
+            return handle;
         }
 
         pub fn add_model(self: *@This(), m: assets_mod.Model) !ModelHandle {
