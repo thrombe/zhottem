@@ -13,3 +13,5 @@
 /assets/*.glb
 /assets/*.gltf
 /assets/*.bin
+/assets/**/*.mp3
+/assets/**/*.wav

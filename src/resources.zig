@@ -3,7 +3,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 
 const math = @import("math.zig");
-const mesh_mod = @import("mesh.zig");
+const assets_mod = @import("assets.zig");
 
 const Engine = @import("engine.zig");
 const Device = Engine.VulkanContext.Api.Device;
@@ -277,7 +277,7 @@ pub const ResourceManager = struct {
         const Triangles = std.ArrayList([3]u32);
         const Instances = std.ArrayList(Instance);
         const Bones = std.ArrayList(math.Mat4x4);
-        const Models = std.ArrayList(mesh_mod.Model);
+        const Models = std.ArrayList(assets_mod.Model);
 
         pub fn init() @This() {
             return .{
@@ -297,7 +297,7 @@ pub const ResourceManager = struct {
             self.models.deinit();
         }
 
-        pub fn add_model(self: *@This(), m: mesh_mod.Model) !ModelHandle {
+        pub fn add_model(self: *@This(), m: assets_mod.Model) !ModelHandle {
             const model_handle = self.models.items.len;
 
             try self.models.append(m);
@@ -309,7 +309,7 @@ pub const ResourceManager = struct {
             };
         }
 
-        pub fn add_mesh(self: *@This(), m: *const mesh_mod.Mesh) !MeshResourceHandle {
+        pub fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshResourceHandle {
             const handle = MeshResourceHandle{
                 .index = .{
                     .first = @intCast(self.triangles.items.len * 3),

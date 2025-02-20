@@ -9,7 +9,7 @@ const ShaderUtils = utils.ShaderUtils;
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
 
-const mesh_mod = @import("mesh.zig");
+const assets_mod = @import("assets.zig");
 
 const Engine = @import("engine.zig");
 const c = Engine.c;
@@ -205,7 +205,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var gltf = try mesh_mod.Gltf.parse_glb("./assets/dance.glb");
+    var gltf = try assets_mod.Gltf.parse_glb("./assets/dance.glb");
     // defer gltf.deinit();
     // const model = try gltf.to_model("Cube.015", "metarig");
     const sphere = try gltf.to_model("Cube.015", "metarig");
@@ -213,10 +213,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
     // defer object.deinit();
 
-    var cube = try mesh_mod.Mesh.cube();
+    var cube = try assets_mod.Mesh.cube();
     defer cube.deinit();
 
-    var plane = try mesh_mod.Mesh.plane();
+    var plane = try assets_mod.Mesh.plane();
     defer plane.deinit();
 
     // var sphere_gltf = try mesh_mod.Gltf.parse_glb("./assets/sphere.glb");
@@ -390,7 +390,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // errdefer audio.deinit() catch |e| utils.dump_error(e);
     // try audio.start();
 
-    const wav = try mesh_mod.Wav.parse_wav("./audio.wav");
+    const wav = try assets_mod.Wav.parse_wav("./audio.wav");
     var audio = try AudioPlayer.init(.{
         .buf = wav.data,
     }, .{});
@@ -968,7 +968,7 @@ pub const AppState = struct {
 
         {
             const animate = struct {
-                fn animate(ar: *Components.AnimatedRender, model: *mesh_mod.Model, time: f32) bool {
+                fn animate(ar: *Components.AnimatedRender, model: *assets_mod.Model, time: f32) bool {
                     const animation = model.animations[0];
                     const bones = model.bones;
                     const indices = ar.indices;
@@ -1004,7 +1004,7 @@ pub const AppState = struct {
                     return updated;
                 }
 
-                fn get_lerped(out: *math.Vec4, keyframes: []mesh_mod.Keyframe, curr: *u32, time: f32) bool {
+                fn get_lerped(out: *math.Vec4, keyframes: []assets_mod.Keyframe, curr: *u32, time: f32) bool {
                     // check if i have to increment keyframe index
                     // calculate dt for this keyframe
                     // lerp
@@ -1027,7 +1027,7 @@ pub const AppState = struct {
                     return true;
                 }
 
-                fn apply(ar: *Components.AnimatedRender, ids: []const mesh_mod.BoneId, bones: []mesh_mod.Bone, t: math.Mat4x4) void {
+                fn apply(ar: *Components.AnimatedRender, ids: []const assets_mod.BoneId, bones: []assets_mod.Bone, t: math.Mat4x4) void {
                     for (ids) |bone_id| {
                         ar.bones[bone_id] = t.mul_mat(ar.bones[bone_id]);
                         apply(ar, bones[bone_id].children, bones, ar.bones[bone_id]);
