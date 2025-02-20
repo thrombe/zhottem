@@ -36,7 +36,7 @@ const Components = world_mod.Components;
 const Entity = world_mod.Entity;
 
 const resources_mod = @import("resources.zig");
-const GpuResourceManager = resources_mod.GpuResourceManager;
+const ResourceManager = resources_mod.ResourceManager;
 const InstanceManager = resources_mod.InstanceManager;
 const InstanceAllocator = resources_mod.InstanceAllocator;
 
@@ -51,8 +51,8 @@ uniforms: UniformBuffer,
 model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
-cpu_resources: GpuResourceManager.CpuResources,
-gpu_resources: GpuResourceManager.GpuResources,
+cpu_resources: ResourceManager.CpuResources,
+gpu_resources: ResourceManager.GpuResources,
 instance_manager: InstanceManager,
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
@@ -68,10 +68,10 @@ texture: Image,
 handles: struct {
     player: Entity,
     model: struct {
-        sphere: GpuResourceManager.ModelHandle,
+        sphere: ResourceManager.ModelHandle,
     },
     mesh: struct {
-        cube: GpuResourceManager.MeshResourceHandle,
+        cube: ResourceManager.MeshResourceHandle,
     },
 },
 
@@ -224,7 +224,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // const sphere = try sphere_gltf.to_model();
     // defer sphere.deinit();
 
-    var cpu = GpuResourceManager.CpuResources.init();
+    var cpu = ResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
     const bones_handle = try cpu.reserve_bones(1500);

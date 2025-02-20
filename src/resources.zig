@@ -132,11 +132,11 @@ pub const UniformBinds = enum(u32) {
 
 pub const InstanceManager = struct {
     instances: std.ArrayList(InstanceAllocator),
-    bones: GpuResourceManager.BonesResourceHandle,
+    bones: ResourceManager.BonesResourceHandle,
     bone_count: u32 = 0,
     hash: u64 = 0,
 
-    pub fn init(bones: GpuResourceManager.BonesResourceHandle) @This() {
+    pub fn init(bones: ResourceManager.BonesResourceHandle) @This() {
         return .{
             .instances = std.ArrayList(InstanceAllocator).init(allocator.*),
             .bones = bones,
@@ -147,7 +147,7 @@ pub const InstanceManager = struct {
         self.instances.deinit();
     }
 
-    pub fn reserve_instance(self: *@This(), mesh: GpuResourceManager.MeshResourceHandle) ?u32 {
+    pub fn reserve_instance(self: *@This(), mesh: ResourceManager.MeshResourceHandle) ?u32 {
         for (self.instances.items) |*item| {
             if (item.maybe_reserve(mesh)) |index| {
                 return index;
@@ -191,8 +191,8 @@ pub const InstanceAllocator = struct {
     // so we have this abstraction that bump allocates instance buffer memory each frame
     // for each type of instance we might want to render.
 
-    mesh: GpuResourceManager.MeshResourceHandle,
-    instances: GpuResourceManager.BatchedInstanceResourceHandle,
+    mesh: ResourceManager.MeshResourceHandle,
+    instances: ResourceManager.BatchedInstanceResourceHandle,
     count: u32 = 0,
 
     pub fn reset(self: *@This()) void {
@@ -204,7 +204,7 @@ pub const InstanceAllocator = struct {
         return self.count + self.instances.first - 1;
     }
 
-    pub fn maybe_reserve(self: *@This(), mesh: GpuResourceManager.MeshResourceHandle) ?u32 {
+    pub fn maybe_reserve(self: *@This(), mesh: ResourceManager.MeshResourceHandle) ?u32 {
         if (std.meta.eql(self.mesh, mesh)) {
             return self.reserve();
         }
@@ -218,7 +218,7 @@ pub const InstanceAllocator = struct {
         offsets: []const u32,
         cmdbuf: *CmdBuffer,
         device: *Device,
-        resources: *GpuResourceManager.GpuResources,
+        resources: *ResourceManager.GpuResources,
     ) void {
         cmdbuf.draw(device, .{
             .pipeline = pipeline,
@@ -243,7 +243,7 @@ pub const InstanceAllocator = struct {
     }
 };
 
-pub const GpuResourceManager = struct {
+pub const ResourceManager = struct {
     pub const MeshResourceHandle = struct {
         index: Region,
         vertex: Region,

@@ -10,7 +10,7 @@ const app = @import("app.zig");
 const AppState = app.AppState;
 
 const resources_mod = @import("resources.zig");
-const GpuResourceManager = resources_mod.GpuResourceManager;
+const ResourceManager = resources_mod.ResourceManager;
 
 const main = @import("main.zig");
 const allocator = main.allocator;
@@ -392,11 +392,11 @@ pub const Components = struct {
     };
 
     pub const StaticRender = struct {
-        mesh: GpuResourceManager.MeshResourceHandle,
+        mesh: ResourceManager.MeshResourceHandle,
     };
 
     pub const AnimatedRender = struct {
-        model: GpuResourceManager.ModelHandle,
+        model: ResourceManager.ModelHandle,
 
         // relative to the start of this animation
         // += dt each frame
