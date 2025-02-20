@@ -117,6 +117,7 @@
           shaderc
           glfw
           portaudio
+          libsndfile
 
           vulkan-headers
           vulkan-validation-layers

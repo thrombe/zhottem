@@ -1157,4 +1157,18 @@ pub const Wav = struct {
             return @as(*align(1) const typ, @ptrCast(self.buf[self.head..].ptr)).*;
         }
     };
+
+    fn parse_sndfile(path: [:0]const u8) !void {
+        const c = @cImport({
+            @cInclude("sndfile.h");
+        });
+
+        var info: c.SF_INFO = undefined;
+        const file = c.sf_open(path, c.SFM_READ, &info);
+        defer _ = c.sf_close(file);
+        const buf = try allocator.alloc(f32, @intCast(info.frames * info.channels * 4));
+        defer allocator.free(buf);
+
+        _ = c.sf_readf_float(file, buf.ptr, info.frames);
+    }
 };
