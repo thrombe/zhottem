@@ -73,45 +73,128 @@ handles: struct {
     mesh: struct {
         cube: ResourceManager.MeshResourceHandle,
     },
+    audio: struct {
+        boom: ResourceManager.AudioHandle,
+        bruh: ResourceManager.AudioHandle,
+        long_reload: ResourceManager.AudioHandle,
+        short_reload: ResourceManager.AudioHandle,
+        scream1: ResourceManager.AudioHandle,
+        scream2: ResourceManager.AudioHandle,
+        shot: ResourceManager.AudioHandle,
+    },
 },
 
-// const AudioPlayer = Engine.Audio.Stream(struct {
-//     recorded: *utils.Channel([256]f32),
-
-//     pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
-//         _ = flags;
-//         _ = timeinfo;
-
-//         if (self.ctx.recorded.try_recv()) |rec| {
-//             for (output, 0..) |*frame, i| {
-//                 frame[0] = rec[i];
-//                 frame[1] = rec[i];
-//             }
-//         } else {
-//             @memset(output, [2]f32{ 0, 0 });
-//         }
-//     }
-// }, .output);
-
 const AudioPlayer = Engine.Audio.Stream(struct {
-    index: usize = 0,
-    buf: []f32,
+    // owned by ResourceManager.CpuResources
+    samples: []assets_mod.Wav,
+
+    playing: struct {
+        // only swap in callback.
+        // self.samples accessed only in callback.
+        // other thread can fill only when not fused.
+        // callback can only swap when fused
+
+        // TODO: actually figure out a way to do this.
+        // TODO: dynamic updates: double buffering + atomic flag updates + updates per frame
+        swap_fuse: Fuse = .{},
+
+        samples: Samples,
+        samples_buf2: Samples,
+
+        fn fused_swap(self: @This()) void {
+            if (self.swap_fuse.check()) {
+                defer _ = self.swap_fuse.unfuse();
+
+                std.mem.swap(Samples, &self.samples, &self.samples_buf2);
+            }
+        }
+
+        pub fn unfused_swap(self: @This()) void {
+            if (!self.swap_fuse.check()) {
+                defer _ = self.swap_fuse.fuse();
+
+                std.mem.swap(Samples, &self.samples, &self.samples_buf2);
+            }
+        }
+    },
+
+    pub fn init(samples: []assets_mod.Wav) !@This() {
+        return @This(){
+            .samples = samples,
+            .playing = .{
+                .samples = try Samples.initCapacity(allocator.*, 200),
+                .samples_buf2 = try Samples.initCapacity(allocator.*, 200),
+            },
+        };
+    }
 
     pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
         _ = flags;
         _ = timeinfo;
 
-        for (output) |*frame| {
-            frame[0] = self.ctx.buf[self.ctx.index];
-            frame[1] = self.ctx.buf[self.ctx.index + 1];
+        @memset(output, [2]f32{ 0, 0 });
 
-            self.ctx.index += 2;
+        var i: usize = 0;
+        while (i < self.ctx.playing.samples.items.len) {
+            const ps = &self.ctx.playing.samples.items[i];
+            if (ps.fill(self.ctx.samples, output)) {
+                _ = self.ctx.playing.samples.swapRemove(i);
+            } else {
+                i += 1;
+            }
         }
     }
 
-    pub fn deinit(self: *@This()) void {
-        allocator.free(self.buf);
-    }
+    pub const Samples = std.ArrayList(PlayingSample);
+    pub const PlayingSample = struct {
+        handle: ResourceManager.AudioHandle,
+        index: u32 = 0,
+
+        // relative position of the sound. (listener +z fwd, +x right, -y up)
+        pos: Vec4,
+        volume: f32 = 1.0,
+
+        // the float values supplied to audio apis is the instantaneous amplitude of the wave
+        // power is proportional to the square of amplitude
+        // intensity is power carried by wave per unit area (perp to the area)
+        // delta dB = 10*log10(p2/p1)
+        // percieved loudness is logarithmic in power
+        // "twice as loud" is a diff of 10dB
+        //
+        // with distance - sound's intensity decreases (as area increases)
+        // so twice as far means a quarter the intensity
+        // which means quarter the power (per unit area (which is what we end up hearing ig. cuz the ear drums are constant in size))
+        // which means we just divide the amplitude by 2 to account for the distance
+
+        pub fn fill(self: *@This(), samples: []assets_mod.Wav, output: [][2]f32) bool {
+            const min = 1.0;
+            const max = 100.0;
+            var dist = self.pos.length();
+            dist = @min(max, @max(min, dist));
+
+            const att = self.volume / dist;
+
+            const angle = std.math.atan2(0, self.pos.x);
+            const pan = (angle + std.math.pi) / std.math.tau;
+            const left = 1.0 - pan;
+            const right = pan;
+
+            const sample = samples[self.handle.index].data;
+            for (output) |*oframe| {
+                defer self.index += 1;
+
+                if (sample.len <= self.index) {
+                    return true;
+                }
+
+                const frame = sample[self.index];
+                oframe[0] = std.math.clamp(oframe[0] + frame[0] * left * att, -1, 1);
+                oframe[1] = std.math.clamp(oframe[1] + frame[1] * right * att, -1, 1);
+            }
+
+            return false;
+        }
+    };
 }, .output);
 
 const AudioRecorder = Engine.Audio.Stream(struct {
@@ -120,10 +203,11 @@ const AudioRecorder = Engine.Audio.Stream(struct {
     pub fn callback(self: *AudioRecorder.CallbackContext, input: []const f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
         _ = flags;
         _ = timeinfo;
+        _ = self;
 
         var buf: [256]f32 = undefined;
         @memcpy(&buf, input);
-        try self.ctx.recorded.send(buf);
+        // try self.ctx.recorded.send(buf);
     }
 
     pub fn deinit(self: *@This()) void {
@@ -227,6 +311,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cpu = ResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
+    const audio_handles = .{
+        .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/boom.wav")),
+        .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/bruh.wav")),
+        .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/long-reload.wav")),
+        .short_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/short-reload.wav")),
+        .scream1 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream1.wav")),
+        .scream2 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream2.wav")),
+        .shot = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/shot.wav")),
+    };
+
     const bones_handle = try cpu.reserve_bones(1500);
 
     var instance_manager = InstanceManager.init(bones_handle);
@@ -257,6 +351,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.Transform{ .pos = .{} },
         Components.LastTransform{},
         Components.Shooter{
+            .audio = audio_handles.shot,
             .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
             .hold = true,
         },
@@ -394,10 +489,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // errdefer audio.deinit() catch |e| utils.dump_error(e);
     // try audio.start();
 
-    const wav = try assets_mod.Wav.parse_wav("./audio.wav");
-    var audio = try AudioPlayer.init(.{
-        .buf = wav.data,
-    }, .{});
+    var audio = try AudioPlayer.init(try AudioPlayer.Ctx.init(cpu.audio.items), .{});
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
@@ -429,6 +521,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .mesh = .{
                 .cube = cube_mesh_handle,
             },
+            .audio = audio_handles,
         },
     };
 }
@@ -912,8 +1005,10 @@ pub const AppState = struct {
                     Components.Collider{ .sphere = .{ .radius = 1.0 } },
                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                    Components.TimeDespawn{ .despawn_time = self.time + 20 },
+                    Components.TimeDespawn{ .despawn_time = self.time + 5 },
                 });
+
+                try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
             }
         }
 
@@ -958,9 +1053,15 @@ pub const AppState = struct {
             var to_remove = std.ArrayList(Entity).init(allocator.*);
             defer to_remove.deinit();
 
-            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
+            const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
+            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn, t: Components.Transform });
             while (it.next()) |e| {
                 if (e.ds.despawn_time < self.time) {
+                    try app.audio.ctx.ctx.playing.samples.append(.{
+                        .handle = if (self.rng.random().boolean()) app.handles.audio.scream1 else app.handles.audio.scream2,
+                        .pos = player.t.rotation.inverse_rotate_vector(e.t.pos.sub(player.t.pos)),
+                        .volume = 2.0,
+                    });
                     try to_remove.append(e.id.*);
                 }
             }

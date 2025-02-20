@@ -247,6 +247,13 @@ pub const Vec4 = extern struct {
         return Vec4{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
     }
 
+    pub fn inverse_rotate_vector(self: *const @This(), v: Vec4) @This() {
+        const qv = .{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
+        const q_conjugate = self.quat_conjugate();
+        const q_result = q_conjugate.quat_mul(qv).quat_mul(self.*);
+        return Vec4{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
+    }
+
     pub fn to_buf(self: *const @This()) [4]f32 {
         return .{ self.x, self.y, self.z, self.w };
     }

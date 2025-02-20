@@ -332,6 +332,7 @@ pub const Components = struct {
     };
 
     pub const Shooter = struct {
+        audio: ResourceManager.AudioHandle,
         ticker: utils_mod.Ticker,
         hold: bool,
 
