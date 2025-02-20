@@ -1047,3 +1047,95 @@ pub const Gltf = struct {
         }
     };
 };
+
+pub const Wav = struct {
+    header: Header,
+    data: []f32,
+
+    const Header = extern struct {
+        riff: [4]u8,
+        chunkSize: u32,
+        wave: [4]u8,
+        fmt: [4]u8,
+        subchunk1Size: u32, // Size of the "fmt " chunk
+        audioFormat: u16, // Audio format (1 for PCM)
+        numChannels: u16, // Number of channels (1 for mono, 2 for stereo)
+        sampleRate: u32,
+        byteRate: u32, // SampleRate * NumChannels * BitsPerSample / 8
+        blockAlign: u16, // NumChannels * BitsPerSample / 8
+        bitsPerSample: u16,
+        data: [4]u8,
+        subchunk2Size: u32,
+    };
+
+    pub fn parse_wav(path: []const u8) !@This() {
+        var reader = try Reader.load(path);
+        defer reader.deinit();
+
+        var header = try reader.read(Header);
+
+        if (!std.mem.eql(u8, &header.riff, "RIFF") or !std.mem.eql(u8, &header.wave, "WAVE") or !std.mem.eql(u8, &header.fmt, "fmt ")) {
+            return error.InvalidWAVFile;
+        }
+        // only PCM supported for now.
+        if (header.audioFormat != 1) {
+            return error.UnsupportedFormat;
+        }
+        if (std.mem.eql(u8, &header.data, "LIST")) {
+            reader.head += header.subchunk2Size;
+            header.data = try reader.read([4]u8);
+            header.subchunk2Size = try reader.read(u32);
+        }
+
+        if (!std.mem.eql(u8, &header.data, "data")) {
+            return error.InvalidWAVFile;
+        }
+
+        const raw = std.mem.bytesAsSlice(i16, reader.buf[reader.head..][0..header.subchunk2Size]);
+        const floats = try allocator.alloc(f32, raw.len);
+        errdefer allocator.free(floats);
+
+        for (raw, floats) |r, *f| {
+            f.* = @as(f32, @floatFromInt(r)) / 32768.0;
+        }
+
+        return .{
+            .header = header,
+            .data = floats,
+        };
+    }
+
+    const Reader = struct {
+        buf: []const u8,
+        head: usize = 0,
+
+        fn load(path: []const u8) !@This() {
+            const buf = try std.fs.cwd().readFileAllocOptions(
+                allocator.*,
+                path,
+                100 * 1000 * 1000,
+                null,
+                8,
+                null,
+            );
+            errdefer allocator.free(buf);
+
+            return .{
+                .buf = buf,
+            };
+        }
+
+        fn deinit(self: *@This()) void {
+            allocator.free(self.buf);
+        }
+
+        fn read(self: *@This(), typ: type) !typ {
+            if (self.buf.len < self.head + @sizeOf(typ)) {
+                return error.CouldNotParseHeader;
+            }
+
+            defer self.head += @sizeOf(typ);
+            return @as(*align(1) const typ, @ptrCast(self.buf[self.head..].ptr)).*;
+        }
+    };
+};

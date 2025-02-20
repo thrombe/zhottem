@@ -75,21 +75,42 @@ handles: struct {
     },
 },
 
+// const AudioPlayer = Engine.Audio.Stream(struct {
+//     recorded: *utils.Channel([256]f32),
+
+//     pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
+//         _ = flags;
+//         _ = timeinfo;
+
+//         if (self.ctx.recorded.try_recv()) |rec| {
+//             for (output, 0..) |*frame, i| {
+//                 frame[0] = rec[i];
+//                 frame[1] = rec[i];
+//             }
+//         } else {
+//             @memset(output, [2]f32{ 0, 0 });
+//         }
+//     }
+// }, .output);
+
 const AudioPlayer = Engine.Audio.Stream(struct {
-    recorded: *utils.Channel([256]f32),
+    index: usize = 0,
+    buf: []f32,
 
     pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
         _ = flags;
         _ = timeinfo;
 
-        if (self.ctx.recorded.try_recv()) |rec| {
-            for (output, 0..) |*frame, i| {
-                frame[0] = rec[i];
-                frame[1] = rec[i];
-            }
-        } else {
-            @memset(output, [2]f32{ 0, 0 });
+        for (output) |*frame| {
+            frame[0] = self.ctx.buf[self.ctx.index];
+            frame[1] = self.ctx.buf[self.ctx.index + 1];
+
+            self.ctx.index += 2;
         }
+    }
+
+    pub fn deinit(self: *@This()) void {
+        allocator.free(self.buf);
     }
 }, .output);
 
@@ -363,8 +384,15 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer recorder.deinit() catch |e| utils.dump_error(e);
     try recorder.start();
 
+    // var audio = try AudioPlayer.init(.{
+    //     .recorded = &recorder.ctx.ctx.recorded,
+    // }, .{});
+    // errdefer audio.deinit() catch |e| utils.dump_error(e);
+    // try audio.start();
+
+    const wav = try mesh_mod.Wav.parse_wav("./audio.wav");
     var audio = try AudioPlayer.init(.{
-        .recorded = &recorder.ctx.ctx.recorded,
+        .buf = wav.data,
     }, .{});
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
