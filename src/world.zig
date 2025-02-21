@@ -963,9 +963,74 @@ pub const EntityComponentStore = struct {
             .sorted_ids = sorted_ids,
             .archetype_it = self.archetype_map.iterator(),
             .archetypes = self.archetypes.items,
-            .current = null,
+            .components = &self.components,
+            .vtables = &self.vtables,
         };
     }
+
+    pub fn explorer(self: *@This(), entity: Entity) !EntityExplorer {
+        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+        const archetype = &self.archetypes.items[ae.archetype];
+
+        return .{
+            .vtables = &self.vtables,
+            .components = &self.components,
+            .archetype = archetype,
+            .entity_index = ae.entity_index,
+        };
+    }
+
+    pub const EntityExplorer = struct {
+        // for queries like (does this entity have this component)
+        // and for fast query of random components of this entity.
+
+        vtables: *Vtables,
+        components: *TypeComponents,
+        archetype: *Archetype,
+        entity_index: usize,
+
+        pub fn get_component(self: *@This(), typ: type) ?*typ {
+            const compid = self.components.get(TypeId.from_type(typ)) orelse unreachable;
+            const compi = self.archetype.typ.index(compid) orelse return null;
+            const val = std.mem.bytesAsValue(typ, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
+            return @alignCast(val);
+        }
+
+        pub fn iterator(self: *@This()) ComponentIterator {
+            return .{ .explorer = self };
+        }
+
+        pub const ComponentIterator = struct {
+            explorer: *EntityExplorer,
+            component_index: usize = 0,
+
+            pub const ComponentEntry = struct {
+                component: []u8,
+                vtable: *ComponentVtable,
+                compid: ComponentId,
+            };
+
+            pub fn next(self: *@This()) ?ComponentEntry {
+                if (self.component_index >= self.explorer.archetype.components.len) {
+                    return null;
+                }
+                defer self.component_index += 1;
+
+                const compid = self.explorer.archetype.typ.components[self.component_index];
+                const component = self.explorer.archetype.components[self.component_index].items[self.explorer.entity_index * compid.size ..][0..compid.size];
+
+                return .{
+                    .component = component,
+                    .vtable = &self.explorer.vtables.items[self.component_index],
+                    .compid = compid,
+                };
+            }
+
+            pub fn reset(self: *@This()) void {
+                self.component_index = 0;
+            }
+        };
+    };
 
     pub fn EntityIterator(typ: type) type {
         return struct {
@@ -977,6 +1042,8 @@ pub const EntityComponentStore = struct {
             sorted_ids: [len]ComponentId,
             archetype_it: ArchetypeMap.Iterator,
             archetypes: []Archetype,
+            components: *TypeComponents,
+            vtables: *Vtables,
             current: ?struct {
                 archetype: ArchetypeId,
                 // indices into archetype.components
@@ -984,7 +1051,16 @@ pub const EntityComponentStore = struct {
                 ids: [len]usize,
                 // current index into archetype.components[].items
                 index: usize = 0,
-            },
+            } = null,
+
+            pub fn current_entity_explorer(self: *@This()) EntityExplorer {
+                return .{
+                    .components = self.components,
+                    .vtables = self.vtables,
+                    .archetype = &self.archetypes[self.current.?.archetype],
+                    .entity_index = self.current.?.index - 1,
+                };
+            }
 
             pub fn next(self: *@This()) ?Type.pointer(typ) {
                 outer: while (true) {
