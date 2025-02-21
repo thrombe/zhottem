@@ -259,7 +259,7 @@ const HotApp = struct {
 
         self.timer = try std.time.Timer.start();
 
-        self.app_state = try AppState.init(self.engine.window, self.timer.read());
+        self.app_state = try AppState.init(self.engine.window, self.timer.read(), &self.app);
         errdefer self.app_state.deinit();
 
         self.gui_state = GuiState{};

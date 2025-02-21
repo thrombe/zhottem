@@ -845,7 +845,9 @@ pub const AppState = struct {
     uniform_shader_dumped: bool = false,
     focus: bool = false,
 
-    pub fn init(window: *Engine.Window, start_ts: u64) !@This() {
+    cmdbuf: world_mod.EntityComponentStore.CmdBuf,
+
+    pub fn init(window: *Engine.Window, start_ts: u64, app: *App) !@This() {
         const mouse = window.poll_mouse();
         const sze = try window.get_res();
 
@@ -857,11 +859,13 @@ pub const AppState = struct {
             .rng = rng,
             .uniform_buffer = try allocator.alloc(u8, 0),
             .ts = start_ts,
+            .cmdbuf = app.world.ecs.deferred(),
         };
     }
 
     pub fn deinit(self: *@This()) void {
         allocator.free(self.uniform_buffer);
+        self.cmdbuf.deinit();
     }
 
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
@@ -996,7 +1000,7 @@ pub const AppState = struct {
 
                 const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
                 const t = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
-                _ = try app.world.ecs.insert(.{
+                _ = try self.cmdbuf.insert(.{
                     @as([]const u8, "bullet"),
                     t,
                     Components.LastTransform{ .t = t },
@@ -1049,18 +1053,18 @@ pub const AppState = struct {
         }
 
         {
-            var to_remove = std.ArrayList(Entity).init(allocator.*);
-            defer to_remove.deinit();
-            var to_dying = std.ArrayList(Entity).init(allocator.*);
-            defer to_dying.deinit();
-
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
             while (it.next()) |e| {
                 switch (e.ds.state) {
                     .alive => {
                         if (e.ds.despawn_time < self.time) {
                             e.ds.state = .dying;
-                            try to_dying.append(e.id.*);
+
+                            try self.cmdbuf.add_component(e.id.*, Components.Sound{
+                                .start_frame = app.audio.ctx.ctx.frame_count,
+                                .audio = if (self.rng.random().boolean()) app.handles.audio.scream1 else app.handles.audio.scream2,
+                                .volume = 2.0,
+                            });
                         }
                     },
                     .dying => {
@@ -1074,21 +1078,9 @@ pub const AppState = struct {
                         }
                     },
                     .dead => {
-                        try to_remove.append(e.id.*);
+                        try self.cmdbuf.delete(e.id.*);
                     },
                 }
-            }
-
-            for (to_dying.items) |e| {
-                try app.world.ecs.add_component(e, Components.Sound{
-                    .start_frame = app.audio.ctx.ctx.frame_count,
-                    .audio = if (self.rng.random().boolean()) app.handles.audio.scream1 else app.handles.audio.scream2,
-                    .volume = 2.0,
-                });
-            }
-
-            for (to_remove.items) |e| {
-                try app.world.ecs.remove(e);
             }
         }
 
@@ -1248,6 +1240,8 @@ pub const AppState = struct {
             const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, lt: Components.LastTransform, transform: Components.Transform });
             app.uniforms.uniform_buffer = try self.uniforms(window, &self.physics.interpolated(player.lt, player.transform), player.camera, player.controller);
         }
+
+        try self.cmdbuf.apply();
     }
 
     fn uniforms(
