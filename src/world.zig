@@ -451,7 +451,9 @@ pub const Components = struct {
 };
 
 pub const Entity = struct {
-    generation: u32,
+    // i don't think i need generational indices here :/
+    // these ids are not at all any sort of indices, these map to ArchetypeEntity using a hashmap.
+    // thoughhh we could totally switch to a array. hmmmmmmmmm
     id: u32,
 };
 
@@ -615,7 +617,6 @@ pub const Archetype = struct {
     // type erased block of components (same length and order as self.typ.components)
     components: []std.ArrayListAligned(u8, 8),
     count: u32 = 0,
-    generation: u32 = 0,
 
     // helpful for converting 1 type of entity to another
     // it is implicit whether we want to add or remove this component to this archetype
@@ -650,7 +651,6 @@ pub const Archetype = struct {
             comp.items.len -= compid.size;
         }
         self.count -= 1;
-        self.generation += 1;
     }
 
     pub fn deinit(self: *@This(), vtables: []EntityComponentStore.ComponentVtable) void {
@@ -699,6 +699,8 @@ pub const EntityComponentStore = struct {
                 []const u8 => return .{ .deinit = null },
                 else => return .{
                     // TODO: these will not update when hot reloaded.
+                    //  - this can be made to work by adding .reload() methods to things that have pointers.
+                    //  - just regester the components again :P
                     // tho maybe unloading earlier dylib might invalidate these ptrs? not sure.
                     // are new dylibs loaded in the similar memory locations as the older ones?
                     //  - this will also break these ptrs.
@@ -826,7 +828,7 @@ pub const EntityComponentStore = struct {
         return archeid;
     }
 
-    pub fn insert(self: *@This(), components: anytype) !Entity {
+    fn insert_reserved(self: *@This(), eid: Entity, components: anytype) !void {
         const component_ids = &try self.component_ids_sorted_from(@TypeOf(components));
         const typ = Type{ .components = [_]ComponentId{self.entityid_component_id} ++ component_ids };
 
@@ -842,17 +844,20 @@ pub const EntityComponentStore = struct {
             try archetype.components[compi].appendSlice(bytes);
         }
 
-        // TODO: think of a better way to generate unique entity ids?
-        // generation kida does not do anything rn.
-        const eid = Entity{ .generation = archetype.generation, .id = self.entity_id };
-        self.entity_id += 1;
-
         {
             const compi = typ.index(self.entityid_component_id) orelse unreachable;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
             try self.entities.put(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
         }
+    }
+
+    pub fn insert(self: *@This(), components: anytype) !Entity {
+        // TODO: think of a better way to generate unique entity ids? do i need to??
+        const eid = Entity{ .id = self.entity_id };
+        defer self.entity_id += 1;
+
+        try self.insert_reserved(eid, components);
 
         return eid;
     }
@@ -873,7 +878,7 @@ pub const EntityComponentStore = struct {
         return t;
     }
 
-    pub fn swap_remove(self: *@This(), ae: ArchetypeEntity) void {
+    fn swap_remove(self: *@This(), ae: ArchetypeEntity) void {
         const archetype = &self.archetypes.items[ae.archetype];
         defer archetype.swap_remove(self.vtables.items, ae.entity_index);
 
@@ -884,7 +889,7 @@ pub const EntityComponentStore = struct {
         }
     }
 
-    pub fn remove(self: *@This(), entity: Entity) !void {
+    pub fn delete(self: *@This(), entity: Entity) !void {
         const ae = self.entities.fetchSwapRemove(entity) orelse return error.EntityNotFound;
         self.swap_remove(ae.value);
     }
@@ -996,6 +1001,10 @@ pub const EntityComponentStore = struct {
             .archetype = archetype,
             .entity_index = ae.entity_index,
         };
+    }
+
+    pub fn deferred(self: *@This()) CmdBuf {
+        return CmdBuf.init(self);
     }
 
     pub const EntityExplorer = struct {
@@ -1126,4 +1135,124 @@ pub const EntityComponentStore = struct {
             }
         };
     }
+
+    pub const CmdBuf = struct {
+        ecs: *EntityComponentStore,
+        alloc: std.heap.ArenaAllocator,
+
+        inserted: Inserted = .{},
+        deleted: Deleted = .{},
+        added_components: Added = .{},
+        removed_components: Removed = .{},
+
+        const Inserted = std.ArrayListUnmanaged(struct {
+            entity: Entity,
+            bundle: *anyopaque,
+            insertfn: *const fn (*EntityComponentStore, Entity, *anyopaque) anyerror!void,
+        });
+        const Deleted = std.ArrayListUnmanaged(Entity);
+        const Added = std.ArrayListUnmanaged(struct {
+            entity: Entity,
+            component: *anyopaque,
+            addfn: *const fn (*EntityComponentStore, Entity, *anyopaque) anyerror!void,
+        });
+        const Removed = std.ArrayListUnmanaged(struct {
+            entity: Entity,
+            rmfn: *const fn (*EntityComponentStore, Entity) anyerror!void,
+        });
+
+        pub fn init(ecs: *EntityComponentStore) @This() {
+            return .{
+                .ecs = ecs,
+                .alloc = std.heap.ArenaAllocator.init(allocator.*),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.alloc.deinit();
+        }
+
+        fn reset(self: *@This()) void {
+            _ = self.alloc.reset(.retain_capacity);
+            self.inserted = .{};
+            self.deleted = .{};
+            self.added_components = .{};
+            self.removed_components = .{};
+        }
+
+        pub fn apply(self: *@This()) !void {
+            defer self.reset();
+
+            for (self.inserted.items) |*t| {
+                try t.insertfn(self.ecs, t.entity, t.bundle);
+            }
+
+            for (self.added_components.items) |*t| {
+                try t.addfn(self.ecs, t.entity, t.component);
+            }
+
+            for (self.removed_components.items) |*t| {
+                try t.rmfn(self.ecs, t.entity);
+            }
+
+            for (self.deleted.items) |t| {
+                try self.ecs.delete(t);
+            }
+        }
+
+        fn allocated(self: *@This(), thing: anytype) !*@TypeOf(thing) {
+            const alloc = self.alloc.allocator();
+            const mem = try alloc.create(@TypeOf(thing));
+            errdefer alloc.free(mem);
+            mem.* = thing;
+            return mem;
+        }
+
+        pub fn insert(self: *@This(), components: anytype) !Entity {
+            const e = Entity{ .id = self.ecs.entity_id };
+            defer self.ecs.entity_id += 1;
+            const alloc = self.alloc.allocator();
+
+            try self.inserted.append(alloc, .{
+                .entity = e,
+                .bundle = @ptrCast(try self.allocated(components)),
+                .insertfn = @ptrCast(&(struct {
+                    fn insert(ecs: *EntityComponentStore, entity: Entity, comp: @TypeOf(components)) anyerror!void {
+                        try ecs.insert_reserved(entity, comp);
+                    }
+                }).insert),
+            });
+
+            return e;
+        }
+
+        pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
+            const alloc = self.alloc.allocator();
+            try self.added_components.append(alloc, .{
+                .entity = entity,
+                .component = @ptrCast(try self.allocated(component)),
+                .addfn = @ptrCast(&(struct {
+                    fn add_component(ecs: *EntityComponentStore, e: Entity, comp: @TypeOf(component)) !void {
+                        try ecs.add_component(e, comp);
+                    }
+                }).add_component),
+            });
+        }
+
+        pub fn remove_component(self: *@This(), entity: Entity, component: type) !void {
+            const alloc = self.alloc.allocator();
+            try self.removed_components.append(alloc, .{
+                .entity = entity,
+                .rmfn = @ptrCast(&(struct {
+                    fn remove_component(ecs: *EntityComponentStore, e: Entity) !void {
+                        try ecs.remove_component(e, component);
+                    }
+                }).remove_component),
+            });
+        }
+
+        pub fn delete(self: *@This(), entity: Entity) !void {
+            try self.deleted.append(self.alloc.allocator(), entity);
+        }
+    };
 };
