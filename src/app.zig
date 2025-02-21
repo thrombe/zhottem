@@ -87,6 +87,7 @@ handles: struct {
 const AudioPlayer = Engine.Audio.Stream(struct {
     // owned by ResourceManager.CpuResources
     samples: []assets_mod.Wav,
+    frame_count: u64 = 0,
 
     playing: struct {
         // only swap in callback.
@@ -98,21 +99,17 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         // TODO: dynamic updates: double buffering + atomic flag updates + updates per frame
         swap_fuse: Fuse = .{},
 
+        // NOTE: only audio thread may lock
+        lock: Fuse = .{},
+
         samples: Samples,
         samples_buf2: Samples,
 
-        fn fused_swap(self: @This()) void {
-            if (self.swap_fuse.check()) {
-                defer _ = self.swap_fuse.unfuse();
+        fn fused_swap(self: *@This()) void {
+            _ = self.lock.fuse();
+            defer _ = self.lock.unfuse();
 
-                std.mem.swap(Samples, &self.samples, &self.samples_buf2);
-            }
-        }
-
-        pub fn unfused_swap(self: @This()) void {
-            if (!self.swap_fuse.check()) {
-                defer _ = self.swap_fuse.fuse();
-
+            if (self.swap_fuse.unfuse()) {
                 std.mem.swap(Samples, &self.samples, &self.samples_buf2);
             }
         }
@@ -132,33 +129,30 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         _ = flags;
         _ = timeinfo;
 
+        defer self.ctx.frame_count += output.len;
+
         @memset(output, [2]f32{ 0, 0 });
 
-        var i: usize = 0;
-        while (i < self.ctx.playing.samples.items.len) {
-            const ps = &self.ctx.playing.samples.items[i];
-            if (ps.fill(self.ctx.samples, output)) {
-                _ = self.ctx.playing.samples.swapRemove(i);
-            } else {
-                i += 1;
-            }
+        self.ctx.playing.fused_swap();
+        for (self.ctx.playing.samples.items) |*ps| {
+            _ = ps.fill(self.ctx.frame_count, self.ctx.samples, output);
         }
     }
 
     pub const Samples = std.ArrayList(PlayingSample);
     pub const PlayingSample = struct {
         handle: ResourceManager.AudioHandle,
-        index: u32 = 0,
+        start_frame: u64,
 
         // relative position of the sound. (listener +z fwd, +x right, -y up)
         pos: Vec4,
-        volume: f32 = 1.0,
+        volume: f32,
 
         // the float values supplied to audio apis is the instantaneous amplitude of the wave
         // power is proportional to the square of amplitude
         // intensity is power carried by wave per unit area (perp to the area)
-        // delta dB = 10*log10(p2/p1)
         // percieved loudness is logarithmic in power
+        // delta dB = 10*log10(p2/p1)
         // "twice as loud" is a diff of 10dB
         //
         // with distance - sound's intensity decreases (as area increases)
@@ -166,7 +160,7 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         // which means quarter the power (per unit area (which is what we end up hearing ig. cuz the ear drums are constant in size))
         // which means we just divide the amplitude by 2 to account for the distance
 
-        pub fn fill(self: *@This(), samples: []assets_mod.Wav, output: [][2]f32) bool {
+        pub fn fill(self: *@This(), frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
             const min = 1.0;
             const max = 100.0;
             var dist = self.pos.length();
@@ -174,20 +168,22 @@ const AudioPlayer = Engine.Audio.Stream(struct {
 
             const att = self.volume / dist;
 
-            const angle = std.math.atan2(0, self.pos.x);
-            const pan = (angle + std.math.pi) / std.math.tau;
+            // const angle = std.math.atan2(0, self.pos.x);
+            // const pan = (angle + std.math.pi) / std.math.tau;
+            const pan = 1.0;
             const left = 1.0 - pan;
             const right = pan;
 
             const sample = samples[self.handle.index].data;
+            var index = frame_count - self.start_frame;
             for (output) |*oframe| {
-                defer self.index += 1;
+                defer index += 1;
 
-                if (sample.len <= self.index) {
+                if (sample.len <= index) {
                     return true;
                 }
 
-                const frame = sample[self.index];
+                const frame = sample[index];
                 oframe[0] = std.math.clamp(oframe[0] + frame[0] * left * att, -1, 1);
                 oframe[1] = std.math.clamp(oframe[1] + frame[1] * right * att, -1, 1);
             }
@@ -826,6 +822,7 @@ pub const AppState = struct {
     mouse: extern struct { x: i32 = 0, y: i32 = 0, left: bool = false, right: bool = false } = .{},
 
     frame: u32 = 0,
+    ts: u64,
     time: f32 = 0,
     deltatime: f32 = 0,
     fps_cap: u32 = 60,
@@ -848,7 +845,7 @@ pub const AppState = struct {
     uniform_shader_dumped: bool = false,
     focus: bool = false,
 
-    pub fn init(window: *Engine.Window) !@This() {
+    pub fn init(window: *Engine.Window, start_ts: u64) !@This() {
         const mouse = window.poll_mouse();
         const sze = try window.get_res();
 
@@ -859,6 +856,7 @@ pub const AppState = struct {
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = rng,
             .uniform_buffer = try allocator.alloc(u8, 0),
+            .ts = start_ts,
         };
     }
 
@@ -914,6 +912,7 @@ pub const AppState = struct {
         self.mouse.y = @intFromFloat(mouse.y);
 
         self.frame += 1;
+        self.ts += lap;
         self.time += delta;
         self.deltatime = delta;
 
@@ -1005,10 +1004,10 @@ pub const AppState = struct {
                     Components.Collider{ .sphere = .{ .radius = 1.0 } },
                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                    Components.TimeDespawn{ .despawn_time = self.time + 5 },
+                    Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
                 });
 
-                try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
+                // try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
             }
         }
 
@@ -1052,18 +1051,40 @@ pub const AppState = struct {
         {
             var to_remove = std.ArrayList(Entity).init(allocator.*);
             defer to_remove.deinit();
+            var to_dying = std.ArrayList(Entity).init(allocator.*);
+            defer to_dying.deinit();
 
-            const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
-            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn, t: Components.Transform });
+            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
             while (it.next()) |e| {
-                if (e.ds.despawn_time < self.time) {
-                    try app.audio.ctx.ctx.playing.samples.append(.{
-                        .handle = if (self.rng.random().boolean()) app.handles.audio.scream1 else app.handles.audio.scream2,
-                        .pos = player.t.rotation.inverse_rotate_vector(e.t.pos.sub(player.t.pos)),
-                        .volume = 2.0,
-                    });
-                    try to_remove.append(e.id.*);
+                switch (e.ds.state) {
+                    .alive => {
+                        if (e.ds.despawn_time < self.time) {
+                            e.ds.state = .dying;
+                            try to_dying.append(e.id.*);
+                        }
+                    },
+                    .dying => {
+                        var exp = it.current_entity_explorer();
+                        if (exp.get_component(Components.Sound)) |s| {
+                            if (s.start_frame + app.cpu_resources.audio.items[s.audio.index].data.len <= app.audio.ctx.ctx.frame_count) {
+                                e.ds.state = .dead;
+                            }
+                        } else {
+                            e.ds.state = .dead;
+                        }
+                    },
+                    .dead => {
+                        try to_remove.append(e.id.*);
+                    },
                 }
+            }
+
+            for (to_dying.items) |e| {
+                try app.world.ecs.add_component(e, Components.Sound{
+                    .start_frame = app.audio.ctx.ctx.frame_count,
+                    .audio = if (self.rng.random().boolean()) app.handles.audio.scream1 else app.handles.audio.scream2,
+                    .volume = 2.0,
+                });
             }
 
             for (to_remove.items) |e| {
@@ -1194,6 +1215,32 @@ pub const AppState = struct {
                         }
                     }
                 }
+            }
+        }
+
+        {
+            const playing = &app.audio.ctx.ctx.playing;
+
+            // if true, the audio thread won't know it had to swap
+            // if false, the audio thread is swapping or has swapped.
+            // but we don't know it it is currently swapping, so we need another lock for that. (hence playing.lock)
+            _ = playing.swap_fuse.unfuse();
+            defer _ = playing.swap_fuse.fuse();
+
+            // this will not lock for more than the tiniest amount of time.
+            while (playing.lock.check()) {}
+
+            playing.samples_buf2.clearRetainingCapacity();
+
+            const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
+            var it = try app.world.ecs.iterator(struct { sound: Components.Sound, t: Components.Transform });
+            while (it.next()) |e| {
+                try playing.samples_buf2.append(.{
+                    .handle = e.sound.audio,
+                    .volume = e.sound.volume,
+                    .start_frame = e.sound.start_frame,
+                    .pos = player.t.rotation.inverse_rotate_vector(e.t.pos.sub(player.t.pos)),
+                });
             }
         }
 

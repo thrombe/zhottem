@@ -257,7 +257,9 @@ const HotApp = struct {
         self.gui_engine = try GuiEngine.init(self.engine.window);
         errdefer self.gui_engine.deinit();
 
-        self.app_state = try AppState.init(self.engine.window);
+        self.timer = try std.time.Timer.start();
+
+        self.app_state = try AppState.init(self.engine.window, self.timer.read());
         errdefer self.app_state.deinit();
 
         self.gui_state = GuiState{};
@@ -270,8 +272,6 @@ const HotApp = struct {
 
         self.gui_renderer = try GuiEngine.GuiRenderer.init(&self.engine, &self.renderer_state.swapchain);
         errdefer self.gui_renderer.deinit(&self.engine.graphics.device);
-
-        self.timer = try std.time.Timer.start();
 
         return self;
     }

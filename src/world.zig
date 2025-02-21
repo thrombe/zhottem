@@ -28,6 +28,7 @@ pub const World = struct {
         _ = try self.ecs.register(math.Camera);
         _ = try self.ecs.register(Components.Controller);
         _ = try self.ecs.register(Components.Shooter);
+        _ = try self.ecs.register(Components.Sound);
         _ = try self.ecs.register(Components.Transform);
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.Rigidbody);
@@ -341,6 +342,12 @@ pub const Components = struct {
         }
     };
 
+    pub const Sound = struct {
+        start_frame: u64,
+        audio: ResourceManager.AudioHandle,
+        volume: f32 = 1.0,
+    };
+
     pub const Collider = union(enum) {
         sphere: Sphere,
         plane: Plane,
@@ -400,8 +407,19 @@ pub const Components = struct {
         dynamic_friction: f32 = 0.5,
     };
 
+    // TODO: better despawn strategy.
+    // - if despawn_time is reached - we switch state and start checking for any components like dying animation.
+    // - if all dying components are clear - we despawn
+
     pub const TimeDespawn = struct {
         despawn_time: f32,
+        state: EntityState,
+
+        pub const EntityState = enum {
+            alive,
+            dying,
+            dead,
+        };
     };
 
     pub const StaticRender = struct {

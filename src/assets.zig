@@ -1051,6 +1051,7 @@ pub const Gltf = struct {
 pub const Wav = struct {
     header: Header,
     data: [][2]f32,
+    duration: u64,
 
     const Header = extern struct {
         riff: [4]u8,
@@ -1121,6 +1122,7 @@ pub const Wav = struct {
         return .{
             .header = header,
             .data = floats,
+            .duration = floats.len * std.time.ns_per_s / header.sampleRate,
         };
     }
 
