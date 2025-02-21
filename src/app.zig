@@ -30,6 +30,9 @@ const DescriptorPool = render_utils.DescriptorPool;
 const DescriptorSet = render_utils.DescriptorSet;
 const CmdBuffer = render_utils.CmdBuffer;
 
+const network_mod = @import("network.zig");
+const Socket = network_mod.Socket;
+
 const world_mod = @import("world.zig");
 const World = world_mod.World;
 const Components = world_mod.Components;
@@ -61,6 +64,7 @@ command_pool: vk.CommandPool,
 stages: ShaderStageManager,
 recorder: AudioRecorder,
 audio: AudioPlayer,
+socket: Socket,
 
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
@@ -357,6 +361,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .dynamic_friction = 1.0,
         },
         Components.Collider{ .sphere = .{ .radius = 1 } },
+        Components.PlayerId{ .id = 0 },
     });
 
     // _ = try world.ecs.insert(.{
@@ -489,6 +494,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
+    var socket = try Socket.init(try std.net.Address.parseIp("127.0.0.1", 8072));
+    errdefer socket.deinit();
+
+    if (!socket.ctx.is_server) {
+        try socket.send(.{ .begin = {} });
+    }
+
     return @This(){
         .world = world,
         .uniforms = uniforms,
@@ -505,6 +517,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .stages = stages,
         .recorder = recorder,
         .audio = audio,
+        .socket = socket,
 
         .texture_img = image,
         .texture = gpu_img,
@@ -538,6 +551,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.stages.deinit();
     defer self.recorder.deinit() catch |e| utils.dump_error(e);
     defer self.audio.deinit() catch |e| utils.dump_error(e);
+    defer self.socket.deinit();
     defer self.texture_img.deinit();
     defer self.texture.deinit(device);
 }
@@ -847,6 +861,8 @@ pub const AppState = struct {
 
     cmdbuf: world_mod.EntityComponentStore.CmdBuf,
 
+    client_count: u8 = 0,
+
     pub fn init(window: *Engine.Window, start_ts: u64, app: *App) !@This() {
         const mouse = window.poll_mouse();
         const sze = try window.get_res();
@@ -1012,6 +1028,70 @@ pub const AppState = struct {
                 });
 
                 // try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
+            }
+        }
+
+        {
+            while (app.socket.ctx.channel.try_recv()) |e| {
+                switch (e) {
+                    .begin => {
+                        if (app.socket.ctx.is_server) {
+                            const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
+                            try app.socket.send(.{ .myname = .{ .id = p.p.id, .pos = .{
+                                .x = p.t.pos.x,
+                                .y = p.t.pos.y,
+                                .z = p.t.pos.z,
+                            } } });
+
+                            self.client_count += 1;
+                            try app.socket.send(.{ .yourname = .{ .id = self.client_count } });
+                        }
+                    },
+                    .pos => |pos| {
+                        var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
+                        while (it.next()) |p| {
+                            if (p.p.id == pos.id) {
+                                p.t.pos.x = pos.pos.x;
+                                p.t.pos.y = pos.pos.y;
+                                p.t.pos.z = pos.pos.z;
+                            }
+                        }
+                    },
+                    .yourname => |id| {
+                        const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
+                        p.p.id = id.id;
+                        try app.socket.send(.{ .myname = .{ .id = id.id, .pos = .{
+                            .x = p.t.pos.x,
+                            .y = p.t.pos.y,
+                            .z = p.t.pos.z,
+                        } } });
+                    },
+                    .myname => |id| {
+                        _ = try self.cmdbuf.insert(.{
+                            Components.Transform{ .pos = .{
+                                .x = id.pos.x,
+                                .y = id.pos.y,
+                                .z = id.pos.z,
+                            } },
+                            Components.LastTransform{ .t = .{ .pos = .{
+                                .x = id.pos.x,
+                                .y = id.pos.y,
+                                .z = id.pos.z,
+                            } } },
+                            Components.Rigidbody{ .flags = .{ .pinned = true } },
+                            Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                            Components.StaticRender{ .mesh = app.handles.mesh.cube },
+                            Components.PlayerId{ .id = id.id },
+                        });
+                    },
+                    .end => {
+                        window.queue_close();
+                    },
+                }
+            }
+            if (app.socket.ctx.has_received or !app.socket.ctx.is_server) {
+                const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
+                try app.socket.send(.{ .pos = .{ .id = p.p.id, .pos = .{ .x = p.t.pos.x, .y = p.t.pos.y, .z = p.t.pos.z } } });
             }
         }
 

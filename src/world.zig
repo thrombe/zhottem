@@ -34,6 +34,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.Rigidbody);
         _ = try self.ecs.register(Components.Collider);
         _ = try self.ecs.register(Components.TimeDespawn);
+        _ = try self.ecs.register(Components.PlayerId);
         _ = try self.ecs.register(Components.StaticRender);
         _ = try self.ecs.register(Components.AnimatedRender);
 
@@ -420,6 +421,11 @@ pub const Components = struct {
             dying,
             dead,
         };
+    };
+
+    pub const PlayerId = struct {
+        id: u8,
+        addr: ?std.net.Address = null,
     };
 
     pub const StaticRender = struct {
