@@ -1022,6 +1022,19 @@ pub const EntityComponentStore = struct {
         archetype: *Archetype,
         entity_index: usize,
 
+        pub fn get(self: *@This(), comptime T: type) !Type.pointer(T) {
+            var t: Type.pointer(T) = undefined;
+
+            inline for (@typeInfo(T).Struct.fields) |field| {
+                const compid = try self.get_component_id(field.type);
+                const compi = self.archetype.typ.index(compid) orelse unreachable;
+                const val = std.mem.bytesAsValue(field.type, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
+                @field(t, field.name) = @alignCast(val);
+            }
+
+            return t;
+        }
+
         pub fn get_component(self: *@This(), typ: type) ?*typ {
             const compid = self.components.get(TypeId.from_type(typ)) orelse unreachable;
             const compi = self.archetype.typ.index(compid) orelse return null;
