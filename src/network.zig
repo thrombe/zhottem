@@ -46,7 +46,6 @@ pub const Socket = struct {
         channel: PacketStream,
         quit: utils.Fuse = .{},
         is_server: bool,
-        has_received: bool,
 
         const PacketStream = utils.Channel(struct { event: Event, addr: std.net.Address });
 
@@ -70,7 +69,6 @@ pub const Socket = struct {
                     },
                     else => return e,
                 };
-                self.has_received = true;
                 const buf = self.buf[0..n];
 
                 const tag: std.meta.Tag(Event) = @enumFromInt(self.buf[0]);
