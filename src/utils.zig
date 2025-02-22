@@ -6,7 +6,10 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 // - [typeId in zig?](https://github.com/ziglang/zig/issues/19858#issuecomment-2596933195)
-pub const TypeId = struct {
+pub const TypeId = extern struct {
+    // this type is marked extern because comptime TypeId that use hashing complain about 'well-defined layout'
+    // - [ensure comptime TypeId s](https://github.com/ziglang/zig/issues/425#issuecomment-754572088)
+
     id: u64,
 
     // unique even across dylib loads. (loading same lib multiple times will create different ids)
@@ -25,66 +28,70 @@ pub const TypeId = struct {
     }
 
     pub inline fn from_name(comptime T: type) @This() {
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(@typeName(T));
-        return .{ .id = hasher.final() };
+        comptime {
+            var hasher = std.hash.Wyhash.init(0);
+            hasher.update(@typeName(T));
+            return .{ .id = hasher.final() };
+        }
     }
 
     pub inline fn from_type(comptime T: type) @This() {
-        const Ti = @typeInfo(T);
+        comptime {
+            const Ti = @typeInfo(T);
 
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(@typeName(T));
-        hasher.update(@tagName(std.meta.activeTag(Ti)));
+            var hasher = std.hash.Wyhash.init(0);
+            hasher.update(@typeName(T));
+            hasher.update(@tagName(std.meta.activeTag(Ti)));
 
-        switch (Ti) {
-            .Struct => |t| {
-                inline for (t.fields) |field| {
-                    hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
-                    hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
-                }
-            },
-            .Int => |t| {
-                hasher.update(@tagName(t.signedness));
-                hasher.update(std.mem.asBytes(&t.bits));
-            },
-            .Float => |t| {
-                hasher.update(std.mem.asBytes(&t.bits));
-            },
-            .Enum => |t| {
-                inline for (t.fields) |field| {
-                    hasher.update(field.name);
-                    hasher.update(std.mem.asBytes(&@as(u32, field.value)));
-                }
-            },
-            .Union => |t| {
-                hasher.update(@tagName(t.layout));
-                inline for (t.fields) |field| {
-                    hasher.update(field.name);
-                    hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
-                    hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
-                }
-            },
-            .Optional => |t| {
-                hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
-            },
-            .Pointer => |t| {
-                // not sure what to do here :/
-                // might have cycles
-                hasher.update(@tagName(t.size));
-                hasher.update(@tagName(t.address_space));
-                hasher.update(std.mem.asBytes(&@as(u32, t.alignment)));
-                hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
-            },
-            .Array => |t| {
-                hasher.update(std.mem.asBytes(&t.len));
-                hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
-            },
-            .Bool, .Void => {},
-            else => @compileLog("can't do TypeIds on this type yet: " ++ @typeName(T)),
+            switch (Ti) {
+                .Struct => |t| {
+                    for (t.fields) |field| {
+                        hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
+                        hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
+                    }
+                },
+                .Int => |t| {
+                    hasher.update(@tagName(t.signedness));
+                    hasher.update(std.mem.asBytes(&t.bits));
+                },
+                .Float => |t| {
+                    hasher.update(std.mem.asBytes(&t.bits));
+                },
+                .Enum => |t| {
+                    for (t.fields) |field| {
+                        hasher.update(field.name);
+                        hasher.update(std.mem.asBytes(&@as(u32, field.value)));
+                    }
+                },
+                .Union => |t| {
+                    hasher.update(@tagName(t.layout));
+                    for (t.fields) |field| {
+                        hasher.update(field.name);
+                        hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
+                        hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
+                    }
+                },
+                .Optional => |t| {
+                    hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+                },
+                .Pointer => |t| {
+                    // not sure what to do here :/
+                    // might have cycles
+                    hasher.update(@tagName(t.size));
+                    hasher.update(@tagName(t.address_space));
+                    hasher.update(std.mem.asBytes(&@as(u32, t.alignment)));
+                    hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+                },
+                .Array => |t| {
+                    hasher.update(std.mem.asBytes(&t.len));
+                    hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+                },
+                .Bool, .Void => {},
+                else => @compileLog("can't do TypeIds on this type yet: " ++ @typeName(T)),
+            }
+
+            return .{ .id = hasher.final() };
         }
-
-        return .{ .id = hasher.final() };
     }
 };
 
