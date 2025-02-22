@@ -65,6 +65,7 @@ stages: ShaderStageManager,
 recorder: AudioRecorder,
 audio: AudioPlayer,
 socket: Socket,
+server_addr: std.net.Address,
 
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
@@ -494,11 +495,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
-    var socket = try Socket.init(try std.net.Address.parseIp("127.0.0.1", 8072));
+    const addr = try std.net.Address.parseIp("127.0.0.1", 8072);
+    var socket = try Socket.init(addr);
     errdefer socket.deinit();
 
     if (!socket.ctx.is_server) {
-        try socket.send(.{ .begin = {} });
+        try socket.send(.{ .begin = {} }, addr);
     }
 
     return @This(){
@@ -518,6 +520,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .recorder = recorder,
         .audio = audio,
         .socket = socket,
+        .server_addr = addr,
 
         .texture_img = image,
         .texture = gpu_img,
@@ -1033,18 +1036,13 @@ pub const AppState = struct {
 
         {
             while (app.socket.ctx.channel.try_recv()) |e| {
-                switch (e) {
+                switch (e.event) {
                     .begin => {
+                        // new player connected. notify it about all other players.
+                        // and notify other players about it.
                         if (app.socket.ctx.is_server) {
-                            const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
-                            try app.socket.send(.{ .myname = .{ .id = p.p.id, .pos = .{
-                                .x = p.t.pos.x,
-                                .y = p.t.pos.y,
-                                .z = p.t.pos.z,
-                            } } });
-
                             self.client_count += 1;
-                            try app.socket.send(.{ .yourname = .{ .id = self.client_count } });
+                            try app.socket.send(.{ .yourname = .{ .id = self.client_count } }, e.addr);
                         }
                     },
                     .pos => |pos| {
@@ -1064,9 +1062,30 @@ pub const AppState = struct {
                             .x = p.t.pos.x,
                             .y = p.t.pos.y,
                             .z = p.t.pos.z,
-                        } } });
+                        } } }, e.addr);
                     },
                     .myname => |id| {
+                        if (app.socket.ctx.is_server) {
+                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
+                            while (it.next()) |p| {
+                                // notify new player about all other players.
+                                try app.socket.send(.{ .myname = .{ .id = p.p.id, .pos = .{
+                                    .x = p.t.pos.x,
+                                    .y = p.t.pos.y,
+                                    .z = p.t.pos.z,
+                                } } }, e.addr);
+
+                                // notify other players about this player
+                                if (p.p.addr) |addr| {
+                                    try app.socket.send(.{ .myname = .{ .id = id.id, .pos = .{
+                                        .x = id.pos.x,
+                                        .y = id.pos.y,
+                                        .z = id.pos.z,
+                                    } } }, addr);
+                                }
+                            }
+                        }
+
                         _ = try self.cmdbuf.insert(.{
                             Components.Transform{ .pos = .{
                                 .x = id.pos.x,
@@ -1081,7 +1100,7 @@ pub const AppState = struct {
                             Components.Rigidbody{ .flags = .{ .pinned = true } },
                             Components.Collider{ .sphere = .{ .radius = 1.0 } },
                             Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                            Components.PlayerId{ .id = id.id },
+                            Components.PlayerId{ .id = id.id, .addr = e.addr },
                         });
                     },
                     .end => {
@@ -1089,9 +1108,27 @@ pub const AppState = struct {
                     },
                 }
             }
-            if (app.socket.ctx.has_received or !app.socket.ctx.is_server) {
+
+            if (app.socket.ctx.is_server) {
+                var pit = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
+                var oit = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
+
+                while (pit.next()) |p| {
+                    defer oit.reset();
+                    while (oit.next()) |o| {
+                        if (p.p.id == o.p.id) continue;
+
+                        if (o.p.addr) |addr| {
+                            try app.socket.send(.{ .pos = .{ .id = p.p.id, .pos = .{ .x = p.t.pos.x, .y = p.t.pos.y, .z = p.t.pos.z } } }, addr);
+                        }
+                    }
+                }
+            } else {
                 const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
-                try app.socket.send(.{ .pos = .{ .id = p.p.id, .pos = .{ .x = p.t.pos.x, .y = p.t.pos.y, .z = p.t.pos.z } } });
+                try app.socket.send(
+                    .{ .pos = .{ .id = p.p.id, .pos = .{ .x = p.t.pos.x, .y = p.t.pos.y, .z = p.t.pos.z } } },
+                    app.server_addr,
+                );
             }
         }
 

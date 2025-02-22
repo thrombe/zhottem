@@ -38,14 +38,12 @@ pub const Socket = struct {
     const ListenCtx = struct {
         sock: posix.socket_t,
         buf: []u8,
-        channel: utils.Channel(Event),
+        channel: PacketStream,
         quit: utils.Fuse = .{},
         is_server: bool,
         has_received: bool,
 
-        addr: std.net.Address,
-        src_addr: posix.sockaddr = std.mem.zeroes(posix.sockaddr),
-        src_addrlen: posix.socklen_t = @sizeOf(posix.sockaddr),
+        const PacketStream = utils.Channel(struct { event: Event, addr: std.net.Address });
 
         fn listen(self: *@This()) !void {
             while (true) {
@@ -53,12 +51,14 @@ pub const Socket = struct {
                     return;
                 }
 
+                var src_addrlen: posix.socklen_t = @sizeOf(posix.sockaddr);
+                var src_addr: posix.sockaddr align(4) = std.mem.zeroes(posix.sockaddr);
                 const n = posix.recvfrom(
                     self.sock,
                     self.buf,
                     0, // posix.SOCK.NONBLOCK, for non blocking
-                    &self.src_addr,
-                    &self.src_addrlen,
+                    &src_addr,
+                    &src_addrlen,
                 ) catch |e| switch (e) {
                     error.WouldBlock => {
                         continue;
@@ -72,7 +72,7 @@ pub const Socket = struct {
                 switch (tag) {
                     inline else => |t| {
                         const p = std.mem.bytesToValue(std.meta.TagPayload(Event, t), buf[1..]);
-                        try self.channel.send(@unionInit(Event, @tagName(t), p));
+                        try self.channel.send(.{ .event = @unionInit(Event, @tagName(t), p), .addr = std.net.Address.initPosix(&src_addr) });
                     },
                 }
 
@@ -106,14 +106,12 @@ pub const Socket = struct {
         ctx.buf = try allocator.alloc(u8, 1500);
         errdefer allocator.free(ctx.buf);
 
-        ctx.channel = try utils.Channel(Event).init(allocator.*);
+        ctx.channel = try ListenCtx.PacketStream.init(allocator.*);
         errdefer ctx.channel.deinit();
 
         ctx.quit = .{};
         ctx.sock = sock;
         ctx.is_server = true;
-        ctx.addr = addr;
-        ctx.src_addrlen = @sizeOf(posix.sockaddr);
 
         posix.bind(sock, &addr.any, addr.getOsSockLen()) catch |e| switch (e) {
             error.AddressInUse => {
@@ -137,7 +135,7 @@ pub const Socket = struct {
         allocator.destroy(self.ctx);
     }
 
-    pub fn send(self: *@This(), val: Event) !void {
+    pub fn send(self: *@This(), val: Event, addr: std.net.Address) !void {
         const T = @TypeOf(val);
         switch (val) {
             inline else => |p, t| {
@@ -149,8 +147,8 @@ pub const Socket = struct {
                     self.ctx.sock,
                     buf[0..],
                     0,
-                    if (self.ctx.is_server) &self.ctx.src_addr else &self.ctx.addr.any,
-                    if (self.ctx.is_server) self.ctx.src_addrlen else self.ctx.addr.getOsSockLen(),
+                    &addr.any,
+                    addr.getOsSockLen(),
                 );
 
                 if (n < @sizeOf(std.meta.Tag(T)) + @sizeOf(@TypeOf(p))) {
