@@ -349,7 +349,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             math.Camera.constants.basis.opengl,
         ),
         Components.Controller{},
-        Components.Transform{ .pos = .{} },
+        Components.Transform{},
         Components.LastTransform{},
         Components.Shooter{
             .audio = audio_handles.shot,
@@ -500,7 +500,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer socket.deinit();
 
     if (!socket.ctx.is_server) {
-        try socket.send(.{ .begin = {} }, addr);
+        try socket.send(.{ .join = {} }, addr);
     }
 
     return @This(){
@@ -891,185 +891,86 @@ pub const AppState = struct {
         const window = engine.window;
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        const input = window.input();
+        var input = window.input();
 
-        var mouse = input.mouse;
-        var kb = input.keys;
-
-        const imgui_io = &c.ImGui_GetIO()[0];
-        if (imgui_io.WantCaptureMouse) {
-            mouse = std.mem.zeroes(@TypeOf(mouse));
-            mouse.x = input.mouse.x;
-            mouse.y = input.mouse.y;
-        }
-        if (imgui_io.WantCaptureKeyboard) {
-            kb = std.mem.zeroes(@TypeOf(kb));
-        }
-
-        if (kb.p.just_pressed()) {
-            try render_utils.dump_image_to_file(
-                &app.screen_image,
-                &engine.graphics,
-                app.command_pool,
-                window.extent,
-                "./images",
-            );
-        }
-
-        if (mouse.left.just_pressed() and !self.focus) {
-            self.focus = true;
-            imgui_io.ConfigFlags |= c.ImGuiConfigFlags_NoMouse;
-            window.hide_cursor(true);
-        }
-        if (kb.escape.just_pressed() and !self.focus) {
-            window.queue_close();
-        }
-        if (kb.escape.just_pressed() and self.focus) {
-            self.focus = false;
-            imgui_io.ConfigFlags &= ~c.ImGuiConfigFlags_NoMouse;
-            window.hide_cursor(false);
-        }
-
-        self.mouse.left = mouse.left.pressed();
-        self.mouse.x = @intFromFloat(mouse.x);
-        self.mouse.y = @intFromFloat(mouse.y);
-
-        self.frame += 1;
-        self.ts += lap;
-        self.time += delta;
-        self.deltatime = delta;
+        var pexp = try app.world.ecs.explorer(app.handles.player);
+        const camera = pexp.get_component(math.Camera).?;
+        const pid = pexp.get_component(Components.PlayerId).?;
 
         {
-            var player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, t: Components.Transform, r: Components.Rigidbody, lt: Components.LastTransform, shooter: Components.Shooter });
+            var mouse = &input.mouse;
+            var kb = &input.keys;
 
-            player.controller.did_move = kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed();
-            player.controller.did_rotate = @abs(mouse.dx) + @abs(mouse.dy) > 0.0001 and self.focus;
-
-            // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
-            if (player.controller.did_rotate) {
-                player.controller.yaw += mouse.dx * player.controller.sensitivity_scale * player.controller.sensitivity;
-                player.controller.pitch += mouse.dy * player.controller.sensitivity_scale * player.controller.sensitivity;
-                player.controller.pitch = std.math.clamp(player.controller.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+            const imgui_io = &c.ImGui_GetIO()[0];
+            if (imgui_io.WantCaptureMouse) {
+                // mouse.* = std.mem.zeroes(@TypeOf(mouse));
+                mouse.x = input.mouse.x;
+                mouse.y = input.mouse.y;
+            }
+            if (imgui_io.WantCaptureKeyboard) {
+                // kb.* = std.mem.zeroes(@TypeOf(kb));
             }
 
-            const rot = player.camera.rot_quat(player.controller.pitch, player.controller.yaw);
-            const fwd = rot.rotate_vector(player.camera.world_basis.fwd);
-            const right = rot.rotate_vector(player.camera.world_basis.right);
-
-            player.t.rotation = rot;
-
-            var speed = player.controller.speed;
-            if (kb.shift.pressed()) {
-                speed *= 2.0;
-            }
-            if (kb.ctrl.pressed()) {
-                speed *= 0.1;
+            if (kb.p.just_pressed()) {
+                try render_utils.dump_image_to_file(
+                    &app.screen_image,
+                    &engine.graphics,
+                    app.command_pool,
+                    window.extent,
+                    "./images",
+                );
             }
 
-            speed *= 50 * player.controller.speed;
-            speed *= player.r.mass;
-
-            if (kb.w.pressed()) {
-                player.r.force = fwd.scale(speed);
+            if (mouse.left.just_pressed() and !self.focus) {
+                self.focus = true;
+                imgui_io.ConfigFlags |= c.ImGuiConfigFlags_NoMouse;
+                window.hide_cursor(true);
             }
-            if (kb.a.pressed()) {
-                player.r.force = right.scale(-speed);
-            }
-            if (kb.s.pressed()) {
-                player.r.force = fwd.scale(-speed);
-            }
-            if (kb.d.pressed()) {
-                player.r.force = right.scale(speed);
-            }
-            if (kb.space.pressed()) {
-                player.r.force = .{};
-                player.r.vel = .{};
-            }
-
-            {
-                const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
-                var t_min: ?f32 = null;
-                var closest: ?world_mod.Type.pointer(T) = null;
-                var it = try app.world.ecs.iterator(T);
-                while (it.next()) |e| {
-                    if (!e.r.flags.player and !e.r.flags.pinned and mouse.left.pressed()) {
-                        if (e.c.raycast(e.t, self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(1.1)), fwd)) |t| {
-                            if (t_min == null) {
-                                t_min = t;
-                                closest = e;
-                            } else if (t_min.? > t) {
-                                t_min = t;
-                                closest = e;
-                            }
-                        }
-                    }
-                }
-                if (closest) |e| {
-                    e.r.vel = e.r.vel.add(fwd.scale(50));
+            if (kb.escape.just_pressed() and !self.focus) {
+                window.queue_close();
+                if (app.socket.ctx.is_server) {
+                    try app.socket.ctx.channel.send(.{ .event = .quit, .addr = app.server_addr });
+                } else {
+                    try app.socket.send(.{ .despawn_player = .{ .id = pid.id } }, app.server_addr);
                 }
             }
+            if (kb.escape.just_pressed() and self.focus) {
+                self.focus = false;
+                imgui_io.ConfigFlags &= ~c.ImGuiConfigFlags_NoMouse;
+                window.hide_cursor(false);
+            }
 
-            if (player.shooter.try_shoot(mouse.right)) {
-                // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
-                // errdefer allocator.free(bones);
-                // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
-                // errdefer allocator.free(indices);
-                // @memset(bones, .{});
-                // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+            self.mouse.left = mouse.left.pressed();
+            self.mouse.x = @intFromFloat(mouse.x);
+            self.mouse.y = @intFromFloat(mouse.y);
 
-                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
-                const t = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
-                _ = try self.cmdbuf.insert(.{
-                    @as([]const u8, "bullet"),
-                    t,
-                    Components.LastTransform{ .t = t },
-                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
-                    Components.Collider{ .sphere = .{ .radius = 1.0 } },
-                    // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                    Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                    Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
-                });
+            self.frame += 1;
+            self.ts += lap;
+            self.time += delta;
+            self.deltatime = delta;
 
-                // try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
+            if (!self.focus) {
+                mouse.dx = 0;
+                mouse.dy = 0;
             }
         }
 
         {
+            try app.socket.ctx.channel.send(.{ .event = .{ .input = .{ .id = pid.id, .input = input } }, .addr = app.server_addr });
+            try app.socket.send(.{ .input = .{ .id = pid.id, .input = input } }, app.server_addr);
+
             while (app.socket.ctx.channel.try_recv()) |e| {
-                switch (e.event) {
-                    .begin => {
-                        // new player connected. notify it about all other players.
-                        // and notify other players about it.
-                        if (app.socket.ctx.is_server) {
+                if (app.socket.ctx.is_server) {
+                    switch (e.event) {
+                        .join => {
                             self.client_count += 1;
-                            try app.socket.send(.{ .yourname = .{ .id = self.client_count } }, e.addr);
-                        }
-                    },
-                    .pos => |pos| {
-                        var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
-                        while (it.next()) |p| {
-                            if (p.p.id == pos.id) {
-                                p.t.pos.x = pos.pos.x;
-                                p.t.pos.y = pos.pos.y;
-                                p.t.pos.z = pos.pos.z;
-                            }
-                        }
-                    },
-                    .yourname => |id| {
-                        const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
-                        p.p.id = id.id;
-                        try app.socket.send(.{ .myname = .{ .id = id.id, .pos = .{
-                            .x = p.t.pos.x,
-                            .y = p.t.pos.y,
-                            .z = p.t.pos.z,
-                        } } }, e.addr);
-                    },
-                    .myname => |id| {
-                        if (app.socket.ctx.is_server) {
+                            try app.socket.send(.{ .setid = .{ .id = self.client_count } }, e.addr);
+                        },
+                        .spawn_player => {
                             var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
                             while (it.next()) |p| {
                                 // notify new player about all other players.
-                                try app.socket.send(.{ .myname = .{ .id = p.p.id, .pos = .{
+                                try app.socket.send(.{ .spawn_player = .{ .id = p.p.id, .pos = .{
                                     .x = p.t.pos.x,
                                     .y = p.t.pos.y,
                                     .z = p.t.pos.z,
@@ -1077,15 +978,56 @@ pub const AppState = struct {
 
                                 // notify other players about this player
                                 if (p.p.addr) |addr| {
-                                    try app.socket.send(.{ .myname = .{ .id = id.id, .pos = .{
-                                        .x = id.pos.x,
-                                        .y = id.pos.y,
-                                        .z = id.pos.z,
-                                    } } }, addr);
+                                    try app.socket.send(e.event, addr);
                                 }
                             }
-                        }
+                        },
+                        .despawn_player => {
+                            // tell everyone this player left
+                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId });
+                            while (it.next()) |p| {
+                                if (p.p.addr) |addr| {
+                                    try app.socket.send(e.event, addr);
+                                }
+                            }
+                        },
+                        .input => |pinput| {
+                            // send this player's inputs to everyone
+                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId });
+                            while (it.next()) |p| {
+                                if (p.p.id == pinput.id) continue;
+                                if (p.p.addr) |addr| {
+                                    try app.socket.send(e.event, addr);
+                                }
+                            }
+                        },
+                        .quit => {
+                            // tell everyone to quit themselves
+                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId });
+                            while (it.next()) |p| {
+                                if (p.p.addr) |addr| {
+                                    try app.socket.send(e.event, addr);
+                                }
+                            }
+                        },
+                        .setid => {
+                            std.debug.print("YIKES server received: {any} event\n", .{std.meta.activeTag(e.event)});
+                            continue;
+                        },
+                    }
+                }
 
+                switch (e.event) {
+                    .setid => |id| {
+                        const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
+                        p.p.id = id.id;
+                        try app.socket.send(.{ .spawn_player = .{ .id = id.id, .pos = .{
+                            .x = p.t.pos.x,
+                            .y = p.t.pos.y,
+                            .z = p.t.pos.z,
+                        } } }, e.addr);
+                    },
+                    .spawn_player => |id| {
                         _ = try self.cmdbuf.insert(.{
                             Components.Transform{ .pos = .{
                                 .x = id.pos.x,
@@ -1097,38 +1039,143 @@ pub const AppState = struct {
                                 .y = id.pos.y,
                                 .z = id.pos.z,
                             } } },
-                            Components.Rigidbody{ .flags = .{ .pinned = true } },
+                            Components.Controller{},
+                            Components.Rigidbody{
+                                .flags = .{ .player = true },
+                                .mass = 2,
+                                .dynamic_friction = 1.0,
+                            },
                             Components.Collider{ .sphere = .{ .radius = 1.0 } },
                             Components.StaticRender{ .mesh = app.handles.mesh.cube },
                             Components.PlayerId{ .id = id.id, .addr = e.addr },
+                            Components.Shooter{
+                                .audio = app.handles.audio.shot,
+                                .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
+                                .hold = true,
+                            },
                         });
                     },
-                    .end => {
+                    .despawn_player => |id| {
+                        var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, entity: Entity });
+                        while (it.next()) |p| {
+                            if (p.p.id == id.id) {
+                                try self.cmdbuf.delete(p.entity.*);
+                            }
+                        }
+                    },
+                    .input => |pinput| {
+                        var pit = try app.world.ecs.iterator(struct {
+                            pid: Components.PlayerId,
+                            controller: Components.Controller,
+                            t: Components.Transform,
+                            r: Components.Rigidbody,
+                            lt: Components.LastTransform,
+                            shooter: Components.Shooter,
+                        });
+
+                        while (pit.next()) |player| {
+                            if (pinput.id != player.pid.id) continue;
+
+                            const kb = pinput.input.keys;
+                            const mouse = pinput.input.mouse;
+
+                            player.controller.did_move = kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed();
+                            player.controller.did_rotate = @abs(mouse.dx) + @abs(mouse.dy) > 0.0001;
+
+                            // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
+                            if (player.controller.did_rotate) {
+                                player.controller.yaw += mouse.dx * player.controller.sensitivity_scale * player.controller.sensitivity;
+                                player.controller.pitch += mouse.dy * player.controller.sensitivity_scale * player.controller.sensitivity;
+                                player.controller.pitch = std.math.clamp(player.controller.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+                            }
+
+                            const rot = camera.rot_quat(player.controller.pitch, player.controller.yaw);
+                            const fwd = rot.rotate_vector(camera.world_basis.fwd);
+                            const right = rot.rotate_vector(camera.world_basis.right);
+
+                            player.t.rotation = rot;
+
+                            var speed = player.controller.speed;
+                            if (kb.shift.pressed()) {
+                                speed *= 2.0;
+                            }
+                            if (kb.ctrl.pressed()) {
+                                speed *= 0.1;
+                            }
+
+                            speed *= 50 * player.controller.speed;
+                            speed *= player.r.mass;
+
+                            if (kb.w.pressed()) {
+                                player.r.force = fwd.scale(speed);
+                            }
+                            if (kb.a.pressed()) {
+                                player.r.force = right.scale(-speed);
+                            }
+                            if (kb.s.pressed()) {
+                                player.r.force = fwd.scale(-speed);
+                            }
+                            if (kb.d.pressed()) {
+                                player.r.force = right.scale(speed);
+                            }
+                            if (kb.space.pressed()) {
+                                player.r.force = .{};
+                                player.r.vel = .{};
+                            }
+
+                            {
+                                const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
+                                var t_min: ?f32 = null;
+                                var closest: ?world_mod.Type.pointer(T) = null;
+                                var it = try app.world.ecs.iterator(T);
+                                while (it.next()) |ent| {
+                                    if (!ent.r.flags.player and !ent.r.flags.pinned and mouse.left.pressed()) {
+                                        if (ent.c.raycast(ent.t, self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(1.1)), fwd)) |t| {
+                                            if (t_min == null) {
+                                                t_min = t;
+                                                closest = ent;
+                                            } else if (t_min.? > t) {
+                                                t_min = t;
+                                                closest = ent;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (closest) |ent| {
+                                    ent.r.vel = ent.r.vel.add(fwd.scale(50));
+                                }
+                            }
+
+                            if (player.shooter.try_shoot(mouse.right)) {
+                                // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                                // errdefer allocator.free(bones);
+                                // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                                // errdefer allocator.free(indices);
+                                // @memset(bones, .{});
+                                // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+
+                                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
+                                const t = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
+                                _ = try self.cmdbuf.insert(.{
+                                    @as([]const u8, "bullet"),
+                                    t,
+                                    Components.LastTransform{ .t = t },
+                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
+                                    Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                                    // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                                    Components.StaticRender{ .mesh = app.handles.mesh.cube },
+                                    Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
+                                });
+
+                                // try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
+                            }
+                        }
+                    },
+                    .quit => {
                         window.queue_close();
                     },
+                    .join => {},
                 }
-            }
-
-            if (app.socket.ctx.is_server) {
-                var pit = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
-                var oit = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
-
-                while (pit.next()) |p| {
-                    defer oit.reset();
-                    while (oit.next()) |o| {
-                        if (p.p.id == o.p.id) continue;
-
-                        if (o.p.addr) |addr| {
-                            try app.socket.send(.{ .pos = .{ .id = p.p.id, .pos = .{ .x = p.t.pos.x, .y = p.t.pos.y, .z = p.t.pos.z } } }, addr);
-                        }
-                    }
-                }
-            } else {
-                const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
-                try app.socket.send(
-                    .{ .pos = .{ .id = p.p.id, .pos = .{ .x = p.t.pos.x, .y = p.t.pos.y, .z = p.t.pos.z } } },
-                    app.server_addr,
-                );
             }
         }
 
@@ -1136,12 +1183,11 @@ pub const AppState = struct {
             self.physics.acctime += delta;
             self.physics.interpolation_acctime += delta;
 
-            const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera });
             {
                 var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
                 while (it.next()) |e| {
                     if (!e.r.flags.pinned) {
-                        const g = player.camera.world_basis.up.scale(-e.r.mass * 9.8);
+                        const g = camera.world_basis.up.scale(-e.r.mass * 9.8);
                         e.r.force = e.r.force.add(g);
                     }
                 }

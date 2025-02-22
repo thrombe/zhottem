@@ -7,22 +7,27 @@ const math = @import("math.zig");
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+const Engine = @import("engine.zig");
+
 const posix = std.posix;
 
 const Event = union(enum(u8)) {
-    begin,
-    end,
-    myname: packed struct {
+    join,
+    setid: packed struct {
+        id: u8,
+    },
+    spawn_player: packed struct {
         id: u8,
         pos: Vec3,
     },
-    yourname: packed struct {
+    despawn_player: packed struct {
         id: u8,
     },
-    pos: packed struct {
+    input: packed struct {
         id: u8,
-        pos: Vec3,
+        input: Engine.Window.InputState,
     },
+    quit,
 
     const Vec3 = packed struct {
         x: f32,
@@ -308,7 +313,7 @@ pub fn testfn() !void {
     defer sock.deinit();
 
     if (!sock.ctx.is_server) {
-        try sock.send(Event{ .begin = {} });
+        try sock.send(Event{ .joined = {} });
     }
 
     while (true) {
