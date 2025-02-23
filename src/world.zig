@@ -29,6 +29,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.Controller);
         _ = try self.ecs.register(Components.Shooter);
         _ = try self.ecs.register(Components.Sound);
+        _ = try self.ecs.register(Components.StaticSound);
         _ = try self.ecs.register(Components.Transform);
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.Rigidbody);
@@ -349,6 +350,13 @@ pub const Components = struct {
         volume: f32 = 1.0,
     };
 
+    pub const StaticSound = struct {
+        audio: ResourceManager.AudioHandle,
+        pos: Vec4,
+        start_frame: u64,
+        volume: f32 = 1.0,
+    };
+
     pub const Collider = union(enum) {
         sphere: Sphere,
         plane: Plane,
@@ -488,7 +496,7 @@ pub const Type = struct {
 
     const one: u128 = 1;
 
-    pub fn from(components: []const ComponentId) @This() {
+    pub inline fn from(components: []const ComponentId) @This() {
         var this: @This() = .{ .components = 0 };
         for (components) |comp| {
             this.components |= mask(comp);
@@ -496,7 +504,7 @@ pub const Type = struct {
         return this;
     }
 
-    fn mask(comp: anytype) u128 {
+    inline fn mask(comp: anytype) u128 {
         return switch (@TypeOf(comp)) {
             ComponentId => @This().one << @intCast(comp.id),
             else => @This().one << @intCast(comp),
@@ -523,7 +531,7 @@ pub const Type = struct {
         return (self.components & components) == components;
     }
 
-    pub fn removed(self: *const @This(), compid: ComponentId) ?@This() {
+    pub inline fn removed(self: *const @This(), compid: ComponentId) ?@This() {
         const typ = self.*;
 
         typ.components &= ~mask(compid);
@@ -534,7 +542,7 @@ pub const Type = struct {
         return typ;
     }
 
-    pub fn inserted(self: *const @This(), compid: ComponentId) ?@This() {
+    pub inline fn inserted(self: *const @This(), compid: ComponentId) ?@This() {
         var typ = self.*;
 
         typ.components |= mask(compid);
@@ -678,12 +686,14 @@ pub const EntityComponentStore = struct {
     const TypeComponents = std.AutoArrayHashMap(TypeId, ComponentId);
     const Vtables = std.ArrayList(ComponentVtable);
     const ComponentVtable = struct {
+        name: []const u8,
         deinit: ?*const fn (ptr: *anyopaque) void,
 
         fn from(component: type) @This() {
             switch (component) {
-                []const u8 => return .{ .deinit = null },
+                []const u8 => return .{ .name = @typeName(component), .deinit = null },
                 else => return .{
+                    .name = @typeName(component),
                     // TODO: these will not update when hot reloaded.
                     //  - this can be made to work by adding .reload() methods to things that have pointers.
                     //  - just regester the components again :P

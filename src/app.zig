@@ -1166,8 +1166,13 @@ pub const AppState = struct {
                                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
                                     Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
                                 });
-
-                                // try app.audio.ctx.ctx.playing.samples.append(.{ .handle = player.shooter.audio, .pos = .{}, .volume = 0.4 });
+                                _ = try self.cmdbuf.insert(.{
+                                    Components.TimeDespawn{
+                                        .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),
+                                        .state = .alive,
+                                    },
+                                    Components.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.pos, .start_frame = app.audio.ctx.ctx.frame_count },
+                                });
                             }
                         }
                     },
@@ -1388,14 +1393,27 @@ pub const AppState = struct {
             playing.samples_buf2.clearRetainingCapacity();
 
             const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
-            var it = try app.world.ecs.iterator(struct { sound: Components.Sound, t: Components.Transform });
-            while (it.next()) |e| {
-                try playing.samples_buf2.append(.{
-                    .handle = e.sound.audio,
-                    .volume = e.sound.volume,
-                    .start_frame = e.sound.start_frame,
-                    .pos = player.t.rotation.inverse_rotate_vector(e.t.pos.sub(player.t.pos)),
-                });
+            {
+                var it = try app.world.ecs.iterator(struct { sound: Components.Sound, t: Components.Transform });
+                while (it.next()) |e| {
+                    try playing.samples_buf2.append(.{
+                        .handle = e.sound.audio,
+                        .volume = e.sound.volume,
+                        .start_frame = e.sound.start_frame,
+                        .pos = player.t.rotation.inverse_rotate_vector(e.t.pos.sub(player.t.pos)),
+                    });
+                }
+            }
+            {
+                var it = try app.world.ecs.iterator(struct { sound: Components.StaticSound });
+                while (it.next()) |e| {
+                    try playing.samples_buf2.append(.{
+                        .handle = e.sound.audio,
+                        .volume = e.sound.volume,
+                        .start_frame = e.sound.start_frame,
+                        .pos = player.t.rotation.inverse_rotate_vector(e.sound.pos.sub(player.t.pos)),
+                    });
+                }
             }
         }
 

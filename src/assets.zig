@@ -1069,6 +1069,10 @@ pub const Wav = struct {
         subchunk2Size: u32,
     };
 
+    pub fn duration_sec(self: *const @This()) f32 {
+        return @floatCast(@as(f64, @floatFromInt(self.duration)) / std.time.ns_per_s);
+    }
+
     pub fn deinit(self: *@This()) void {
         allocator.free(self.data);
     }
