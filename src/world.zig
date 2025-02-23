@@ -486,12 +486,30 @@ pub const Type = struct {
     // assume components are 0..128
     components: u128,
 
+    const one: u128 = 1;
+
+    pub fn from(components: []const ComponentId) @This() {
+        var this: @This() = .{ .components = 0 };
+        for (components) |comp| {
+            this.components |= mask(comp);
+        }
+        return this;
+    }
+
+    fn mask(comp: anytype) u128 {
+        return switch (@TypeOf(comp)) {
+            ComponentId => @This().one << @intCast(comp.id),
+            else => @This().one << @intCast(comp),
+        };
+    }
+
     // have a biset of components in each Type
     // mask out all components with bigger or equal ids: bitset & ((1 << compid.id) - 1)
     // count the number of bits still set
     pub fn index(self: *const @This(), component: ComponentId) ?usize {
-        if (self.components & (@as(u128, 1) << @intCast(component.id)) > 0) {
-            return @popCount(self.components & ((@as(u128, 1) << @intCast(component.id)) - 1));
+        const m = mask(component);
+        if (self.components & m > 0) {
+            return @popCount(self.components & (m - 1));
         } else {
             return null;
         }
@@ -508,7 +526,7 @@ pub const Type = struct {
     pub fn removed(self: *const @This(), compid: ComponentId) ?@This() {
         const typ = self.*;
 
-        typ.components &= !(@as(u128, 1) << @intCast(compid.id));
+        typ.components &= ~mask(compid);
         if (typ.components == self.components) {
             return null;
         }
@@ -519,7 +537,7 @@ pub const Type = struct {
     pub fn inserted(self: *const @This(), compid: ComponentId) ?@This() {
         var typ = self.*;
 
-        typ.components |= (@as(u128, 1) << @intCast(compid.id));
+        typ.components |= mask(compid);
         if (typ.components == self.components) {
             return null;
         }
@@ -562,7 +580,7 @@ pub const Type = struct {
         pub fn next(self: *@This()) ?ComponentId {
             if (self.components > 0) {
                 const i = @ctz(self.components);
-                self.components &= ~(@as(u128, 1) << @intCast(i));
+                self.components &= ~mask(i);
                 return .{ .id = i, .size = self.sizes[i] };
             } else {
                 return null;
@@ -774,11 +792,7 @@ pub const EntityComponentStore = struct {
 
     fn components_from(self: *@This(), typ: type) !u128 {
         const components = try self.component_ids_from(typ);
-        var comps: u128 = 0;
-        for (components) |compid| {
-            comps |= (@as(u128, 1) << @intCast(compid.id));
-        }
-        return comps;
+        return Type.from(&components).components;
     }
 
     fn get_archetype(self: *@This(), typ: Type) !ArchetypeId {
@@ -798,7 +812,7 @@ pub const EntityComponentStore = struct {
 
     fn insert_reserved(self: *@This(), eid: Entity, components: anytype) !void {
         const component_ids = try self.components_from(@TypeOf(components));
-        const typ = Type{ .components = (@as(u128, 1) << @intCast(self.entityid_component_id.id)) | component_ids };
+        const typ = Type{ .components = component_ids | Type.mask(self.entityid_component_id) };
 
         const archeid = try self.get_archetype(typ);
         const archetype = &self.archetypes.items[archeid];
@@ -838,7 +852,7 @@ pub const EntityComponentStore = struct {
 
         inline for (@typeInfo(T).Struct.fields) |field| {
             const compid = try self.get_component_id(field.type);
-            const compi = archetype.typ.index(compid) orelse unreachable;
+            const compi = archetype.typ.index(compid).?;
             const val = std.mem.bytesAsValue(field.type, archetype.components[compi].items[ae.entity_index * compid.size ..][0..compid.size]);
             @field(t, field.name) = @alignCast(val);
         }
@@ -946,14 +960,10 @@ pub const EntityComponentStore = struct {
 
     pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(typ) {
         const ids = try self.component_ids_from(typ);
-        var components: u128 = 0;
-        for (ids) |compid| {
-            components |= (@as(u128, 1) << @intCast(compid.id));
-        }
 
         return .{
             .ids = ids,
-            .components = components,
+            .typ = Type.from(&ids),
             .archetype_it = self.archetype_map.iterator(),
             .ecs = self,
         };
@@ -1045,7 +1055,7 @@ pub const EntityComponentStore = struct {
             ecs: *EntityComponentStore,
             // same order as that of fields
             ids: [len]ComponentId,
-            components: u128,
+            typ: Type,
             archetype_it: ArchetypeMap.Iterator,
             current: ?struct {
                 archetype: ArchetypeId,
@@ -1083,7 +1093,7 @@ pub const EntityComponentStore = struct {
                     }
 
                     while (self.archetype_it.next()) |e| {
-                        if (!e.key_ptr.has_components(self.components)) {
+                        if (!e.key_ptr.has_components(self.typ.components)) {
                             continue;
                         }
 
