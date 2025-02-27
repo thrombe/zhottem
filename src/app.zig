@@ -358,7 +358,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
         Components.Rigidbody{
             .flags = .{ .player = true },
-            .mass = 2,
+            .invmass = 0.5,
             .dynamic_friction = 1.0,
         },
         Components.Collider{ .sphere = .{ .radius = 1 } },
@@ -374,7 +374,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     Components.Collider{ .sphere = .{ .radius = -10 } },
     // });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .dynamic_friction = 1 },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .dynamic_friction = 1, .invmass = 0 },
         Components.Transform{
             .pos = .{ .y = -3 },
             .scale = Vec4.splat3(50),
@@ -384,7 +384,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
         Components.Transform{
             .pos = .{ .y = 50, .x = 50 },
             .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
@@ -395,7 +395,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
         Components.Transform{
             .pos = .{ .y = 50, .x = -50 },
             .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
@@ -406,7 +406,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
         Components.Transform{
             .pos = .{ .y = 50, .z = 50 },
             .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
@@ -417,7 +417,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true } },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
         Components.Transform{
             .pos = .{ .y = 50, .z = -50 },
             .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
@@ -1042,7 +1042,7 @@ pub const AppState = struct {
                             Components.Controller{},
                             Components.Rigidbody{
                                 .flags = .{ .player = true },
-                                .mass = 2,
+                                .invmass = 0.5,
                                 .dynamic_friction = 1.0,
                             },
                             Components.Collider{ .sphere = .{ .radius = 1.0 } },
@@ -1104,7 +1104,7 @@ pub const AppState = struct {
                             }
 
                             speed *= 50 * player.controller.speed;
-                            speed *= player.r.mass;
+                            speed /= player.r.invmass;
 
                             if (kb.w.pressed()) {
                                 player.r.force = fwd.scale(speed);
@@ -1160,7 +1160,7 @@ pub const AppState = struct {
                                     @as([]const u8, "bullet"),
                                     t,
                                     Components.LastTransform{ .t = t },
-                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .mass = 1, .dynamic_friction = 1 },
+                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .dynamic_friction = 1 },
                                     Components.Collider{ .sphere = .{ .radius = 1.0 } },
                                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
@@ -1171,7 +1171,7 @@ pub const AppState = struct {
                                         .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),
                                         .state = .alive,
                                     },
-                                    Components.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.pos, .start_frame = app.audio.ctx.ctx.frame_count },
+                                    Components.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
                                 });
                             }
                         }
@@ -1188,16 +1188,6 @@ pub const AppState = struct {
             self.physics.acctime += delta;
             self.physics.interpolation_acctime += delta;
 
-            {
-                var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
-                while (it.next()) |e| {
-                    if (!e.r.flags.pinned) {
-                        const g = camera.world_basis.up.scale(-e.r.mass * 9.8);
-                        e.r.force = e.r.force.add(g);
-                    }
-                }
-            }
-
             while (self.physics.acctime >= self.physics.step) {
                 self.physics.acctime -= self.physics.step;
 
@@ -1206,6 +1196,16 @@ pub const AppState = struct {
                     var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
                     while (it.next()) |e| {
                         e.ft.t = e.t.*;
+                    }
+                }
+
+                {
+                    var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
+                    while (it.next()) |e| {
+                        if (!e.r.flags.pinned) {
+                            const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
+                            e.r.force = e.r.force.add(g);
+                        }
                     }
                 }
 

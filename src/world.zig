@@ -78,7 +78,7 @@ pub const World = struct {
         defer positions.deinit();
 
         for (collisions.items) |*e| {
-            ImpulseSolver.solve(e);
+            ImpulseSolver.solve(e, delta);
 
             try positions.append(.{ .entity = e.* });
         }
@@ -202,57 +202,49 @@ pub const EntityCollider = struct {
 };
 
 pub const ImpulseSolver = struct {
-    pub fn solve(entity: *EntityCollider.CollisionEntity) void {
+    pub fn solve(entity: *EntityCollider.CollisionEntity, delta: f32) void {
         // - [Inelastic collision - Wikipedia](https://en.wikipedia.org/wiki/Inelastic_collision)
 
         const rba = entity.a.rigidbody;
         const rbb = entity.b.rigidbody;
 
-        var vba = rbb.vel.sub(rba.vel);
+        const vba = rbb.vel.sub(rba.vel);
+
         // normal velocity
-        var nvel = entity.collision.normal.dot(vba);
+        const nvel = entity.collision.normal.dot(vba);
 
         if (nvel >= 0) return;
 
         // impulse
         const e = rba.restitution * rbb.restitution;
-        const j = -(1 + e) * nvel / (1 / rba.mass + 1 / rbb.mass);
-        const impulse = entity.collision.normal.scale(j);
-        if (!rba.flags.pinned) {
-            rba.vel = rba.vel.sub(impulse.scale(1 / rba.mass));
-        }
-        if (!rbb.flags.pinned) {
-            rbb.vel = rbb.vel.add(impulse.scale(1 / rbb.mass));
+        const j = -(1 + e) * nvel / (rba.invmass + rbb.invmass);
+
+        const fvel = (rbb.force.scale(rbb.invmass).sub(rba.force.scale(rba.invmass))).scale(delta).dot(entity.collision.normal);
+        if (-fvel + 0.001 >= -nvel) {
+            rba.vel = rba.vel.sub(entity.collision.normal.scale(-rba.vel.dot(entity.collision.normal)));
+            rbb.vel = rbb.vel.add(entity.collision.normal.scale(-rbb.vel.dot(entity.collision.normal)));
+        } else {
+            const impulse = entity.collision.normal.scale(j);
+            rba.vel = rba.vel.sub(impulse.scale(rba.invmass));
+            rbb.vel = rbb.vel.add(impulse.scale(rbb.invmass));
         }
 
         // friction
-        vba = rbb.vel.sub(rba.vel);
-        nvel = entity.collision.normal.dot(vba);
-        var tangent = vba.sub(entity.collision.normal.scale(nvel));
-        if (tangent.length() > 0.0001) {
-            tangent = tangent.normalize3D();
-        }
+        // var tangent = vba.sub(entity.collision.normal.scale(nvel));
+        // if (tangent.length() > 0.0001) {
+        //     tangent = tangent.normalize3D();
+        // }
 
-        // tangential velocity
-        const tvel = vba.dot(tangent);
-        const smu = (Vec4{ .x = rba.static_friction, .y = rbb.static_friction }).length();
+        // const dmu = (Vec4{ .x = rba.dynamic_friction, .y = rbb.dynamic_friction }).length();
+        // const friction = tangent.scale(-j * dmu);
+        // // std.debug.print("friction: {any}\n", .{friction});
 
-        const f = -tvel / (1 / rba.mass + 1 / rbb.mass);
+        // rba.vel = rba.vel.sub(friction.scale(rba.invmass));
+        // rbb.vel = rbb.vel.add(friction.scale(rbb.invmass));
 
-        var friction = Vec4{};
-        if (@abs(f) < j * smu) {
-            friction = tangent.scale(f);
-        } else {
-            const dmu = (Vec4{ .x = rba.dynamic_friction, .y = rbb.dynamic_friction }).length();
-            friction = tangent.scale(-j * dmu);
-        }
-
-        if (!rba.flags.pinned) {
-            rba.vel = rba.vel.sub(friction.scale(1 / rba.mass));
-        }
-        if (!rbb.flags.pinned) {
-            rbb.vel = rbb.vel.add(friction.scale(1 / rbb.mass));
-        }
+        // const torque = entity.collision.normal.cross(friction);
+        // rba.angular_vel = rba.angular_vel.sub(torque.scale(amassinv));
+        // rbb.angular_vel = rbb.angular_vel.add(torque.scale(bmassinv));
     }
 };
 
@@ -273,25 +265,19 @@ pub const PositionSolver = struct {
         const rbb = entity.entity.b.rigidbody;
         const col = entity.entity.collision;
 
-        const del = col.normal.scale(@max(col.depth - constants.slop, 0));
+        const del = col.normal.scale(@max(col.depth - constants.slop, 0) / (rba.invmass + rbb.invmass));
 
-        if (!rba.flags.pinned) {
-            entity.dela = del;
-        }
-        if (!rbb.flags.pinned) {
-            entity.delb = del;
-        }
+        entity.dela = del.scale(rba.invmass);
+        entity.delb = del.scale(rbb.invmass);
     }
 
     pub fn apply(entity: *PositionEntity, delta: f32) void {
+        _ = delta;
         const a = entity.entity.a;
         const b = entity.entity.b;
-        if (!a.rigidbody.flags.pinned) {
-            a.transform.pos = a.transform.pos.sub(entity.dela.scale(delta));
-        }
-        if (!b.rigidbody.flags.pinned) {
-            b.transform.pos = b.transform.pos.add(entity.delb.scale(delta));
-        }
+
+        a.transform.pos = a.transform.pos.sub(entity.dela);
+        b.transform.pos = b.transform.pos.add(entity.delb);
     }
 };
 
@@ -329,7 +315,7 @@ pub const Components = struct {
         yaw: f32 = 0,
         speed: f32 = 1.0,
         sensitivity: f32 = 1.0,
-        sensitivity_scale: f32 = 0.003,
+        sensitivity_scale: f32 = 0.001,
         did_rotate: bool = false,
         did_move: bool = false,
     };
@@ -408,10 +394,13 @@ pub const Components = struct {
             pinned: bool = false,
             player: bool = false,
         } = .{},
+
+        invmass: f32 = 1.0,
+        restitution: f32 = 0.3,
+
         vel: Vec4 = .{},
         force: Vec4 = .{},
-        restitution: f32 = 1.0,
-        mass: f32 = 1.0,
+
         static_friction: f32 = 0.5,
         dynamic_friction: f32 = 0.5,
     };
