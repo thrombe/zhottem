@@ -954,10 +954,11 @@ pub const EntityComponentStore = struct {
     pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
         const compid = try self.get_component_id(@TypeOf(component));
         const ae = self.entities.getEntry(entity) orelse return error.EntityNotFound;
-        const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
 
-        const edge = try curr_archetype.edges.getOrPut(compid);
         const archeid = blk: {
+            const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
+
+            const edge = try curr_archetype.edges.getOrPut(compid);
             if (edge.found_existing) {
                 break :blk edge.value_ptr.*;
             } else {
@@ -968,6 +969,7 @@ pub const EntityComponentStore = struct {
             }
         };
 
+        const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
         const archetype = &self.archetypes.items[archeid];
         defer {
             self.swap_remove(ae.value_ptr.*);
@@ -996,10 +998,10 @@ pub const EntityComponentStore = struct {
     pub fn remove_component(self: *@This(), entity: Entity, component: type) !void {
         const compid = try self.get_component_id(component);
         const ae = self.entities.getEntry(entity) orelse return error.EntityNotFound;
-        const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
-
-        const edge = try curr_archetype.edges.getOrPut(compid);
         const archeid = blk: {
+            const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
+
+            const edge = try curr_archetype.edges.getOrPut(compid);
             if (edge.found_existing) {
                 break :blk edge.value_ptr.*;
             } else {
@@ -1010,6 +1012,7 @@ pub const EntityComponentStore = struct {
             }
         };
 
+        const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
         const archetype = &self.archetypes.items[archeid];
         defer {
             self.swap_remove(ae.value_ptr.*);
@@ -1270,8 +1273,8 @@ pub const EntityComponentStore = struct {
                 .entity = e,
                 .bundle = @ptrCast(try self.allocated(components)),
                 .insertfn = @ptrCast(&(struct {
-                    fn insert(ecs: *EntityComponentStore, entity: Entity, comp: @TypeOf(components)) anyerror!void {
-                        try ecs.insert_reserved(entity, comp);
+                    fn insert(ecs: *EntityComponentStore, entity: Entity, comp: *@TypeOf(components)) anyerror!void {
+                        try ecs.insert_reserved(entity, comp.*);
                     }
                 }).insert),
             });
@@ -1285,8 +1288,8 @@ pub const EntityComponentStore = struct {
                 .entity = entity,
                 .component = @ptrCast(try self.allocated(component)),
                 .addfn = @ptrCast(&(struct {
-                    fn add_component(ecs: *EntityComponentStore, e: Entity, comp: @TypeOf(component)) !void {
-                        try ecs.add_component(e, comp);
+                    fn add_component(ecs: *EntityComponentStore, e: Entity, comp: *@TypeOf(component)) !void {
+                        try ecs.add_component(e, comp.*);
                     }
                 }).add_component),
             });
