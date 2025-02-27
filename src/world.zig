@@ -51,7 +51,14 @@ pub const World = struct {
             var it = try self.ecs.iterator(struct { r: Components.Rigidbody });
             while (it.next()) |e| {
                 if (e.r.flags.pinned) continue;
-                e.r.vel = e.r.vel.add(e.r.force.scale(1 / e.r.mass).scale(delta));
+
+                // damping
+                const s = e.r.vel.length();
+                if (s > 0) {
+                    e.r.force = e.r.force.add(e.r.vel.normalize3D().scale(-1).scale(s * 0.0001 + s * s * 0.001));
+                }
+
+                e.r.vel = e.r.vel.add(e.r.force.scale(e.r.invmass).scale(delta));
             }
         }
 
@@ -141,9 +148,13 @@ pub const EntityCollider = struct {
                         sa.radius *= a.transform.scale.max_v3();
                         sb.radius *= b.transform.scale.max_v3();
 
-                        const ba = sb.center.sub(sa.center);
+                        var ba = sb.center.sub(sa.center);
                         if (sb.radius > 0) {
-                            const dist = ba.length() - sa.radius - sb.radius;
+                            const bal = ba.length();
+                            if (bal < 0.001) {
+                                ba = .{ .y = 1 };
+                            }
+                            const dist = bal - sa.radius - sb.radius;
 
                             if (dist > 0) {
                                 return null;
@@ -154,7 +165,11 @@ pub const EntityCollider = struct {
                                 .depth = @abs(dist),
                             };
                         } else {
-                            const dist = -sb.radius - ba.length() - sa.radius;
+                            const bal = ba.length();
+                            if (bal < 0.001) {
+                                ba = .{ .y = 1 };
+                            }
+                            const dist = -sb.radius - bal - sa.radius;
 
                             if (dist > 0) {
                                 return null;
