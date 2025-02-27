@@ -34,6 +34,8 @@ pub const World = struct {
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.Rigidbody);
         _ = try self.ecs.register(Components.Collider);
+        _ = try self.ecs.register(Components.CableAttached);
+        _ = try self.ecs.register(Components.RodAttached);
         _ = try self.ecs.register(Components.TimeDespawn);
         _ = try self.ecs.register(Components.PlayerId);
         _ = try self.ecs.register(Components.StaticRender);
@@ -80,6 +82,47 @@ pub const World = struct {
                 }
             }
         }
+        {
+            var it = try self.ecs.iterator(struct { cable: Components.CableAttached });
+            while (it.next()) |e| {
+                const a = try self.ecs.get(e.cable.a, EntityCollider.RigidEntity);
+                const b = try self.ecs.get(e.cable.b, EntityCollider.RigidEntity);
+
+                const ba = a.transform.pos.sub(b.transform.pos);
+                if (ba.length() > e.cable.length) {
+                    try collisions.append(.{
+                        .a = a,
+                        .b = b,
+                        .collision = .{
+                            .restitution = e.cable.restitution,
+                            .depth = 0,
+                            .normal = ba.normalize3D().scale(1),
+                        },
+                    });
+                }
+            }
+        }
+        {
+            var it = try self.ecs.iterator(struct { rod: Components.RodAttached });
+            while (it.next()) |e| {
+                const a = try self.ecs.get(e.rod.a, EntityCollider.RigidEntity);
+                const b = try self.ecs.get(e.rod.b, EntityCollider.RigidEntity);
+
+                const ba = a.transform.pos.sub(b.transform.pos);
+                const bal = ba.length();
+                if (@abs(bal - e.rod.length) > 0.001) {
+                    try collisions.append(.{
+                        .a = a,
+                        .b = b,
+                        .collision = .{
+                            .restitution = 0,
+                            .depth = 0,
+                            .normal = ba.normalize3D().scale(if (bal > e.rod.length) 1 else -1),
+                        },
+                    });
+                }
+            }
+        }
 
         var positions = std.ArrayList(PositionSolver.PositionEntity).init(allocator.*);
         defer positions.deinit();
@@ -115,6 +158,8 @@ pub const EntityCollider = struct {
 
         // len(a - b)
         depth: f32,
+
+        restitution: f32,
     };
 
     pub const CollisionEntity = struct {
@@ -163,6 +208,7 @@ pub const EntityCollider = struct {
                             return .{
                                 .normal = ba.normalize3D(),
                                 .depth = @abs(dist),
+                                .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                             };
                         } else {
                             const bal = ba.length();
@@ -178,6 +224,7 @@ pub const EntityCollider = struct {
                             return .{
                                 .normal = ba.normalize3D().scale(-1),
                                 .depth = @abs(dist),
+                                .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                             };
                         }
                     },
@@ -199,6 +246,7 @@ pub const EntityCollider = struct {
                         return .{
                             .normal = pb.normal.scale(-1),
                             .depth = @abs(dist),
+                            .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                         };
                     },
                 }
@@ -231,7 +279,7 @@ pub const ImpulseSolver = struct {
         if (nvel >= 0) return;
 
         // impulse
-        const e = rba.restitution * rbb.restitution;
+        const e = entity.collision.restitution;
         const j = -(1 + e) * nvel / (rba.invmass + rbb.invmass);
 
         const fvel = (rbb.force.scale(rbb.invmass).sub(rba.force.scale(rba.invmass))).scale(delta).dot(entity.collision.normal);
@@ -402,6 +450,19 @@ pub const Components = struct {
                 },
             }
         }
+    };
+
+    pub const CableAttached = struct {
+        length: f32,
+        restitution: f32,
+        a: Entity,
+        b: Entity,
+    };
+
+    pub const RodAttached = struct {
+        length: f32,
+        a: Entity,
+        b: Entity,
     };
 
     pub const Rigidbody = struct {

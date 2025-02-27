@@ -1155,16 +1155,44 @@ pub const AppState = struct {
                                 // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
 
                                 const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
-                                const t = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
-                                _ = try self.cmdbuf.insert(.{
+                                const t1 = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)).add(right.scale(1.0)), .scale = Vec4.splat3(rng.next()) };
+                                const e1 = try self.cmdbuf.insert(.{
                                     @as([]const u8, "bullet"),
-                                    t,
-                                    Components.LastTransform{ .t = t },
+                                    t1,
+                                    Components.LastTransform{ .t = t1 },
                                     Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .dynamic_friction = 1 },
                                     Components.Collider{ .sphere = .{ .radius = 1.0 } },
                                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
                                     Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
+                                });
+                                const t2 = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)).add(right.scale(-1.0)), .scale = Vec4.splat3(rng.next()) };
+                                const e2 = try self.cmdbuf.insert(.{
+                                    @as([]const u8, "bullet"),
+                                    t2,
+                                    Components.LastTransform{ .t = t2 },
+                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .dynamic_friction = 1 },
+                                    Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                                    // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                                    Components.StaticRender{ .mesh = app.handles.mesh.cube },
+                                    Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
+                                });
+                                // _ = try self.cmdbuf.insert(.{
+                                //     Components.CableAttached{
+                                //         .a = e1,
+                                //         .b = e2,
+                                //         .length = 4,
+                                //         .restitution = 0.5,
+                                //     },
+                                //     Components.TimeDespawn{ .despawn_time = self.time + 4, .state = .alive },
+                                // });
+                                _ = try self.cmdbuf.insert(.{
+                                    Components.RodAttached{
+                                        .a = e1,
+                                        .b = e2,
+                                        .length = 4,
+                                    },
+                                    Components.TimeDespawn{ .despawn_time = self.time + 4, .state = .alive },
                                 });
                                 _ = try self.cmdbuf.insert(.{
                                     Components.TimeDespawn{
