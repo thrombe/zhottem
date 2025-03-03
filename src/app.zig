@@ -33,10 +33,12 @@ const CmdBuffer = render_utils.CmdBuffer;
 const network_mod = @import("network.zig");
 const Socket = network_mod.Socket;
 
+const ecs_mod = @import("ecs.zig");
+const Entity = ecs_mod.Entity;
+
 const world_mod = @import("world.zig");
 const World = world_mod.World;
 const Components = world_mod.Components;
-const Entity = world_mod.Entity;
 
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
@@ -358,8 +360,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
         Components.Rigidbody{
             .flags = .{ .player = true },
-            .invmass = 0.5,
-            .dynamic_friction = 1.0,
+            .invmass = 1.0,
+            .friction = 1.0,
         },
         Components.Collider{ .sphere = .{ .radius = 1 } },
         Components.PlayerId{ .id = 0 },
@@ -374,7 +376,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     Components.Collider{ .sphere = .{ .radius = -10 } },
     // });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .dynamic_friction = 1, .invmass = 0 },
+        Components.Rigidbody{ .flags = .{ .pinned = true }, .friction = 1, .invmass = 0 },
         Components.Transform{
             .pos = .{ .y = -3 },
             .scale = Vec4.splat3(50),
@@ -862,7 +864,7 @@ pub const AppState = struct {
     uniform_shader_dumped: bool = false,
     focus: bool = false,
 
-    cmdbuf: world_mod.EntityComponentStore.CmdBuf,
+    cmdbuf: ecs_mod.EntityComponentStore.CmdBuf,
 
     client_count: u8 = 0,
 
@@ -1042,8 +1044,8 @@ pub const AppState = struct {
                             Components.Controller{},
                             Components.Rigidbody{
                                 .flags = .{ .player = true },
-                                .invmass = 0.5,
-                                .dynamic_friction = 1.0,
+                                .invmass = 1.0,
+                                .friction = 1.0,
                             },
                             Components.Collider{ .sphere = .{ .radius = 1.0 } },
                             Components.StaticRender{ .mesh = app.handles.mesh.cube },
@@ -1126,7 +1128,7 @@ pub const AppState = struct {
                             {
                                 const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
                                 var t_min: ?f32 = null;
-                                var closest: ?world_mod.Type.pointer(T) = null;
+                                var closest: ?ecs_mod.Type.pointer(T) = null;
                                 var it = try app.world.ecs.iterator(T);
                                 while (it.next()) |ent| {
                                     if (!ent.r.flags.player and !ent.r.flags.pinned and mouse.left.pressed()) {
@@ -1160,8 +1162,8 @@ pub const AppState = struct {
                                     @as([]const u8, "bullet"),
                                     t1,
                                     Components.LastTransform{ .t = t1 },
-                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .dynamic_friction = 1 },
-                                    Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
+                                    Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
                                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
                                     Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
@@ -1171,7 +1173,7 @@ pub const AppState = struct {
                                     @as([]const u8, "bullet"),
                                     t2,
                                     Components.LastTransform{ .t = t2 },
-                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .dynamic_friction = 1 },
+                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
                                     Components.Collider{ .sphere = .{ .radius = 1.0 } },
                                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
