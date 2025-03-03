@@ -63,6 +63,11 @@ void set_seed(int id) {
         
         vec3 color = texture(tex, uv).xyz;
         fcolor = vec4(color * max(pow(light, 0.2), 0.2), 1.0);
+
+        vec2 screen_uv = gl_FragCoord.xy/res.xy;
+        vec2 center = step(-abs(screen_uv * 2.0 - 1.0), vec2(-0.004) * res.yx/min(res.x, res.y));
+        float cursor = 1.0 - max(center.x, center.y);
+        fcolor = vec4(mix(color, vec3(0.0, 8.0, 8.0), cursor), 1.0);
     }
 #endif // FRAG_PASS
 
