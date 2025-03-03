@@ -19,9 +19,13 @@ const allocator = main.allocator;
 
 pub const World = struct {
     ecs: EntityComponentStore,
+    collider: EntityCollider,
 
     pub fn init() !@This() {
-        var self = @This(){ .ecs = try EntityComponentStore.init() };
+        var self = @This(){
+            .ecs = try EntityComponentStore.init(),
+            .collider = EntityCollider.init(),
+        };
         errdefer self.deinit();
 
         _ = try self.ecs.register([]const u8);
@@ -46,6 +50,7 @@ pub const World = struct {
 
     pub fn deinit(self: *@This()) void {
         self.ecs.deinit();
+        self.collider.deinit();
     }
 
     pub fn step(self: *@This(), delta: f32) !void {
@@ -61,12 +66,17 @@ pub const World = struct {
                 }
 
                 e.r.vel = e.r.vel.add(e.r.force.scale(e.r.invmass).scale(delta));
+
+                const r = e.r.angular_vel.length();
+                if (r > 0) {
+                    e.r.torque = e.r.torque.add(e.r.angular_vel.normalize3D().scale(-1).scale(0.0001));
+                }
+
+                e.r.angular_vel = e.r.angular_vel.add(e.r.invinertia.mul_vec4(e.r.torque).scale(delta));
             }
         }
 
-        var collisions = std.ArrayList(EntityCollider.CollisionEntity).init(allocator.*);
-        defer collisions.deinit();
-
+        defer self.collider.reset();
         {
             var it1 = try self.ecs.iterator(EntityCollider.RigidEntity);
             var it2 = it1;
@@ -76,65 +86,65 @@ pub const World = struct {
                     if (std.meta.eql(a.id, b.id)) {
                         break;
                     }
-                    const collision = EntityCollider.collide(a, b, .{}) orelse continue;
+                    const collision = try self.collider.collide(a, b, .{}) orelse continue;
 
-                    try collisions.append(.{ .a = a, .b = b, .collision = collision });
+                    try self.collider.collisions.append(.{ .a = a, .b = b, .collision = collision });
                 }
             }
         }
-        {
-            var it = try self.ecs.iterator(struct { cable: Components.CableAttached });
-            while (it.next()) |e| {
-                const a = try self.ecs.get(e.cable.a, EntityCollider.RigidEntity);
-                const b = try self.ecs.get(e.cable.b, EntityCollider.RigidEntity);
+        // {
+        //     var it = try self.ecs.iterator(struct { cable: Components.CableAttached });
+        //     while (it.next()) |e| {
+        //         const a = try self.ecs.get(e.cable.a, EntityCollider.RigidEntity);
+        //         const b = try self.ecs.get(e.cable.b, EntityCollider.RigidEntity);
 
-                const ba = a.transform.pos.sub(b.transform.pos);
-                if (ba.length() > e.cable.length) {
-                    try collisions.append(.{
-                        .a = a,
-                        .b = b,
-                        .collision = .{
-                            .restitution = e.cable.restitution,
-                            .depth = 0,
-                            .normal = ba.normalize3D().scale(1),
-                        },
-                    });
-                }
-            }
-        }
-        {
-            var it = try self.ecs.iterator(struct { rod: Components.RodAttached });
-            while (it.next()) |e| {
-                const a = try self.ecs.get(e.rod.a, EntityCollider.RigidEntity);
-                const b = try self.ecs.get(e.rod.b, EntityCollider.RigidEntity);
+        //         const ba = a.transform.pos.sub(b.transform.pos);
+        //         if (ba.length() > e.cable.length) {
+        //             try self.collider.collisions.append(.{
+        //                 .a = a,
+        //                 .b = b,
+        //                 .collision = .{
+        //                     .restitution = e.cable.restitution,
+        //                     .depth = 0,
+        //                     .normal = ba.normalize3D().scale(1),
+        //                 },
+        //             });
+        //         }
+        //     }
+        // }
+        // {
+        //     var it = try self.ecs.iterator(struct { rod: Components.RodAttached });
+        //     while (it.next()) |e| {
+        //         const a = try self.ecs.get(e.rod.a, EntityCollider.RigidEntity);
+        //         const b = try self.ecs.get(e.rod.b, EntityCollider.RigidEntity);
 
-                const ba = a.transform.pos.sub(b.transform.pos);
-                const bal = ba.length();
-                if (@abs(bal - e.rod.length) > 0.001) {
-                    try collisions.append(.{
-                        .a = a,
-                        .b = b,
-                        .collision = .{
-                            .restitution = 0,
-                            .depth = 0,
-                            .normal = ba.normalize3D().scale(if (bal > e.rod.length) 1 else -1),
-                        },
-                    });
-                }
-            }
-        }
+        //         const ba = a.transform.pos.sub(b.transform.pos);
+        //         const bal = ba.length();
+        //         if (@abs(bal - e.rod.length) > 0.001) {
+        //             try self.collider.collisions.append(.{
+        //                 .a = a,
+        //                 .b = b,
+        //                 .collision = .{
+        //                     .restitution = 0,
+        //                     .depth = 0,
+        //                     .normal = ba.normalize3D().scale(if (bal > e.rod.length) 1 else -1),
+        //                 },
+        //             });
+        //         }
+        //     }
+        // }
 
         var positions = std.ArrayList(PositionSolver.PositionEntity).init(allocator.*);
         defer positions.deinit();
 
-        for (collisions.items) |*e| {
-            ImpulseSolver.solve(e, delta);
+        for (self.collider.collisions.items) |*e| {
+            ImpulseSolver.solve(self.collider.contacts.items, e, delta);
 
             try positions.append(.{ .entity = e.* });
         }
 
         for (positions.items) |*e| {
-            PositionSolver.solve(e);
+            PositionSolver.solve(self.collider.contacts.items, e);
         }
 
         for (positions.items) |*e| {
@@ -152,13 +162,39 @@ pub const World = struct {
 };
 
 pub const EntityCollider = struct {
-    pub const Collision = struct {
+    contacts: Contacts,
+    collisions: Collisions,
+    last: struct {
+        contacts: Contacts,
+        collisions: Collisions,
+    },
+
+    const Contacts = std.ArrayList(Contact);
+    const Collisions = std.ArrayList(CollisionEntity);
+
+    pub const Contact = struct {
+        pos: Vec4 = .{},
+
         // norm(a - b)
-        normal: Vec4,
+        normal: Vec4 = .{},
 
         // len(a - b)
-        depth: f32,
+        depth: f32 = 0,
+    };
 
+    const ContactsHandle = packed struct {
+        len: u8,
+        index: u24,
+
+        fn reserve(self: *@This(), ec: *EntityCollider) !*Contact {
+            defer self.len += 1;
+            try ec.contacts.append(.{});
+            return &ec.contacts.items[self.index + self.len];
+        }
+    };
+
+    pub const Collision = struct {
+        contacts: ContactsHandle,
         restitution: f32,
     };
 
@@ -177,7 +213,39 @@ pub const EntityCollider = struct {
         const p = Type.pointer(@This());
     };
 
-    pub fn collide(a: RigidEntity.p, b: RigidEntity.p, v: struct { flip: bool = false }) ?Collision {
+    pub fn init() @This() {
+        return .{
+            .contacts = Contacts.init(allocator.*),
+            .collisions = Collisions.init(allocator.*),
+            .last = .{
+                .contacts = Contacts.init(allocator.*),
+                .collisions = Collisions.init(allocator.*),
+            },
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.contacts.deinit();
+        self.collisions.deinit();
+        self.last.contacts.deinit();
+        self.last.collisions.deinit();
+    }
+
+    pub fn reset(self: *@This()) void {
+        std.mem.swap(Contacts, &self.contacts, &self.last.contacts);
+        std.mem.swap(Collisions, &self.collisions, &self.last.collisions);
+
+        self.contacts.clearRetainingCapacity();
+        self.collisions.clearRetainingCapacity();
+    }
+
+    fn contact_handle(self: *@This()) ContactsHandle {
+        return .{ .index = @intCast(self.contacts.items.len), .len = 0 };
+    }
+
+    pub fn collide(self: *@This(), a: RigidEntity.p, b: RigidEntity.p, args: struct { flip: bool = false }) !?Collision {
+        var handle = self.contact_handle();
+
         var ac = a.collider.*;
         var bc = b.collider.*;
         switch (ac) {
@@ -205,9 +273,16 @@ pub const EntityCollider = struct {
                                 return null;
                             }
 
-                            return .{
-                                .normal = ba.normalize3D(),
+                            const normal = ba.normalize3D();
+
+                            const contact = try handle.reserve(self);
+                            contact.* = .{
+                                .pos = sa.center.add(normal.scale(@abs(dist) * 0.5)),
+                                .normal = normal,
                                 .depth = @abs(dist),
+                            };
+                            return .{
+                                .contacts = handle,
                                 .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                             };
                         } else {
@@ -221,9 +296,16 @@ pub const EntityCollider = struct {
                                 return null;
                             }
 
-                            return .{
-                                .normal = ba.normalize3D().scale(-1),
+                            const normal = ba.normalize3D().scale(-1);
+                            const contact = try handle.reserve(self);
+                            contact.* = .{
+                                .pos = sa.center.add(normal.scale(-(sa.radius - @abs(dist)))),
+                                .normal = normal,
                                 .depth = @abs(dist),
+                            };
+
+                            return .{
+                                .contacts = handle,
                                 .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                             };
                         }
@@ -232,20 +314,26 @@ pub const EntityCollider = struct {
                         sa.center = sa.center.add(a.transform.pos);
                         sa.radius *= a.transform.scale.max_v3();
 
-                        const ba = sa.center.sub(b.transform.pos);
-
                         pb.normal.w = 0;
                         pb.normal = b.transform.rotation.rotate_vector(pb.normal).normalize3D();
 
+                        const ba = sa.center.sub(b.transform.pos.add(pb.normal.scale(pb.offset)));
                         const dist = ba.dot(pb.normal) - sa.radius;
 
                         if (dist > 0) {
                             return null;
                         }
 
-                        return .{
-                            .normal = pb.normal.scale(-1),
+                        const normal = pb.normal.scale(-1);
+                        const contact = try handle.reserve(self);
+                        contact.* = .{
+                            .pos = sa.center.add(normal.scale(-(sa.radius - @abs(dist)))),
+                            .normal = normal,
                             .depth = @abs(dist),
+                        };
+
+                        return .{
+                            .contacts = handle,
                             .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                         };
                     },
@@ -254,56 +342,68 @@ pub const EntityCollider = struct {
             else => {},
         }
 
-        if (v.flip) {
+        if (args.flip) {
             return null;
         }
 
-        var collision = collide(b, a, .{ .flip = true }) orelse return null;
-        collision.normal = collision.normal.scale(-1);
+        const collision = (try self.collide(b, a, .{ .flip = true })) orelse return null;
+        for (self.contacts.items[collision.contacts.index..][0..collision.contacts.len]) |*contact| {
+            contact.normal = contact.normal.scale(-1);
+        }
         return collision;
     }
 };
 
 pub const ImpulseSolver = struct {
-    pub fn solve(entity: *EntityCollider.CollisionEntity, delta: f32) void {
+    pub fn solve(contacts: []EntityCollider.Contact, entity: *EntityCollider.CollisionEntity, delta: f32) void {
         // - [Inelastic collision - Wikipedia](https://en.wikipedia.org/wiki/Inelastic_collision)
 
         const rba = entity.a.rigidbody;
         const rbb = entity.b.rigidbody;
+        const contact = &contacts[entity.collision.contacts.index];
+        const restitution = entity.collision.restitution;
 
         const vba = rbb.vel.sub(rba.vel);
 
         // normal velocity
-        const nvel = entity.collision.normal.dot(vba);
+        const nvel = contact.normal.dot(vba);
 
-        if (nvel >= 0) return;
+        if (nvel >= -0.0) return;
 
         // impulse
-        const e = entity.collision.restitution;
+        const e = restitution;
         const j = -(1 + e) * nvel / (rba.invmass + rbb.invmass);
 
-        const fvel = (rbb.force.scale(rbb.invmass).sub(rba.force.scale(rba.invmass))).scale(delta).dot(entity.collision.normal);
+        const fvel = (rbb.force.scale(rbb.invmass).sub(rba.force.scale(rba.invmass))).scale(delta).dot(contact.normal);
         if (-fvel + 0.001 >= -nvel) {
-            rba.vel = rba.vel.sub(entity.collision.normal.scale(-rba.vel.dot(entity.collision.normal)));
-            rbb.vel = rbb.vel.add(entity.collision.normal.scale(-rbb.vel.dot(entity.collision.normal)));
+            rba.vel = rba.vel.sub(contact.normal.scale(-rba.vel.dot(contact.normal)));
+            rbb.vel = rbb.vel.add(contact.normal.scale(-rbb.vel.dot(contact.normal)));
         } else {
-            const impulse = entity.collision.normal.scale(j);
+            const impulse = contact.normal.scale(j);
             rba.vel = rba.vel.sub(impulse.scale(rba.invmass));
             rbb.vel = rbb.vel.add(impulse.scale(rbb.invmass));
         }
 
         // friction
-        // var tangent = vba.sub(entity.collision.normal.scale(nvel));
-        // if (tangent.length() > 0.0001) {
-        //     tangent = tangent.normalize3D();
-        // }
+        var tangent = vba.sub(contact.normal.scale(nvel));
+        if (tangent.length() > 0.0001) {
+            tangent = tangent.normalize3D();
+        }
 
-        // const dmu = (Vec4{ .x = rba.dynamic_friction, .y = rbb.dynamic_friction }).length();
-        // const friction = tangent.scale(-j * dmu);
-        // // std.debug.print("friction: {any}\n", .{friction});
+        const dmu = (Vec4{ .x = rba.friction, .y = rbb.friction }).length();
 
-        // rba.vel = rba.vel.sub(friction.scale(rba.invmass));
-        // rbb.vel = rbb.vel.add(friction.scale(rbb.invmass));
+        // tangential velocity
+        const tvel = vba.dot(tangent);
+        const f = -tvel / (rba.invmass + rbb.invmass);
+        var friction = Vec4{};
+        if (@abs(f) < j * dmu) {
+            friction = tangent.scale(f);
+        } else {
+            friction = tangent.scale(-j * dmu);
+        }
+
+        rba.vel = rba.vel.sub(friction.scale(rba.invmass));
+        rbb.vel = rbb.vel.add(friction.scale(rbb.invmass));
 
         // const torque = entity.collision.normal.cross(friction);
         // rba.angular_vel = rba.angular_vel.sub(torque.scale(amassinv));
@@ -323,12 +423,12 @@ pub const PositionSolver = struct {
         const slop = 0.01;
     };
 
-    pub fn solve(entity: *PositionEntity) void {
+    pub fn solve(contacts: []EntityCollider.Contact, entity: *PositionEntity) void {
         const rba = entity.entity.a.rigidbody;
         const rbb = entity.entity.b.rigidbody;
-        const col = entity.entity.collision;
+        const contact = &contacts[entity.entity.collision.contacts.index];
 
-        const del = col.normal.scale(@max(col.depth - constants.slop, 0) / (rba.invmass + rbb.invmass));
+        const del = contact.normal.scale(@max(contact.depth - constants.slop, 0) / (rba.invmass + rbb.invmass));
 
         entity.dela = del.scale(rba.invmass);
         entity.delb = del.scale(rbb.invmass);
@@ -355,6 +455,14 @@ pub const Components = struct {
             const rot = math.Mat4x4.rot_mat_from_quat(self.rotation);
             const scale = math.Mat4x4.scaling_mat(self.scale);
             return translate.mul_mat(rot).mul_mat(scale);
+        }
+
+        pub fn transform_pos(self: *const @This(), pos: Vec4) Vec4 {
+            return self.pos.add(self.rotation.rotate_vector(pos.mul(self.scale)));
+        }
+
+        pub fn transform_direction(self: *const @This(), dir: Vec4) Vec4 {
+            return self.rotation.rotate_vector(dir.scale(self.scale));
         }
     };
 
@@ -417,6 +525,7 @@ pub const Components = struct {
         };
         pub const Plane = struct {
             normal: Vec4 = .{ .y = 1 },
+            offset: f32 = 0,
         };
         pub const Cuboid = struct {
             center: Vec4 = .{},
@@ -477,8 +586,28 @@ pub const Components = struct {
         vel: Vec4 = .{},
         force: Vec4 = .{},
 
-        static_friction: f32 = 0.5,
-        dynamic_friction: f32 = 0.5,
+        invinertia: math.Mat4x4 = inertia.cuboid(1.0, Vec4.splat3(1.0)),
+
+        angular_vel: Vec4 = .{},
+        torque: Vec4 = .{},
+
+        friction: f32 = 0.5,
+
+        const inertia = struct {
+            pub fn cuboid(mass: f32, half_sides: Vec4) math.Mat4x4 {
+                return math.Mat4x4.scaling_mat(.{
+                    .x = 1.0 / 3.0 * mass * (half_sides.y * half_sides.y + half_sides.z * half_sides.z),
+                    .y = 1.0 / 3.0 * mass * (half_sides.x * half_sides.x + half_sides.z * half_sides.z),
+                    .z = 1.0 / 3.0 * mass * (half_sides.x * half_sides.x + half_sides.y * half_sides.y),
+                });
+            }
+
+            pub fn sphere(mass: f32, radius: f32) math.Mat4x4 {
+                _ = mass;
+                _ = radius;
+                return .{};
+            }
+        };
     };
 
     // TODO: better despawn strategy.
