@@ -144,6 +144,10 @@ pub const Vec4 = extern struct {
         return @sqrt(self.dot(self.*));
     }
 
+    pub fn length_sq(self: *const @This()) f32 {
+        return self.dot(self.*);
+    }
+
     pub fn abs(self: *const @This()) @This() {
         return .{
             .x = @abs(self.x),
@@ -171,7 +175,7 @@ pub const Vec4 = extern struct {
             .x = self.x / size,
             .y = self.y / size,
             .z = self.z / size,
-            .w = self.w,
+            .w = 0,
         };
     }
 
@@ -300,6 +304,8 @@ pub const Vec4 = extern struct {
 pub const Mat4x4 = extern struct {
     data: [4]Vec4 = std.mem.zeroes([4]Vec4),
 
+    pub const Axis = enum { x, y, z };
+
     pub fn mul_vec4(self: *const @This(), v: Vec4) Vec4 {
         const this = self.transpose();
         return .{
@@ -308,6 +314,15 @@ pub const Mat4x4 = extern struct {
             .z = this.data[2].dot(v),
             .w = this.data[3].dot(v),
         };
+    }
+
+    pub fn mul_scalar(self: *const @This(), t: f32) @This() {
+        const this = self.*;
+        this.data[0] = this.data[0].scale(t);
+        this.data[1] = this.data[1].scale(t);
+        this.data[2] = this.data[2].scale(t);
+        this.data[3] = this.data[3].scale(t);
+        return this;
     }
 
     pub fn mul_mat(self: *const @This(), o: @This()) @This() {
@@ -347,6 +362,57 @@ pub const Mat4x4 = extern struct {
             .{ .x = self.data[0].z, .y = self.data[1].z, .z = self.data[2].z, .w = self.data[3].z },
             .{ .x = self.data[0].w, .y = self.data[1].w, .z = self.data[2].w, .w = self.data[3].w },
         } };
+    }
+
+    pub fn determinant3x3(self: *@This()) f32 {
+        const a = self.data[0].x;
+        const b = self.data[1].x;
+        const c = self.data[2].x;
+        const d = self.data[0].y;
+        const e = self.data[1].y;
+        const f = self.data[2].y;
+        const g = self.data[0].z;
+        const h = self.data[1].z;
+        const i = self.data[2].z;
+        return a * e * i + d * h * c + g * b * f - a * h * f - g * e * c - d * b * i;
+    }
+
+    pub fn inverse3x3(self: *const @This()) ?@This() {
+        const det = self.determinant3x3();
+        if (det == 0.0) return null;
+
+        const a = self.data[0].x;
+        const b = self.data[1].x;
+        const c = self.data[2].x;
+        const d = self.data[0].y;
+        const e = self.data[1].y;
+        const f = self.data[2].y;
+        const g = self.data[0].z;
+        const h = self.data[1].z;
+        const i = self.data[2].z;
+
+        return (@This(){
+            .data = .{
+                .{ .x = e * i - f * h, .y = c * h - b * i, .z = b * f - c * e },
+                .{ .x = f * g - d * i, .y = a * i - c * g, .z = c * d - a * f },
+                .{ .x = d * h - e * g, .y = b * g - a * h, .z = a * e - b * d },
+                .{},
+            },
+        }).transpose().mul_scalar(1.0 / det);
+    }
+
+    pub fn change_basis3x3(self: *const @This(), basis: *const @This()) ?@This() {
+        return basis.mul_mat(self).mul_mat(&basis.inverse3x3() orelse return null);
+    }
+
+    pub fn axis(self: *const @This(), a: Axis) Vec4 {
+        // so axes would be stored as a column (as we have column vectors)
+        // but we store everything transposed on cpu side.
+        return switch (a) {
+            .x => self.data[0],
+            .y => self.data[1],
+            .z => self.data[2],
+        };
     }
 
     pub fn mix(self: *const @This(), other: *const @This(), t: f32) @This() {
