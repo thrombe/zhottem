@@ -36,7 +36,8 @@ pub const TypeId = extern struct {
     }
 
     pub inline fn from_type(comptime T: type) @This() {
-        const t = from_name(T);
+        // const t = from_name(T);
+        const t = _from_type(T);
         return t;
     }
 
@@ -85,11 +86,14 @@ pub const TypeId = extern struct {
                     // might have cycles
                     hasher.update(@tagName(t.size));
                     hasher.update(@tagName(t.address_space));
-                    hasher.update(std.mem.asBytes(&@as(u32, t.alignment)));
+
+                    // OOF: ?this produces different hash for the same type??
+                    // hasher.update(std.mem.asBytes(&@as(u32, t.alignment)));
+
                     hasher.update(std.mem.asBytes(&TypeId._from_type(t.child)));
                 },
                 .array => |t| {
-                    hasher.update(std.mem.asBytes(&@as(usize, t.len)));
+                    hasher.update(std.mem.asBytes(&@as(u32, t.len)));
                     hasher.update(std.mem.asBytes(&TypeId._from_type(t.child)));
                 },
                 .bool, .void => {},
