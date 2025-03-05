@@ -15,10 +15,10 @@ const HotAction = enum(u8) {
 };
 
 const HotVtable = struct {
-    const SetAlloc = *const fn (alloc: *anyopaque) callconv(.withStackAlign(.c, 4)) void;
-    const Init = *const fn () callconv(.withStackAlign(.c, 4)) ?*anyopaque;
-    const Deinit = *const fn (app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction;
-    const Tick = *const fn (app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction;
+    const SetAlloc = *const fn (alloc: *anyopaque) callconv(.c) void;
+    const Init = *const fn () callconv(.c) ?*anyopaque;
+    const Deinit = *const fn (app: *anyopaque) callconv(.c) HotAction;
+    const Tick = *const fn (app: *anyopaque) callconv(.c) HotAction;
 
     set_alloc: SetAlloc,
     init: Init,
@@ -159,7 +159,7 @@ pub fn main() !void {
     // _ = gpa.deinit();
 }
 
-export fn set_alloc(_alloc: *anyopaque) callconv(.withStackAlign(.c, 4)) void {
+export fn set_alloc(_alloc: *anyopaque) callconv(.c) void {
     switch (options.mode) {
         .exe, .hotexe => {},
         .hotlib => {
@@ -169,7 +169,7 @@ export fn set_alloc(_alloc: *anyopaque) callconv(.withStackAlign(.c, 4)) void {
     }
 }
 
-export fn hot_init() callconv(.withStackAlign(.c, 4)) ?*anyopaque {
+export fn hot_init() callconv(.c) ?*anyopaque {
     switch (options.mode) {
         .exe, .hotexe => return null,
         .hotlib => {
@@ -183,7 +183,7 @@ export fn hot_init() callconv(.withStackAlign(.c, 4)) ?*anyopaque {
     }
 }
 
-export fn hot_tick(_app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction {
+export fn hot_tick(_app: *anyopaque) callconv(.c) HotAction {
     switch (options.mode) {
         .exe, .hotexe => {
             return .quit;
@@ -201,7 +201,7 @@ export fn hot_tick(_app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction 
     }
 }
 
-export fn hot_deinit(_app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction {
+export fn hot_deinit(_app: *anyopaque) callconv(.c) HotAction {
     switch (options.mode) {
         .exe, .hotexe => {
             return .quit;
