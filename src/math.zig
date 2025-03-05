@@ -245,14 +245,14 @@ pub const Vec4 = extern struct {
     }
 
     pub fn rotate_vector(self: *const @This(), v: Vec4) @This() {
-        const qv = .{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
+        const qv = Vec4{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
         const q_conjugate = self.quat_conjugate();
         const q_result = self.quat_mul(qv).quat_mul(q_conjugate);
         return Vec4{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
     }
 
     pub fn inverse_rotate_vector(self: *const @This(), v: Vec4) @This() {
-        const qv = .{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
+        const qv = Vec4{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
         const q_conjugate = self.quat_conjugate();
         const q_result = q_conjugate.quat_mul(qv).quat_mul(self.*);
         return Vec4{ .x = q_result.x, .y = q_result.y, .z = q_result.z };

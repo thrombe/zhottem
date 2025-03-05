@@ -95,12 +95,12 @@ pub const Socket = struct {
         errdefer posix.close(sock);
 
         try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&posix.timeval{
-            .tv_sec = 0,
-            .tv_usec = @intFromFloat(std.time.us_per_s * constants.read_timeout),
+            .sec = 0,
+            .usec = @intFromFloat(std.time.us_per_s * constants.read_timeout),
         }));
         // try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.SNDTIMEO, std.mem.asBytes(&posix.timeval{
-        //     .tv_sec = 2,
-        //     .tv_usec = 500_000,
+        //     .sec = 2,
+        //     .usec = 500_000,
         // }));
 
         const ctx = try allocator.create(ListenCtx);

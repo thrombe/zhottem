@@ -108,18 +108,18 @@ pub const Type = struct {
     pub fn pointer(comptime typ: type) type {
         const StructField = std.builtin.Type.StructField;
         var input_val: typ = undefined;
-        const input_struct = @typeInfo(typ).Struct;
+        const input_struct = @typeInfo(typ).@"struct";
 
         comptime {
             var fields: [input_struct.fields.len]StructField = undefined;
             @memcpy(&fields, input_struct.fields);
             for (&fields) |*field| {
-                field.default_value = null;
+                // field.default_value = null;
                 const t: *field.type = &@field(input_val, field.name);
                 field.type = @TypeOf(t);
             }
 
-            return @Type(.{ .Struct = .{
+            return @Type(.{ .@"struct" = .{
                 .layout = .auto,
                 .fields = &fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
@@ -331,8 +331,8 @@ pub const EntityComponentStore = struct {
         return self.components.get(type_id) orelse error.TypeNotAComponent;
     }
 
-    fn component_ids_from(self: *@This(), typ: type) ![@typeInfo(typ).Struct.fields.len]ComponentId {
-        const fields = @typeInfo(typ).Struct.fields;
+    fn component_ids_from(self: *@This(), typ: type) ![@typeInfo(typ).@"struct".fields.len]ComponentId {
+        const fields = @typeInfo(typ).@"struct".fields;
         var components: [fields.len]ComponentId = undefined;
 
         inline for (fields, 0..) |*field, i| {
@@ -375,7 +375,7 @@ pub const EntityComponentStore = struct {
         const archetype = &self.archetypes.items[archeid];
         defer archetype.count += 1;
 
-        inline for (@typeInfo(@TypeOf(components)).Struct.fields) |field| {
+        inline for (@typeInfo(@TypeOf(components)).@"struct".fields) |field| {
             const compid = try self.get_component_id(field.type);
             const compi = archetype.typ.index(compid).?;
             const f = @field(components, field.name);
@@ -407,7 +407,7 @@ pub const EntityComponentStore = struct {
         const ae = self.entities.get(entity) orelse return error.EntityNotFound;
         const archetype = &self.archetypes.items[ae.archetype];
 
-        inline for (@typeInfo(T).Struct.fields) |field| {
+        inline for (@typeInfo(T).@"struct".fields) |field| {
             const compid = try self.get_component_id(field.type);
             const compi = archetype.typ.index(compid).?;
             const val = std.mem.bytesAsValue(field.type, archetype.components[compi].items[ae.entity_index * compid.size ..][0..compid.size]);
@@ -555,7 +555,7 @@ pub const EntityComponentStore = struct {
         pub fn get(self: *@This(), comptime T: type) !Type.pointer(T) {
             var t: Type.pointer(T) = undefined;
 
-            inline for (@typeInfo(T).Struct.fields) |field| {
+            inline for (@typeInfo(T).@"struct".fields) |field| {
                 const compid = try self.get_component_id(field.type);
                 const compi = self.archetype.typ.index(compid).?;
                 const val = std.mem.bytesAsValue(field.type, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
@@ -609,7 +609,7 @@ pub const EntityComponentStore = struct {
 
     pub fn EntityIterator(typ: type) type {
         return struct {
-            const fields = @typeInfo(typ).Struct.fields;
+            const fields = @typeInfo(typ).@"struct".fields;
             const len = fields.len;
 
             ecs: *EntityComponentStore,

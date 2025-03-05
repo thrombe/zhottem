@@ -633,7 +633,7 @@ pub const Gltf = struct {
 
         const Ti = @typeInfo(typ);
         const T = switch (Ti) {
-            .Array => |child| child.child,
+            .array => |child| child.child,
             else => typ,
         };
 
@@ -810,14 +810,15 @@ pub const Gltf = struct {
             acc: AccessorIndex,
 
             fn parse_from_int_and_field_name(num: i64, fieldname: []const u8) !@This() {
-                inline for (@typeInfo(PrimitiveAttributeType).Union.fields) |field| {
+                @setEvalBranchQuota(2000);
+                inline for (@typeInfo(PrimitiveAttributeType).@"union".fields) |field| {
                     if (std.ascii.startsWithIgnoreCase(fieldname, field.name)) {
                         const typ = @unionInit(
                             PrimitiveAttributeType,
                             field.name,
                             switch (comptime std.meta.stringToEnum(std.meta.Tag(PrimitiveAttributeType), field.name).?) {
                                 .texcoord, .color, .joint, .weight => blk: {
-                                    var s = std.mem.split(u8, fieldname, "_");
+                                    var s = std.mem.splitSequence(u8, fieldname, "_");
                                     _ = s.next();
                                     const unparsed = s.next() orelse return error.MissingField;
                                     const parsed = std.fmt.parseInt(u32, unparsed, 10) catch return error.MissingField;
@@ -957,12 +958,12 @@ pub const Gltf = struct {
             pub fn matches_typ(self: *@This(), typ: type) bool {
                 const Ti = @typeInfo(typ);
                 const T = switch (Ti) {
-                    .Array => |child| child.child,
+                    .array => |child| child.child,
                     else => typ,
                 };
 
                 const length = switch (Ti) {
-                    .Array => |child| child.len,
+                    .array => |child| child.len,
                     else => 1,
                 };
 

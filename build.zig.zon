@@ -1,5 +1,5 @@
 .{
-    .name = "zhottem",
+    .name = .zhottem,
     .version = "0.0.0",
 
     .dependencies = .{
@@ -15,8 +15,8 @@
             .hash = "1220baf3b47dcd52522e25f15090fd0ca5860716c7f88a339f8ef34b6c9a49548951",
         },
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/zig-0.13-compat.tar.gz",
-            .hash = "1220ed8dbf35b9391f2d11c984493f80ecef1287bf07c9e29fba967c6912e54bb9b3",
+            .url = "https://github.com/Snektron/vulkan-zig/archive/dcd538828c513919c3abf0bd55afacdce0576c61.tar.gz",
+            .hash = "vulkan-0.0.0-r7Ytxy5bAwASnqFlLMD4V42z3LolS8n7xv3RlbXhAhv0",
         },
         .imgui = .{
             .url = "https://github.com/ocornut/imgui/archive/refs/tags/v1.91.8.tar.gz",
@@ -29,4 +29,5 @@
     },
 
     .paths = .{""},
+    .fingerprint = 0xb69d48f012de28c6,
 }

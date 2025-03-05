@@ -24,11 +24,11 @@ fn step(b: *std.Build, v: struct {
             .hotexe => "hottem",
             .hotlib => "hot",
         },
-        .root_module = .{
+        .root_module = b.createModule(.{
             .target = v.target,
             .optimize = v.optimize,
             .root_source_file = b.path("src/main.zig"),
-        },
+        }),
         .kind = switch (v.mode) {
             .exe, .hotexe => .exe,
             .hotlib => .lib,
@@ -37,7 +37,6 @@ fn step(b: *std.Build, v: struct {
             .hotlib => .dynamic,
             .exe, .hotexe => null,
         },
-        .zig_lib_dir = b.zig_lib_dir,
     });
 
     const options = b.addOptions();

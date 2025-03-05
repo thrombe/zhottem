@@ -15,10 +15,10 @@ const HotAction = enum(u8) {
 };
 
 const HotVtable = struct {
-    const SetAlloc = *const fn (alloc: *anyopaque) void;
-    const Init = *const fn () ?*anyopaque;
-    const Deinit = *const fn (app: *anyopaque) HotAction;
-    const Tick = *const fn (app: *anyopaque) HotAction;
+    const SetAlloc = *const fn (alloc: *anyopaque) callconv(.withStackAlign(.c, 4)) void;
+    const Init = *const fn () callconv(.withStackAlign(.c, 4)) ?*anyopaque;
+    const Deinit = *const fn (app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction;
+    const Tick = *const fn (app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction;
 
     set_alloc: SetAlloc,
     init: Init,
@@ -41,7 +41,7 @@ const HotReloader = struct {
     const utils = @import("utils.zig");
 
     path: [:0]const u8,
-    hot_cache: [:0]const u8,
+    hot_cache: []const u8,
     libpath: [:0]const u8,
 
     dylib: std.DynLib,
@@ -57,12 +57,15 @@ const HotReloader = struct {
         const cwd = std.fs.cwd();
         try cwd.copyFile(libpath, cwd, hot_cache, .{});
 
-        var dyn = try std.DynLib.open(hot_cache);
+        const hot_lib = try cwd.realpathAlloc(allocator.*, hot_cache);
+        errdefer allocator.free(hot_lib);
+
+        var dyn = try std.DynLib.open(hot_lib);
         errdefer dyn.close();
 
         const vtable = try HotVtable.from_dyn(&dyn);
 
-        vtable.set_alloc(allocator);
+        vtable.set_alloc(@ptrCast(allocator));
         const app = vtable.init() orelse return error.CouldNotInitApp;
         errdefer _ = vtable.deinit(app);
 
@@ -72,7 +75,7 @@ const HotReloader = struct {
         return .{
             .libpath = libpath,
             .path = path,
-            .hot_cache = hot_cache,
+            .hot_cache = hot_lib,
             .dylib = dyn,
             .vtable = vtable,
             .app = app,
@@ -84,6 +87,7 @@ const HotReloader = struct {
         defer self.dylib.close();
         defer _ = self.vtable.deinit(self.app);
         defer self.fs.deinit();
+        defer allocator.free(self.hot_cache);
     }
 
     fn tick(self: *@This()) !bool {
@@ -92,7 +96,8 @@ const HotReloader = struct {
             while (self.fs.try_recv()) |event| {
                 defer event.deinit();
 
-                if (std.mem.eql(u8, options.hotlib_name, event.file)) {
+                // event.file.len == 0 cuz fswatch keeps returning "" when libhot.so changes :/
+                if (std.mem.eql(u8, options.hotlib_name, event.file) or event.file.len == 0) {
                     std.debug.print("reloading\n", .{});
 
                     // dlopen() caches library loads.
@@ -116,7 +121,7 @@ const HotReloader = struct {
 
                     self.dylib = dyn;
                     self.vtable = vtable;
-                    self.vtable.set_alloc(allocator);
+                    self.vtable.set_alloc(@ptrCast(allocator));
                     // self.app = self.vtable.init() orelse unreachable;
                 }
             }
@@ -154,7 +159,7 @@ pub fn main() !void {
     // _ = gpa.deinit();
 }
 
-export fn set_alloc(_alloc: *anyopaque) void {
+export fn set_alloc(_alloc: *anyopaque) callconv(.withStackAlign(.c, 4)) void {
     switch (options.mode) {
         .exe, .hotexe => {},
         .hotlib => {
@@ -164,7 +169,7 @@ export fn set_alloc(_alloc: *anyopaque) void {
     }
 }
 
-export fn hot_init() ?*anyopaque {
+export fn hot_init() callconv(.withStackAlign(.c, 4)) ?*anyopaque {
     switch (options.mode) {
         .exe, .hotexe => return null,
         .hotlib => {
@@ -178,7 +183,7 @@ export fn hot_init() ?*anyopaque {
     }
 }
 
-export fn hot_tick(_app: *anyopaque) HotAction {
+export fn hot_tick(_app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction {
     switch (options.mode) {
         .exe, .hotexe => {
             return .quit;
@@ -196,7 +201,7 @@ export fn hot_tick(_app: *anyopaque) HotAction {
     }
 }
 
-export fn hot_deinit(_app: *anyopaque) HotAction {
+export fn hot_deinit(_app: *anyopaque) callconv(.withStackAlign(.c, 4)) HotAction {
     switch (options.mode) {
         .exe, .hotexe => {
             return .quit;

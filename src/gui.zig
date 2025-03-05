@@ -250,7 +250,7 @@ pub const GuiEngine = struct {
 
 fn enum_dropdown(enum_ptr: anytype, title: [*:0]const u8) void {
     const opt_modes = comptime blk: {
-        const fields = @typeInfo(@TypeOf(enum_ptr.*)).Enum.fields;
+        const fields = @typeInfo(@TypeOf(enum_ptr.*)).@"enum".fields;
         var arr: [fields.len][*:0]const u8 = undefined;
         for (fields, 0..) |field, i| {
             arr[i] = field.name;

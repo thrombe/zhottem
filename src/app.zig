@@ -72,7 +72,9 @@ server_addr: std.net.Address,
 texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
 
-handles: struct {
+handles: Handles,
+
+const Handles = struct {
     player: Entity,
     model: struct {
         sphere: ResourceManager.ModelHandle,
@@ -80,7 +82,9 @@ handles: struct {
     mesh: struct {
         cube: ResourceManager.MeshResourceHandle,
     },
-    audio: struct {
+    audio: AudioHandles,
+
+    const AudioHandles = struct {
         boom: ResourceManager.AudioHandle,
         bruh: ResourceManager.AudioHandle,
         long_reload: ResourceManager.AudioHandle,
@@ -88,8 +92,8 @@ handles: struct {
         scream1: ResourceManager.AudioHandle,
         scream2: ResourceManager.AudioHandle,
         shot: ResourceManager.AudioHandle,
-    },
-},
+    };
+};
 
 const AudioPlayer = Engine.Audio.Stream(struct {
     // owned by ResourceManager.CpuResources
@@ -314,7 +318,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cpu = ResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
-    const audio_handles = .{
+    const audio_handles = Handles.AudioHandles{
         .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/boom.wav")),
         .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/bruh.wav")),
         .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/long-reload.wav")),

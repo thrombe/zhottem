@@ -21,7 +21,7 @@ pub const TypeId = extern struct {
             comptime {
                 _ = T;
             }
-            var id: @typeInfo(Phantom).Pointer.child = undefined;
+            var id: @typeInfo(Phantom).pointer.child = undefined;
         }.id;
 
         return .{ .id = @intCast(@intFromPtr(ptr)) };
@@ -36,7 +36,13 @@ pub const TypeId = extern struct {
     }
 
     pub inline fn from_type(comptime T: type) @This() {
+        const t = from_name(T);
+        return t;
+    }
+
+    pub inline fn _from_type(comptime T: type) @This() {
         comptime {
+            @setEvalBranchQuota(10000);
             const Ti = @typeInfo(T);
 
             var hasher = std.hash.Wyhash.init(0);
@@ -44,49 +50,49 @@ pub const TypeId = extern struct {
             hasher.update(@tagName(std.meta.activeTag(Ti)));
 
             switch (Ti) {
-                .Struct => |t| {
+                .@"struct" => |t| {
                     for (t.fields) |field| {
                         hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
-                        hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
+                        hasher.update(std.mem.asBytes(&TypeId._from_type(field.type)));
                     }
                 },
-                .Int => |t| {
+                .int => |t| {
                     hasher.update(@tagName(t.signedness));
                     hasher.update(std.mem.asBytes(&t.bits));
                 },
-                .Float => |t| {
+                .float => |t| {
                     hasher.update(std.mem.asBytes(&t.bits));
                 },
-                .Enum => |t| {
+                .@"enum" => |t| {
                     for (t.fields) |field| {
                         hasher.update(field.name);
                         hasher.update(std.mem.asBytes(&@as(u32, field.value)));
                     }
                 },
-                .Union => |t| {
+                .@"union" => |t| {
                     hasher.update(@tagName(t.layout));
                     for (t.fields) |field| {
                         hasher.update(field.name);
-                        hasher.update(std.mem.asBytes(&TypeId.from_type(field.type)));
+                        hasher.update(std.mem.asBytes(&TypeId._from_type(field.type)));
                         hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
                     }
                 },
-                .Optional => |t| {
-                    hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+                .optional => |t| {
+                    hasher.update(std.mem.asBytes(&TypeId._from_type(t.child)));
                 },
-                .Pointer => |t| {
+                .pointer => |t| {
                     // not sure what to do here :/
                     // might have cycles
                     hasher.update(@tagName(t.size));
                     hasher.update(@tagName(t.address_space));
                     hasher.update(std.mem.asBytes(&@as(u32, t.alignment)));
-                    hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+                    hasher.update(std.mem.asBytes(&TypeId._from_type(t.child)));
                 },
-                .Array => |t| {
-                    hasher.update(std.mem.asBytes(&t.len));
-                    hasher.update(std.mem.asBytes(&TypeId.from_type(t.child)));
+                .array => |t| {
+                    hasher.update(std.mem.asBytes(&@as(usize, t.len)));
+                    hasher.update(std.mem.asBytes(&TypeId._from_type(t.child)));
                 },
-                .Bool, .Void => {},
+                .bool, .void => {},
                 else => @compileLog("can't do TypeIds on this type yet: " ++ @typeName(T)),
             }
 
@@ -339,7 +345,7 @@ pub const JsonHelpers = struct {
     pub fn parseUnionAsStringWithUnknown(t: type, alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !t {
         switch (try source.nextAlloc(alloc, options.allocate orelse .alloc_if_needed)) {
             .string, .allocated_string => |field| {
-                inline for (@typeInfo(t).Union.fields) |typ| {
+                inline for (@typeInfo(t).@"union".fields) |typ| {
                     comptime if (std.meta.stringToEnum(std.meta.Tag(t), typ.name).? == .unknown) {
                         continue;
                     };
@@ -358,7 +364,7 @@ pub const JsonHelpers = struct {
         @setEvalBranchQuota(2000);
         switch (try source.nextAlloc(alloc, options.allocate orelse .alloc_if_needed)) {
             .string, .allocated_string => |field| {
-                inline for (@typeInfo(t).Enum.fields) |typ| {
+                inline for (@typeInfo(t).@"enum".fields) |typ| {
                     if (std.mem.eql(u8, field, typ.name)) {
                         return comptime std.meta.stringToEnum(t, typ.name).?;
                     }
@@ -742,10 +748,10 @@ pub const ShaderUtils = struct {
     pub fn create_extern_type(comptime uniform: type) type {
         const Type = std.builtin.Type;
         const Ut: Type = @typeInfo(uniform);
-        const U = Ut.Struct;
+        const U = Ut.@"struct";
 
         return @Type(.{
-            .Struct = .{
+            .@"struct" = .{
                 .layout = .@"extern",
                 .fields = U.fields,
                 .decls = &[_]Type.Declaration{},
@@ -757,7 +763,7 @@ pub const ShaderUtils = struct {
     pub fn create_uniform_object(comptime uniform_type: type, uniform: anytype) create_extern_type(uniform_type) {
         const Type = std.builtin.Type;
         const Ut: Type = @typeInfo(uniform_type);
-        const U = Ut.Struct;
+        const U = Ut.@"struct";
 
         var uniform_object: create_extern_type(uniform_type) = undefined;
 
@@ -807,7 +813,7 @@ pub const ShaderUtils = struct {
                 Camera.CameraMeta => "CameraMeta",
                 Frame => "Frame",
                 else => switch (@typeInfo(t)) {
-                    .Array => |child| zig_to_glsl_type(child.child),
+                    .array => |child| zig_to_glsl_type(child.child),
                     else => @compileError("cannot handle this type"),
                 },
             };
@@ -815,7 +821,7 @@ pub const ShaderUtils = struct {
 
         fn fieldname(field: std.builtin.Type.StructField) []const u8 {
             switch (@typeInfo(field.type)) {
-                .Array => |child| {
+                .array => |child| {
                     const len = std.fmt.comptimePrint("{d}", .{child.len});
                     return field.name ++ "[" ++ len ++ "]";
                 },
@@ -843,9 +849,9 @@ pub const ShaderUtils = struct {
             switch (t) {
                 []Mat4x4, Mat4x4, Vec4, i32, u32, f32 => return,
                 else => switch (@typeInfo(t)) {
-                    .Array => return,
+                    .array => return,
                     else => {
-                        const fields = @typeInfo(t).Struct.fields;
+                        const fields = @typeInfo(t).@"struct".fields;
                         inline for (fields) |field| {
                             try self.add_struct(zig_to_glsl_type(field.type), field.type);
                         }
@@ -883,7 +889,7 @@ pub const ShaderUtils = struct {
 
             const w = self.shader.writer();
 
-            inline for (@typeInfo(bind).Enum.fields) |field| {
+            inline for (@typeInfo(bind).@"enum".fields) |field| {
                 try w.print(
                     \\ const int _bind_{s} = {d};
                     \\
@@ -1110,7 +1116,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                 const shaders = try allocator.dupe(ShaderInfo, shader_info);
                 // OOF: not getting free-d if anything errors but meh
                 for (shaders) |*s| {
-                    var buf: [std.fs.MAX_PATH_BYTES:0]u8 = undefined;
+                    var buf: [std.fs.max_path_bytes:0]u8 = undefined;
                     const real = try std.fs.cwd().realpath(s.path, &buf);
                     s.path = try allocator.dupe(u8, real);
 

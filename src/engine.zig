@@ -334,7 +334,7 @@ pub const Window = struct {
             backspace: Action = .none,
 
             fn tick(self: anytype) void {
-                inline for (@typeInfo(@This()).Struct.fields) |field| {
+                inline for (@typeInfo(@This()).@"struct".fields) |field| {
                     @field(self, field.name).tick();
                 }
             }
@@ -472,7 +472,7 @@ pub const Window = struct {
             return error.VulkanNotSupported;
         }
 
-        const extent = .{ .width = 800, .height = 600 };
+        const extent = vk.Extent2D{ .width = 800, .height = 600 };
         c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
         const window = c.glfwCreateWindow(
             extent.width,
