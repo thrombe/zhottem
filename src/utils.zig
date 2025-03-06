@@ -47,7 +47,11 @@ pub const TypeId = extern struct {
             const Ti = @typeInfo(T);
 
             var hasher = std.hash.Wyhash.init(0);
-            hasher.update(@typeName(T));
+
+            // OOF: parallel compilation strikes again.
+            // anon structs have different names compilation to compilation
+            // hasher.update(@typeName(T));
+
             hasher.update(@tagName(std.meta.activeTag(Ti)));
 
             switch (Ti) {
