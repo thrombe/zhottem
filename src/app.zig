@@ -1307,7 +1307,7 @@ pub const AppState = struct {
                         if (get_lerped(&out_r, animation.bones[i].rotation_keyframes.items, &indices[i].rotation, time)) {
                             updated = true;
                         }
-                        var out_s = math.Vec4.splat4(1);
+                        var out_s = math.Vec4.splat(1);
                         if (get_lerped(&out_s, animation.bones[i].scale_keyframes.items, &indices[i].scale, time)) {
                             updated = true;
                         }

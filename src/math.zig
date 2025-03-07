@@ -128,15 +128,15 @@ pub const Vec4 = extern struct {
         return .{ .x = t, .y = t, .z = t };
     }
 
-    pub fn splat4(t: f32) @This() {
+    pub fn splat(t: f32) @This() {
         return .{ .x = t, .y = t, .z = t, .w = t };
     }
 
-    pub fn max_v3(self: *const @This()) f32 {
+    pub fn max3(self: *const @This()) f32 {
         return @max(self.x, @max(self.y, self.z));
     }
 
-    pub fn max_v4(self: *const @This()) f32 {
+    pub fn max(self: *const @This()) f32 {
         return @max(@max(self.x, self.y), @max(self.z, self.w));
     }
 
@@ -166,6 +166,15 @@ pub const Vec4 = extern struct {
         };
     }
 
+    pub fn pow(self: *const @This(), p: f32) @This() {
+        return .{
+            .x = std.math.pow(f32, self.x, p),
+            .y = std.math.pow(f32, self.y, p),
+            .z = std.math.pow(f32, self.z, p),
+            .w = std.math.pow(f32, self.w, p),
+        };
+    }
+
     pub fn normalize3D(self: *const @This()) @This() {
         var this = self.*;
         this.w = 0;
@@ -179,7 +188,7 @@ pub const Vec4 = extern struct {
         };
     }
 
-    pub fn normalize4D(self: *const @This()) @This() {
+    pub fn normalize(self: *const @This()) @This() {
         const size = @sqrt(self.dot(self.*));
         return .{
             .x = self.x / size,
@@ -262,35 +271,146 @@ pub const Vec4 = extern struct {
         return .{ self.x, self.y, self.z, self.w };
     }
 
-    pub fn gamma_correct_inv(self: *const @This()) @This() {
-        // const p: f32 = 1.0 / 2.2;
-        const p: f32 = 2.2;
+    pub fn random(rng: *const Rng) @This() {
+        return .{
+            .x = rng.next(),
+            .y = rng.next(),
+            .z = rng.next(),
+            .w = rng.next(),
+        };
+    }
+};
+
+pub const Vec3 = extern struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+
+    pub fn dot(self: *const @This(), other: @This()) f32 {
+        return self.x * other.x +
+            self.y * other.y +
+            self.z * other.z;
+    }
+
+    // right handed cross product
+    pub fn cross(self: *const @This(), other: @This()) @This() {
+        return .{
+            .x = self.y * other.z - self.z * other.y,
+            .y = self.z * other.x - self.x * other.z,
+            .z = self.x * other.y - self.y * other.x,
+        };
+    }
+
+    pub fn mul(self: *const @This(), other: @This()) @This() {
+        return .{
+            .x = self.x * other.x,
+            .y = self.y * other.y,
+            .z = self.z * other.z,
+        };
+    }
+
+    pub fn add(self: *const @This(), other: @This()) @This() {
+        return .{
+            .x = self.x + other.x,
+            .y = self.y + other.y,
+            .z = self.z + other.z,
+        };
+    }
+
+    pub fn sub(self: *const @This(), other: @This()) @This() {
+        return .{
+            .x = self.x - other.x,
+            .y = self.y - other.y,
+            .z = self.z - other.z,
+        };
+    }
+
+    pub fn scale(self: *const @This(), s: f32) @This() {
+        return .{ .x = self.x * s, .y = self.y * s, .z = self.z * s };
+    }
+
+    pub fn mix(self: *const @This(), other: @This(), t: f32) @This() {
+        return .{
+            .x = std.math.lerp(self.x, other.x, t),
+            .y = std.math.lerp(self.y, other.y, t),
+            .z = std.math.lerp(self.z, other.z, t),
+        };
+    }
+
+    pub fn clamp(self: *const @This(), low: f32, high: f32) @This() {
+        return .{
+            .x = std.math.clamp(self.x, low, high),
+            .y = std.math.clamp(self.y, low, high),
+            .z = std.math.clamp(self.z, low, high),
+        };
+    }
+
+    pub fn splat(t: f32) @This() {
+        return .{ .x = t, .y = t, .z = t };
+    }
+
+    pub fn max(self: *const @This()) f32 {
+        return @max(self.x, @max(self.y, self.z));
+    }
+
+    pub fn length(self: *const @This()) f32 {
+        return @sqrt(self.dot(self.*));
+    }
+
+    pub fn length_sq(self: *const @This()) f32 {
+        return self.dot(self.*);
+    }
+
+    pub fn abs(self: *const @This()) @This() {
+        return .{
+            .x = @abs(self.x),
+            .y = @abs(self.y),
+            .z = @abs(self.z),
+        };
+    }
+
+    pub fn sign(self: *const @This()) @This() {
+        return .{
+            .x = std.math.sign(self.x),
+            .y = std.math.sign(self.y),
+            .z = std.math.sign(self.z),
+        };
+    }
+
+    pub fn pow(self: *const @This(), p: f32) @This() {
         return .{
             .x = std.math.pow(f32, self.x, p),
             .y = std.math.pow(f32, self.y, p),
             .z = std.math.pow(f32, self.z, p),
-            .w = std.math.pow(f32, self.w, p),
         };
     }
 
-    pub const random = struct {
-        pub fn vec3(rng: *const Rng) Vec4 {
-            return .{
-                .x = rng.next(),
-                .y = rng.next(),
-                .z = rng.next(),
-            };
-        }
+    pub fn normalize(self: *const @This()) @This() {
+        var this = self.*;
 
-        pub fn vec4(rng: *const Rng) Vec4 {
-            return .{
-                .x = rng.next(),
-                .y = rng.next(),
-                .z = rng.next(),
-                .w = rng.next(),
-            };
-        }
-    };
+        const size = @sqrt(this.dot(this));
+        return .{
+            .x = self.x / size,
+            .y = self.y / size,
+            .z = self.z / size,
+        };
+    }
+
+    pub fn to_buf(self: *const @This()) [4]f32 {
+        return .{ self.x, self.y, self.z };
+    }
+
+    pub fn random(rng: *const Rng) @This() {
+        return .{
+            .x = rng.next(),
+            .y = rng.next(),
+            .z = rng.next(),
+        };
+    }
+
+    pub fn withw(self: *const @This(), w: f32) Vec4 {
+        return .{ .x = self.x, .y = self.y, .z = self.z, .w = w };
+    }
 };
 
 // - [Matrix storage](https://github.com/hexops/machengine.org/blob/0aab00137dc3d1098e5237e2bee124e0ef9fbc17/content/docs/math/matrix-storage.md)
@@ -584,7 +704,7 @@ pub const Mat4x4 = extern struct {
                 .z = (rng.rng.float(f32) - 0.5),
                 .w = (rng.rng.float(f32) - 0.5),
             };
-            q = q.normalize4D();
+            q = q.normalize();
 
             const r = Mat4x4.rot_mat_from_quat(q);
             return r;

@@ -263,8 +263,8 @@ pub const EntityCollider = struct {
                         sa.center = sa.center.add(a.transform.pos);
                         sb.center = sb.center.add(b.transform.pos);
 
-                        sa.radius *= a.transform.scale.max_v3();
-                        sb.radius *= b.transform.scale.max_v3();
+                        sa.radius *= a.transform.scale.max3();
+                        sb.radius *= b.transform.scale.max3();
 
                         var ba = sb.center.sub(sa.center);
                         if (sb.radius > 0) {
@@ -317,7 +317,7 @@ pub const EntityCollider = struct {
                     },
                     .plane => |*pb| {
                         sa.center = sa.center.add(a.transform.pos);
-                        sa.radius *= a.transform.scale.max_v3();
+                        sa.radius *= a.transform.scale.max3();
 
                         pb.normal.w = 0;
                         pb.normal = b.transform.rotation.rotate_vector(pb.normal).normalize3D();
@@ -542,7 +542,7 @@ pub const Components = struct {
             switch (this) {
                 .sphere => |*s| {
                     s.center = s.center.add(transform.pos);
-                    s.radius *= transform.scale.max_v3();
+                    s.radius *= transform.scale.max3();
 
                     const oc = s.center.sub(ro);
                     const b = oc.dot(rd);
