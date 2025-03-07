@@ -11,7 +11,7 @@
       inputs.flake-utils.follows = "flake-utils";
     };
     zls = {
-      url = "github:zigtools/zls";
+      url = "github:zigtools/zls/0.14.0";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.zig-overlay.follows = "zig-overlay";
     };
@@ -68,14 +68,14 @@
           # zig = inputs.zig2nix.outputs.packages.${system}.zig.master.bin;
           # zig = inputs.zig2nix.outputs.packages.${system}.zig.default.bin;
 
-          # zls = (flakePackage inputs.zls "zls").overrideAttrs (old: {
-          #   nativeBuildInputs = [
-          #     zig
-          #   ];
-          #   buildInputs = [
-          #     zig
-          #   ];
-          # });
+          zls = (flakePackage inputs.zls "zls").overrideAttrs (old: {
+            nativeBuildInputs = [
+              zig
+            ];
+            buildInputs = [
+              zig
+            ];
+          });
         })
       ];
 
@@ -124,7 +124,7 @@
 
           zig
 
-          # zls
+          zls
           gdb
 
           # - [nixOS usage | Mach: zig game engine & graphics toolkit](https://machengine.org/about/nixos-usage/)
