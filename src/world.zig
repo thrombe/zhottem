@@ -431,9 +431,15 @@ pub const PositionSolver = struct {
     pub fn solve(contacts: []EntityCollider.Contact, entity: *PositionEntity) void {
         const rba = entity.entity.a.rigidbody;
         const rbb = entity.entity.b.rigidbody;
-        const contact = &contacts[entity.entity.collision.contacts.index];
 
-        const del = contact.normal.scale(@max(contact.depth - constants.slop, 0) / (rba.invmass + rbb.invmass));
+        var depth: f32 = 0;
+        var del = Vec4{};
+        for (contacts[entity.entity.collision.contacts.index..][0..entity.entity.collision.contacts.len]) |contact| {
+            if (contact.depth > depth) {
+                del = contact.normal.scale(@max(contact.depth - constants.slop, 0) / (rba.invmass + rbb.invmass));
+                depth = contact.depth;
+            }
+        }
 
         entity.dela = del.scale(rba.invmass);
         entity.delb = del.scale(rbb.invmass);

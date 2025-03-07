@@ -912,6 +912,8 @@ pub const AppState = struct {
                 // mouse.* = std.mem.zeroes(@TypeOf(mouse));
                 mouse.x = input.mouse.x;
                 mouse.y = input.mouse.y;
+                mouse.left = .none;
+                mouse.right = .none;
             }
             if (imgui_io.WantCaptureKeyboard) {
                 // kb.* = std.mem.zeroes(@TypeOf(kb));
