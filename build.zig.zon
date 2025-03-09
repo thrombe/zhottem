@@ -26,6 +26,10 @@
             .url = "https://github.com/dearimgui/dear_bindings/archive/f6e8ea713405914b16f8bf018ee7abaccdbae283.tar.gz",
             .hash = "122036b555e00c1dbb1addc3eb8e1bf80baf1c72266577f245340bac9648523bfaab",
         },
+        .jolt = .{
+            .url = "https://github.com/jrouwe/JoltPhysics/archive/refs/tags/v5.2.0.tar.gz",
+            .hash = "N-V-__8AAJc--gHvOPNc7WeB_y7jD5dZYULTidMAnPZvKoJJ",
+        },
     },
 
     .paths = .{""},
