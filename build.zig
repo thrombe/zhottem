@@ -268,6 +268,8 @@ fn step(b: *std.Build, v: struct {
     cimgui: *std.Build.Step.Compile,
     imgui_dep: *std.Build.Dependency,
     dcimgui_generated: *std.Build.Step.WriteFile,
+    jolt: *std.Build.Step.Compile,
+    jolt_dep: *std.Build.Dependency,
 }) *std.Build.Step.Compile {
     // see b.addSharedLibrary()
     // see b.addStaticLibrary()
@@ -307,10 +309,23 @@ fn step(b: *std.Build, v: struct {
             compile_step.addIncludePath(v.dcimgui_generated.getDirectory());
             compile_step.addIncludePath(v.imgui_dep.path("./"));
             compile_step.addIncludePath(v.imgui_dep.path("./backends"));
+            compile_step.addIncludePath(v.jolt_dep.path("./"));
+            compile_step.addIncludePath(b.path("./src"));
 
             // compile_step.linkLibrary(v.cimgui);
-            compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
+            // compile_step.linkLibrary(v.jolt);
+
             compile_step.addLibraryPath(b.path("./zig-out/lib"));
+            compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
+            compile_step.addObjectFile(b.path("./zig-out/lib/libjolt.so"));
+
+            compile_step.addCSourceFiles(.{
+                .root = b.path("./src"),
+                .flags = &[_][]const u8{},
+                .files = &[_][]const u8{
+                    "jolt.cpp",
+                },
+            });
 
             compile_step.linkSystemLibrary("glfw");
             compile_step.linkSystemLibrary("portaudio");
@@ -319,6 +334,7 @@ fn step(b: *std.Build, v: struct {
             compile_step.linkSystemLibrary2("MagickWand", .{});
             compile_step.linkSystemLibrary2("MagickCore", .{});
             compile_step.linkLibC();
+            compile_step.linkLibCpp();
         },
         .hotexe => {
             compile_step.linkSystemLibrary("fswatch");
@@ -361,6 +377,8 @@ pub fn build(b: *std.Build) void {
         .imgui_dep = imgui,
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
+        .jolt = libjolt.lib,
+        .jolt_dep = jolt,
     });
     const hotlib = step(b, .{
         .target = target,
@@ -370,6 +388,8 @@ pub fn build(b: *std.Build) void {
         .imgui_dep = imgui,
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
+        .jolt = libjolt.lib,
+        .jolt_dep = jolt,
     });
     const hotexe = step(b, .{
         .target = target,
@@ -379,6 +399,8 @@ pub fn build(b: *std.Build) void {
         .imgui_dep = imgui,
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
+        .jolt = libjolt.lib,
+        .jolt_dep = jolt,
     });
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");
