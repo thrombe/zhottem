@@ -161,6 +161,12 @@ pub const World = struct {
             while (it.next()) |e| {
                 if (e.r.flags.pinned) continue;
                 e.t.pos = e.t.pos.add(e.r.vel.scale(delta));
+
+                // - [physically based modelling](https://graphics.stanford.edu/courses/cs448b-00-winter/papers/phys_model.pdf)
+                // q' = 0.5 * {omega, .w = 0} * q
+                // q ~= q + q' * dt
+                e.r.angular_vel.w = 0;
+                e.t.rotation = e.t.rotation.add(e.r.angular_vel.quat_mul(e.t.rotation).scale(0.5 * delta)).normalize();
             }
         }
     }
@@ -342,6 +348,301 @@ pub const EntityCollider = struct {
                             .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
                         };
                     },
+                    .cuboid => {},
+                }
+            },
+            .cuboid => |*ca| {
+                switch (bc) {
+                    .plane => |*pb| {
+                        ca.center = a.transform.transform_pos(ca.center);
+                        ca.half_extent.w = 0;
+                        ca.half_extent = ca.half_extent.mul(a.transform.scale);
+
+                        pb.normal.w = 0;
+                        pb.normal = b.transform.rotation.rotate_vector(pb.normal.mul(b.transform.scale)).normalize3D();
+
+                        const vertices = [8]Vec4{
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = ca.half_extent.x, .y = ca.half_extent.y, .z = ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = ca.half_extent.x, .y = ca.half_extent.y, .z = -ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = ca.half_extent.x, .y = -ca.half_extent.y, .z = ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = ca.half_extent.x, .y = -ca.half_extent.y, .z = -ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = -ca.half_extent.x, .y = ca.half_extent.y, .z = ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = -ca.half_extent.x, .y = ca.half_extent.y, .z = -ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = -ca.half_extent.x, .y = -ca.half_extent.y, .z = ca.half_extent.z })),
+                            ca.center.add(a.transform.rotation.rotate_vector(.{ .x = -ca.half_extent.x, .y = -ca.half_extent.y, .z = -ca.half_extent.z })),
+                        };
+
+                        for (vertices) |v| {
+                            const ba = v.sub(b.transform.pos.add(pb.normal.scale(pb.offset)));
+                            const dist = ba.dot(pb.normal);
+
+                            if (dist > 0) {
+                                continue;
+                            }
+
+                            const normal = pb.normal.scale(-1);
+                            const contact = try handle.reserve(self);
+                            contact.* = .{
+                                .pos = v.add(normal.scale(dist * 0.5)),
+                                .normal = normal,
+                                .depth = @abs(dist),
+                            };
+                        }
+
+                        if (handle.len == 0) {
+                            return null;
+                        }
+
+                        return .{
+                            .contacts = handle,
+                            .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
+                        };
+                    },
+                    .sphere => |*sb| {
+                        // sb.center.w = 1;
+                        // sb.center = b.transform.transform_pos(sb.center);
+                        sb.radius = sb.radius * b.transform.scale.max3();
+                        // ca.half_extent = ca.half_extent.mul(a.transform.scale);
+
+                        const relcenter = a.transform.inverse_transform_pos(sb.center);
+
+                        var closest = Vec4{};
+                        closest.x = relcenter.x;
+                        if (closest.x > ca.half_extent.x) closest.x = ca.half_extent.x;
+                        if (closest.x < -ca.half_extent.x) closest.x = -ca.half_extent.x;
+
+                        closest.y = relcenter.y;
+                        if (closest.y > ca.half_extent.y) closest.y = ca.half_extent.y;
+                        if (closest.y < -ca.half_extent.y) closest.y = -ca.half_extent.y;
+
+                        closest.z = relcenter.z;
+                        if (closest.z > ca.half_extent.z) closest.z = ca.half_extent.z;
+                        if (closest.z < -ca.half_extent.z) closest.z = -ca.half_extent.z;
+
+                        const ab = closest.sub(sb.center);
+                        std.debug.print("{any}\n", .{ab});
+                        if (ab.length() > sb.radius) return null;
+                        if (ab.length() < 0.0001) return null;
+
+                        const normal = ab.normalize3D();
+                        const contact = try handle.reserve(self);
+                        closest.w = 1;
+                        contact.* = .{
+                            .pos = a.transform.transform_pos(closest),
+                            .normal = normal,
+                            .depth = @abs(sb.radius - ab.length()),
+                        };
+
+                        return .{
+                            .contacts = handle,
+                            .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
+                        };
+                    },
+                    .cuboid => |*cb| {
+                        const mata = a.transform.mat4();
+                        const matb = b.transform.mat4();
+
+                        ca.center = a.transform.transform_pos(ca.center);
+                        cb.center = b.transform.transform_pos(cb.center);
+
+                        const axis_overlap = struct {
+                            fn project_on_axis(mat: *const math.Mat4x4, axis: Vec4, dir: Vec4) f32 {
+                                return (Vec4{ .x = dir.x, .y = dir.y, .z = dir.z }).dot((Vec4{
+                                    .x = mat.axis(.x).dot(axis),
+                                    .y = mat.axis(.y).dot(axis),
+                                    .z = mat.axis(.z).dot(axis),
+                                }).abs());
+                            }
+
+                            fn axis_overlap(
+                                cua: *const Components.Collider.Cuboid,
+                                mat_a: *const math.Mat4x4,
+                                cub: *const Components.Collider.Cuboid,
+                                mat_b: *const math.Mat4x4,
+                                axis: Vec4,
+                            ) f32 {
+                                const p1 = project_on_axis(mat_a, axis, cua.half_extent);
+                                const p2 = project_on_axis(mat_b, axis, cub.half_extent);
+                                const dist = @abs(cub.center.sub(cua.center).dot(axis));
+                                return p1 + p2 - dist;
+                            }
+                        }.axis_overlap;
+
+                        var axes = [15]Vec4{
+                            mata.axis(.x),
+                            mata.axis(.y),
+                            mata.axis(.z),
+                            matb.axis(.x),
+                            matb.axis(.y),
+                            matb.axis(.z),
+                            mata.axis(.x).cross(matb.axis(.x)),
+                            mata.axis(.x).cross(matb.axis(.y)),
+                            mata.axis(.x).cross(matb.axis(.z)),
+                            mata.axis(.y).cross(matb.axis(.x)),
+                            mata.axis(.y).cross(matb.axis(.y)),
+                            mata.axis(.y).cross(matb.axis(.z)),
+                            mata.axis(.z).cross(matb.axis(.x)),
+                            mata.axis(.z).cross(matb.axis(.y)),
+                            mata.axis(.z).cross(matb.axis(.z)),
+                        };
+
+                        var besti: usize = 15;
+                        var best_overlap = std.math.floatMax(f32);
+                        for (&axes, 0..) |*axis, i| {
+                            if (axis.length_sq() < 0.001) {
+                                continue;
+                            }
+                            axis.* = axis.normalize3D();
+
+                            const overlap = axis_overlap(ca, &mata, cb, &matb, axis.*);
+                            if (overlap < 0) return null;
+                            if (overlap < best_overlap) {
+                                best_overlap = overlap;
+                                besti = i;
+                            }
+                        }
+
+                        switch (besti) {
+                            0...2 => {
+                                var normal = mata.axis(switch (besti) {
+                                    0 => .x,
+                                    1 => .y,
+                                    2 => .z,
+                                    else => unreachable,
+                                });
+                                if (normal.dot(cb.center.sub(ca.center)) < 0) {
+                                    normal = normal.scale(-1);
+                                }
+
+                                var v = cb.half_extent;
+                                if (matb.axis(.x).dot(normal) < 0) v.x *= -1;
+                                if (matb.axis(.y).dot(normal) < 0) v.y *= -1;
+                                if (matb.axis(.z).dot(normal) < 0) v.z *= -1;
+
+                                v.z = 1;
+                                v = matb.mul_vec4(v);
+
+                                const contact = try handle.reserve(self);
+                                contact.* = .{
+                                    .pos = v,
+                                    .normal = normal,
+                                    .depth = @abs(best_overlap),
+                                };
+                            },
+                            3...5 => {
+                                var normal = matb.axis(switch (besti) {
+                                    3 => .x,
+                                    4 => .y,
+                                    5 => .z,
+                                    else => unreachable,
+                                });
+                                if (normal.dot(ca.center.sub(cb.center)) < 0) {
+                                    normal = normal.scale(-1);
+                                }
+
+                                var v = ca.half_extent;
+                                if (mata.axis(.x).dot(normal) < 0) v.x *= -1;
+                                if (mata.axis(.y).dot(normal) < 0) v.y *= -1;
+                                if (mata.axis(.z).dot(normal) < 0) v.z *= -1;
+
+                                v.z = 1;
+                                v = mata.mul_vec4(v);
+
+                                const contact = try handle.reserve(self);
+                                contact.* = .{
+                                    .pos = v,
+                                    .normal = normal,
+                                    .depth = @abs(best_overlap),
+                                };
+                            },
+                            6...14 => {
+                                const aaxisi: math.Mat4x4.Axis = switch (besti) {
+                                    6...8 => .x,
+                                    9...11 => .y,
+                                    12...14 => .z,
+                                    else => unreachable,
+                                };
+                                const baxisi: math.Mat4x4.Axis = switch (besti) {
+                                    6, 9, 12 => .x,
+                                    7, 10, 13 => .y,
+                                    8, 11, 14 => .z,
+                                    else => unreachable,
+                                };
+                                const aaxis = mata.axis(aaxisi);
+                                const baxis = matb.axis(baxisi);
+                                var axis = aaxis.cross(baxis).normalize3D();
+
+                                if (axis.dot(cb.center.sub(ca.center)) > 0) axis = axis.scale(-1);
+
+                                var pedgea = ca.half_extent;
+                                var pedgeb = cb.half_extent;
+
+                                if (aaxisi == .x) {
+                                    pedgea.x = 0;
+                                } else if (mata.axis(.x).dot(axis) > 0) {
+                                    pedgea.x *= -1;
+                                }
+                                if (baxisi == .x) {
+                                    pedgeb.x = 0;
+                                } else if (matb.axis(.x).dot(axis) < 0) {
+                                    pedgeb.x *= -1;
+                                }
+
+                                if (aaxisi == .y) {
+                                    pedgea.y = 0;
+                                } else if (mata.axis(.y).dot(axis) > 0) {
+                                    pedgea.y *= -1;
+                                }
+                                if (baxisi == .y) {
+                                    pedgeb.y = 0;
+                                } else if (matb.axis(.y).dot(axis) < 0) {
+                                    pedgeb.y *= -1;
+                                }
+
+                                if (aaxisi == .z) {
+                                    pedgea.z = 0;
+                                } else if (mata.axis(.z).dot(axis) > 0) {
+                                    pedgea.z *= -1;
+                                }
+                                if (baxisi == .z) {
+                                    pedgeb.z = 0;
+                                } else if (matb.axis(.z).dot(axis) < 0) {
+                                    pedgeb.z *= -1;
+                                }
+
+                                pedgea = ca.center.add(pedgea);
+                                pedgeb = cb.center.add(pedgeb);
+
+                                const ab = pedgea.sub(pedgeb);
+                                const dpa = aaxis.dot(ab);
+                                const dpb = baxis.dot(ab);
+
+                                const sma = aaxis.length_sq();
+                                const smb = baxis.length_sq();
+                                const dpe = aaxis.dot(baxis);
+                                const denom = sma * smb - dpe * dpe;
+                                if (@abs(denom) < 0.001) {
+                                    return null;
+                                }
+                                const npa = pedgea.add(aaxis.scale((dpe * dpb - smb * dpa) / denom));
+                                const npb = pedgeb.add(baxis.scale((sma * dpb - dpe * dpb) / denom));
+                                const v = npa.scale(0.5).add(npb.scale(0.5));
+
+                                const contact = try handle.reserve(self);
+                                contact.* = .{
+                                    .pos = v,
+                                    .normal = aaxis.cross(baxis).normalize3D(),
+                                    .depth = @abs(best_overlap),
+                                };
+                            },
+                            else => return null,
+                        }
+
+                        return .{
+                            .contacts = handle,
+                            .restitution = a.rigidbody.restitution * b.rigidbody.restitution,
+                        };
+                    },
                 }
             },
             else => {},
@@ -472,6 +773,14 @@ pub const Components = struct {
             return self.pos.add(self.rotation.rotate_vector(pos.mul(self.scale)));
         }
 
+        pub fn inverse_transform_pos(self: *const @This(), pos: Vec4) Vec4 {
+            return self.rotation.inverse_rotate_vector(pos.sub(self.pos)).mul(.{
+                .x = 1.0 / self.scale.x,
+                .y = 1.0 / self.scale.y,
+                .z = 1.0 / self.scale.z,
+            });
+        }
+
         pub fn transform_direction(self: *const @This(), dir: Vec4) Vec4 {
             return self.rotation.rotate_vector(dir.scale(self.scale));
         }
@@ -528,7 +837,7 @@ pub const Components = struct {
     pub const Collider = union(enum) {
         sphere: Sphere,
         plane: Plane,
-        // cuboid: Cuboid,
+        cuboid: Cuboid,
 
         pub const Sphere = struct {
             center: Vec4 = .{},
@@ -566,6 +875,9 @@ pub const Components = struct {
                 },
                 .plane => |p| {
                     _ = p;
+                    return null;
+                },
+                .cuboid => {
                     return null;
                 },
             }

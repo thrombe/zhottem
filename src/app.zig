@@ -367,7 +367,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .invmass = 1.0,
             .friction = 1.0,
         },
-        Components.Collider{ .sphere = .{ .radius = 1 } },
+        Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
         Components.PlayerId{ .id = 0 },
     });
 
@@ -457,6 +457,24 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //         Components.AnimatedRender{ .model = sphere_model_handle },
     //     });
     // }
+
+    const t1 = Components.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
+    _ = try world.ecs.insert(.{
+        t1,
+        Components.LastTransform{ .t = t1 },
+        Components.Rigidbody{ .flags = .{}, .invmass = 1, .friction = 1 },
+        Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+        Components.StaticRender{ .mesh = cube_mesh_handle },
+    });
+
+    const t2 = Components.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
+    _ = try world.ecs.insert(.{
+        t2,
+        Components.LastTransform{ .t = t2 },
+        Components.Rigidbody{ .flags = .{}, .invmass = 1, .friction = 1 },
+        Components.Collider{ .sphere = .{ .radius = 1 } },
+        Components.StaticRender{ .mesh = cube_mesh_handle },
+    });
 
     const player = try world.ecs.get(player_id, struct { transform: Components.Transform, camera: math.Camera, controller: Components.Controller });
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
@@ -1053,7 +1071,7 @@ pub const AppState = struct {
                                 .invmass = 1.0,
                                 .friction = 1.0,
                             },
-                            Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                            Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
                             Components.StaticRender{ .mesh = app.handles.mesh.cube },
                             Components.PlayerId{ .id = id.id, .addr = e.addr },
                             Components.Shooter{
@@ -1180,7 +1198,8 @@ pub const AppState = struct {
                                     t2,
                                     Components.LastTransform{ .t = t2 },
                                     Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                    Components.Collider{ .sphere = .{ .radius = 1.0 } },
+                                    // Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+                                    Components.Collider{ .sphere = .{ .radius = 1 } },
                                     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     Components.StaticRender{ .mesh = app.handles.mesh.cube },
                                     Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
