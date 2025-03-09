@@ -5,15 +5,12 @@ const compile_commands_flags = &[_][]const u8{ "-gen-cdb-fragment-path", ".cache
 fn compile_commands_step(b: *std.Build, v: struct {
     cdb_dir: []const u8,
     compile_commands_dir: []const u8,
+    alloc: std.mem.Allocator,
 }) !struct { step: *std.Build.Step } {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const alloc = arena.allocator();
-    const cdb = try b.build_root.join(alloc, &.{v.cdb_dir});
-    const compile_commands_dir = try b.build_root.join(alloc, &.{v.compile_commands_dir});
+    const cdb = try b.build_root.join(v.alloc, &.{v.cdb_dir});
+    const compile_commands_dir = try b.build_root.join(v.alloc, &.{v.compile_commands_dir});
     const command = try std.fmt.allocPrint(
-        alloc,
+        v.alloc,
         "(echo \\[ ; cat {s}/* ; echo {{}}\\]) | jq 'map(select(length > 0)) | map(select(. != \"no-default-config\"))' > {s}/compile_commands.json",
         .{ cdb, compile_commands_dir },
     );
@@ -119,12 +116,24 @@ fn jolt_step(b: *std.Build, v: struct {
     jolt: *std.Build.Dependency,
     target: ?std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-}) struct { lib: *std.Build.Step.Compile } {
+    alloc: std.mem.Allocator,
+}) !struct { lib: *std.Build.Step.Compile } {
     const jolt = b.addSharedLibrary(.{
         .name = "jolt",
         .target = v.target,
         .optimize = v.optimize,
     });
+
+    var files = std.ArrayList([]const u8).init(v.alloc);
+    const jolt_src = try v.jolt.path("./Jolt").getPath3(b, &jolt.step).joinString(v.alloc, "");
+    const dir = try std.fs.openDirAbsolute(jolt_src, .{ .iterate = true });
+    var it = try dir.walk(v.alloc);
+    while (try it.next()) |f| {
+        if (f.kind != .file) continue;
+        if (!std.mem.endsWith(u8, f.path, ".cpp")) continue;
+
+        try files.append(try v.alloc.dupe(u8, f.path));
+    }
 
     jolt.addIncludePath(v.jolt.path("./"));
     jolt.addCSourceFiles(.{
@@ -139,141 +148,7 @@ fn jolt_step(b: *std.Build, v: struct {
             // "-DJPH_DOUBLE_PRECISION",
             // "-DJPH_ENABLE_ASSERTS",
         } ++ compile_commands_flags,
-        .files = &[_][]const u8{
-            "AABBTree/AABBTreeBuilder.cpp",
-            "Core/Color.cpp",
-            "Core/Factory.cpp",
-            "Core/IssueReporting.cpp",
-            "Core/JobSystemSingleThreaded.cpp",
-            "Core/JobSystemThreadPool.cpp",
-            "Core/JobSystemWithBarrier.cpp",
-            "Core/LinearCurve.cpp",
-            "Core/Memory.cpp",
-            "Core/Profiler.cpp",
-            "Core/RTTI.cpp",
-            "Core/Semaphore.cpp",
-            "Core/StringTools.cpp",
-            "Core/TickCounter.cpp",
-            "Geometry/ConvexHullBuilder.cpp",
-            "Geometry/ConvexHullBuilder2D.cpp",
-            "Geometry/Indexify.cpp",
-            "Geometry/OrientedBox.cpp",
-            "Math/Vec3.cpp",
-            "ObjectStream/ObjectStream.cpp",
-            "ObjectStream/ObjectStreamBinaryIn.cpp",
-            "ObjectStream/ObjectStreamBinaryOut.cpp",
-            "ObjectStream/ObjectStreamIn.cpp",
-            "ObjectStream/ObjectStreamOut.cpp",
-            "ObjectStream/ObjectStreamTextIn.cpp",
-            "ObjectStream/ObjectStreamTextOut.cpp",
-            "ObjectStream/SerializableObject.cpp",
-            "ObjectStream/TypeDeclarations.cpp",
-            "Physics/Body/Body.cpp",
-            "Physics/Body/BodyCreationSettings.cpp",
-            "Physics/Body/BodyInterface.cpp",
-            "Physics/Body/BodyManager.cpp",
-            "Physics/Body/MassProperties.cpp",
-            "Physics/Body/MotionProperties.cpp",
-            "Physics/Character/Character.cpp",
-            "Physics/Character/CharacterBase.cpp",
-            "Physics/Character/CharacterVirtual.cpp",
-            "Physics/Collision/BroadPhase/BroadPhase.cpp",
-            "Physics/Collision/BroadPhase/BroadPhaseBruteForce.cpp",
-            "Physics/Collision/BroadPhase/BroadPhaseQuadTree.cpp",
-            "Physics/Collision/BroadPhase/QuadTree.cpp",
-            "Physics/Collision/CastConvexVsTriangles.cpp",
-            "Physics/Collision/CastSphereVsTriangles.cpp",
-            "Physics/Collision/CollideConvexVsTriangles.cpp",
-            "Physics/Collision/CollideSphereVsTriangles.cpp",
-            "Physics/Collision/CollisionDispatch.cpp",
-            "Physics/Collision/CollisionGroup.cpp",
-            "Physics/Collision/EstimateCollisionResponse.cpp",
-            "Physics/Collision/GroupFilter.cpp",
-            "Physics/Collision/GroupFilterTable.cpp",
-            "Physics/Collision/ManifoldBetweenTwoFaces.cpp",
-            "Physics/Collision/NarrowPhaseQuery.cpp",
-            "Physics/Collision/NarrowPhaseStats.cpp",
-            "Physics/Collision/PhysicsMaterial.cpp",
-            "Physics/Collision/PhysicsMaterialSimple.cpp",
-            "Physics/Collision/Shape/BoxShape.cpp",
-            "Physics/Collision/Shape/CapsuleShape.cpp",
-            "Physics/Collision/Shape/CompoundShape.cpp",
-            "Physics/Collision/Shape/ConvexHullShape.cpp",
-            "Physics/Collision/Shape/ConvexShape.cpp",
-            "Physics/Collision/Shape/CylinderShape.cpp",
-            "Physics/Collision/Shape/DecoratedShape.cpp",
-            "Physics/Collision/Shape/EmptyShape.cpp",
-            "Physics/Collision/Shape/HeightFieldShape.cpp",
-            "Physics/Collision/Shape/MeshShape.cpp",
-            "Physics/Collision/Shape/MutableCompoundShape.cpp",
-            "Physics/Collision/Shape/OffsetCenterOfMassShape.cpp",
-            "Physics/Collision/Shape/PlaneShape.cpp",
-            "Physics/Collision/Shape/RotatedTranslatedShape.cpp",
-            "Physics/Collision/Shape/ScaledShape.cpp",
-            "Physics/Collision/Shape/Shape.cpp",
-            "Physics/Collision/Shape/SphereShape.cpp",
-            "Physics/Collision/Shape/StaticCompoundShape.cpp",
-            "Physics/Collision/Shape/TaperedCapsuleShape.cpp",
-            "Physics/Collision/Shape/TaperedCylinderShape.cpp",
-            "Physics/Collision/Shape/TriangleShape.cpp",
-            "Physics/Collision/TransformedShape.cpp",
-            "Physics/Constraints/ConeConstraint.cpp",
-            "Physics/Constraints/Constraint.cpp",
-            "Physics/Constraints/ConstraintManager.cpp",
-            "Physics/Constraints/ContactConstraintManager.cpp",
-            "Physics/Constraints/DistanceConstraint.cpp",
-            "Physics/Constraints/FixedConstraint.cpp",
-            "Physics/Constraints/GearConstraint.cpp",
-            "Physics/Constraints/HingeConstraint.cpp",
-            "Physics/Constraints/MotorSettings.cpp",
-            "Physics/Constraints/PathConstraint.cpp",
-            "Physics/Constraints/PathConstraintPath.cpp",
-            "Physics/Constraints/PathConstraintPathHermite.cpp",
-            "Physics/Constraints/PointConstraint.cpp",
-            "Physics/Constraints/PulleyConstraint.cpp",
-            "Physics/Constraints/RackAndPinionConstraint.cpp",
-            "Physics/Constraints/SixDOFConstraint.cpp",
-            "Physics/Constraints/SliderConstraint.cpp",
-            "Physics/Constraints/SpringSettings.cpp",
-            "Physics/Constraints/SwingTwistConstraint.cpp",
-            "Physics/Constraints/TwoBodyConstraint.cpp",
-            "Physics/DeterminismLog.cpp",
-            "Physics/IslandBuilder.cpp",
-            "Physics/LargeIslandSplitter.cpp",
-            "Physics/PhysicsScene.cpp",
-            "Physics/PhysicsSystem.cpp",
-            "Physics/PhysicsUpdateContext.cpp",
-            "Physics/Ragdoll/Ragdoll.cpp",
-            "Physics/SoftBody/SoftBodyCreationSettings.cpp",
-            "Physics/SoftBody/SoftBodyMotionProperties.cpp",
-            "Physics/SoftBody/SoftBodyShape.cpp",
-            "Physics/SoftBody/SoftBodySharedSettings.cpp",
-            "Physics/StateRecorderImpl.cpp",
-            "Physics/Vehicle/MotorcycleController.cpp",
-            "Physics/Vehicle/TrackedVehicleController.cpp",
-            "Physics/Vehicle/VehicleAntiRollBar.cpp",
-            "Physics/Vehicle/VehicleCollisionTester.cpp",
-            "Physics/Vehicle/VehicleConstraint.cpp",
-            "Physics/Vehicle/VehicleController.cpp",
-            "Physics/Vehicle/VehicleDifferential.cpp",
-            "Physics/Vehicle/VehicleEngine.cpp",
-            "Physics/Vehicle/VehicleTrack.cpp",
-            "Physics/Vehicle/VehicleTransmission.cpp",
-            "Physics/Vehicle/Wheel.cpp",
-            "Physics/Vehicle/WheeledVehicleController.cpp",
-            "RegisterTypes.cpp",
-            "Renderer/DebugRenderer.cpp",
-            "Renderer/DebugRendererPlayback.cpp",
-            "Renderer/DebugRendererRecorder.cpp",
-            "Renderer/DebugRendererSimple.cpp",
-            "Skeleton/SkeletalAnimation.cpp",
-            "Skeleton/Skeleton.cpp",
-            "Skeleton/SkeletonMapper.cpp",
-            "Skeleton/SkeletonPose.cpp",
-            "TriangleSplitter/TriangleSplitter.cpp",
-            "TriangleSplitter/TriangleSplitterBinning.cpp",
-            "TriangleSplitter/TriangleSplitterMean.cpp",
-        },
+        .files = files.items,
     });
 
     jolt.linkLibC();
@@ -374,6 +249,10 @@ fn step(b: *std.Build, v: struct {
 }
 
 pub fn build(b: *std.Build) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -391,14 +270,16 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    const libjolt = jolt_step(b, .{
+    const libjolt = try jolt_step(b, .{
         .jolt = jolt,
         .target = target,
         .optimize = optimize,
+        .alloc = alloc,
     });
     const compile_commands = try compile_commands_step(b, .{
         .cdb_dir = ".cache/cdb",
         .compile_commands_dir = "",
+        .alloc = alloc,
     });
     // run this after building everything
     compile_commands.step.dependOn(b.getInstallStep());
