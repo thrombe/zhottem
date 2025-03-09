@@ -1,5 +1,33 @@
 const std = @import("std");
 
+const compile_commands_flags = &[_][]const u8{ "-gen-cdb-fragment-path", ".cache/cdb" };
+
+fn compile_commands_step(b: *std.Build, v: struct {
+    cdb_dir: []const u8,
+    compile_commands_dir: []const u8,
+}) !struct { step: *std.Build.Step } {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const alloc = arena.allocator();
+    const cdb = try b.build_root.join(alloc, &.{v.cdb_dir});
+    const compile_commands_dir = try b.build_root.join(alloc, &.{v.compile_commands_dir});
+    const command = try std.fmt.allocPrint(
+        alloc,
+        "(echo \\[ ; cat {s}/* ; echo {{}}\\]) | jq 'map(select(length > 0)) | map(select(. != \"no-default-config\"))' > {s}/compile_commands.json",
+        .{ cdb, compile_commands_dir },
+    );
+
+    // https://github.com/ziglang/zig/issues/9323#issuecomment-1646590552
+    const gen = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        command,
+    });
+
+    return .{ .step = &gen.step };
+}
+
 fn vulkan_step(b: *std.Build, v: struct {
     vulkan_headers: *std.Build.Dependency,
 }) struct { mod: *std.Build.Module } {
@@ -110,7 +138,7 @@ fn jolt_step(b: *std.Build, v: struct {
             // "-DJPH_DEBUG_RENDERER",
             // "-DJPH_DOUBLE_PRECISION",
             // "-DJPH_ENABLE_ASSERTS",
-        },
+        } ++ compile_commands_flags,
         .files = &[_][]const u8{
             "AABBTree/AABBTreeBuilder.cpp",
             "Core/Color.cpp",
@@ -321,7 +349,7 @@ fn step(b: *std.Build, v: struct {
 
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
-                .flags = &[_][]const u8{},
+                .flags = &[_][]const u8{} ++ compile_commands_flags,
                 .files = &[_][]const u8{
                     "jolt.cpp",
                 },
@@ -345,7 +373,7 @@ fn step(b: *std.Build, v: struct {
     return compile_step;
 }
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -368,6 +396,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const compile_commands = try compile_commands_step(b, .{
+        .cdb_dir = ".cache/cdb",
+        .compile_commands_dir = "",
+    });
+    // run this after building everything
+    compile_commands.step.dependOn(b.getInstallStep());
 
     const exe = step(b, .{
         .target = target,
@@ -408,10 +442,12 @@ pub fn build(b: *std.Build) void {
     build_libs_step.dependOn(&b.addInstallArtifact(libimgui.lib, .{}).step);
     build_libs_step.dependOn(&libjolt.lib.step);
     build_libs_step.dependOn(&b.addInstallArtifact(libjolt.lib, .{}).step);
+    build_libs_step.dependOn(compile_commands.step);
 
     const hot_build_step = b.step("build-hot", "Build the hot app");
     hot_build_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     hot_build_step.dependOn(b.getInstallStep());
+    hot_build_step.dependOn(compile_commands.step);
 
     const hot_run_cmd = b.addRunArtifact(hotexe);
     hot_run_cmd.step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
@@ -421,6 +457,7 @@ pub fn build(b: *std.Build) void {
     }
     const hot_run_step = b.step("run-hot", "Run the hot app");
     hot_run_step.dependOn(&hot_run_cmd.step);
+    hot_run_step.dependOn(compile_commands.step);
 
     const exe_run_cmd = b.addRunArtifact(exe);
     exe_run_cmd.step.dependOn(&b.addInstallArtifact(exe, .{}).step);
@@ -429,4 +466,5 @@ pub fn build(b: *std.Build) void {
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&exe_run_cmd.step);
+    run_step.dependOn(compile_commands.step);
 }

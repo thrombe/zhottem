@@ -152,6 +152,8 @@
             export PROJECT_ROOT="$(pwd)"
             export LD_LIBRARY_PATH=${pkgs.xorg.libX11}/lib:${pkgs.vulkan-loader}/lib:$LD_LIBRARY_PATH
 
+            export CLANGD_FLAGS="--compile-commands-dir=$PROJECT_ROOT --query-driver=$(which $CXX)"
+
             # if renderdoc does not work well on wayland
             # export QT_QPA_PLATFORM=xcb
           '';
