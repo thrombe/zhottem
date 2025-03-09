@@ -1,5 +1,92 @@
 const std = @import("std");
 
+fn vulkan_step(b: *std.Build, v: struct {
+    vulkan_headers: *std.Build.Dependency,
+}) struct { mod: *std.Build.Module } {
+    // generate vulkan bindings from vk.xml and create a zig module from the generated code
+    const registry = v.vulkan_headers.path("registry/vk.xml");
+    const vk_gen = b.dependency("vulkan_zig", .{}).artifact("vulkan-zig-generator");
+    const vk_generate_cmd = b.addRunArtifact(vk_gen);
+    vk_generate_cmd.addFileArg(registry);
+    const vulkan_zig = b.addModule("vulkan-zig", .{
+        .root_source_file = vk_generate_cmd.addOutputFileArg("vk.zig"),
+    });
+
+    return .{ .mod = vulkan_zig };
+}
+
+fn imgui_step(b: *std.Build, v: struct {
+    dear: *std.Build.Dependency,
+    imgui: *std.Build.Dependency,
+    vulkan_headers: *std.Build.Dependency,
+    target: ?std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+}) struct { generated: *std.Build.Step.WriteFile, lib: *std.Build.Step.Compile } {
+    const dear = v.dear.path("dear_bindings.py");
+
+    const cimgui = b.addSharedLibrary(.{
+        .name = "cimgui",
+        .target = v.target,
+        .optimize = v.optimize,
+    });
+
+    const dcimgui_generated = b.addWriteFiles();
+    cimgui.step.dependOn(&dcimgui_generated.step);
+
+    const dcimgui = b.addSystemCommand(&[_][]const u8{"python"});
+    dcimgui.addFileArg(dear);
+    dcimgui.addArgs(&[_][]const u8{ "-o", "dcimgui" });
+    dcimgui.addFileArg(v.imgui.path("imgui.h"));
+    dcimgui.setCwd(dcimgui_generated.getDirectory());
+    cimgui.step.dependOn(&dcimgui.step);
+
+    const dcimgui_glfw = b.addSystemCommand(&[_][]const u8{"python"});
+    dcimgui_glfw.addFileArg(dear);
+    dcimgui_glfw.addArgs(&[_][]const u8{ "-o", "dcimgui_impl_glfw", "--backend", "--include" });
+    dcimgui_glfw.addFileArg(v.imgui.path("imgui.h"));
+    dcimgui_glfw.addFileArg(v.imgui.path("backends/imgui_impl_glfw.h"));
+    dcimgui_glfw.step.dependOn(&dcimgui.step);
+    dcimgui_glfw.setCwd(dcimgui_generated.getDirectory());
+    cimgui.step.dependOn(&dcimgui_glfw.step);
+
+    const dcimgui_vulkan = b.addSystemCommand(&[_][]const u8{"python"});
+    dcimgui_vulkan.addFileArg(dear);
+    dcimgui_vulkan.addArgs(&[_][]const u8{ "-o", "dcimgui_impl_vulkan", "--backend", "--include" });
+    dcimgui_vulkan.addFileArg(v.imgui.path("imgui.h"));
+    dcimgui_vulkan.addFileArg(v.imgui.path("backends/imgui_impl_vulkan.h"));
+    dcimgui_vulkan.step.dependOn(&dcimgui.step);
+    dcimgui_vulkan.setCwd(dcimgui_generated.getDirectory());
+    cimgui.step.dependOn(&dcimgui_vulkan.step);
+
+    cimgui.addCSourceFiles(.{ .root = v.imgui.path("./"), .files = &[_][]const u8{
+        "imgui.cpp",
+        "imgui_draw.cpp",
+        "imgui_widgets.cpp",
+        "imgui_tables.cpp",
+        "imgui_demo.cpp",
+        "backends/imgui_impl_glfw.cpp",
+        "backends/imgui_impl_vulkan.cpp",
+    }, .flags = &[_][]const u8{} });
+    cimgui.addCSourceFiles(.{ .root = dcimgui_generated.getDirectory(), .files = &[_][]const u8{
+        "dcimgui.cpp",
+        "dcimgui_impl_glfw.cpp",
+        "dcimgui_impl_vulkan.cpp",
+    }, .flags = &[_][]const u8{} });
+    cimgui.addIncludePath(v.imgui.path("./"));
+    cimgui.addIncludePath(v.imgui.path("./backends"));
+    cimgui.addIncludePath(v.vulkan_headers.path("./include"));
+    cimgui.addIncludePath(dcimgui_generated.getDirectory());
+    cimgui.linkSystemLibrary("vulkan");
+    cimgui.linkSystemLibrary("glfw");
+    cimgui.linkLibC();
+    cimgui.linkLibCpp();
+
+    return .{
+        .generated = dcimgui_generated,
+        .lib = cimgui,
+    };
+}
+
 const CompileMode = enum {
     exe,
     hotexe,
@@ -79,107 +166,51 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // generate vulkan bindings from vk.xml and create a zig module from the generated code
     const vulkan_headers = b.dependency("vulkan_headers", .{});
-    const registry = vulkan_headers.path("registry/vk.xml");
-    const vk_gen = b.dependency("vulkan_zig", .{}).artifact("vulkan-zig-generator");
-    const vk_generate_cmd = b.addRunArtifact(vk_gen);
-    vk_generate_cmd.addFileArg(registry);
-    const vulkan_zig = b.addModule("vulkan-zig", .{
-        .root_source_file = vk_generate_cmd.addOutputFileArg("vk.zig"),
-    });
-
-    const dear = b.dependency("dear_bindings", .{}).path("dear_bindings.py");
     const imgui = b.dependency("imgui", .{});
 
-    const cimgui = b.addSharedLibrary(.{
-        .name = "cimgui",
+    const vulkan = vulkan_step(b, .{
+        .vulkan_headers = vulkan_headers,
+    });
+    const cimgui = imgui_step(b, .{
+        .dear = b.dependency("dear_bindings", .{}),
+        .imgui = imgui,
+        .vulkan_headers = vulkan_headers,
         .target = target,
         .optimize = optimize,
     });
-
-    const dcimgui_generated = b.addWriteFiles();
-    cimgui.step.dependOn(&dcimgui_generated.step);
-
-    const dcimgui = b.addSystemCommand(&[_][]const u8{"python"});
-    dcimgui.addFileArg(dear);
-    dcimgui.addArgs(&[_][]const u8{ "-o", "dcimgui" });
-    dcimgui.addFileArg(imgui.path("imgui.h"));
-    dcimgui.setCwd(dcimgui_generated.getDirectory());
-    cimgui.step.dependOn(&dcimgui.step);
-
-    const dcimgui_glfw = b.addSystemCommand(&[_][]const u8{"python"});
-    dcimgui_glfw.addFileArg(dear);
-    dcimgui_glfw.addArgs(&[_][]const u8{ "-o", "dcimgui_impl_glfw", "--backend", "--include" });
-    dcimgui_glfw.addFileArg(imgui.path("imgui.h"));
-    dcimgui_glfw.addFileArg(imgui.path("backends/imgui_impl_glfw.h"));
-    dcimgui_glfw.step.dependOn(&dcimgui.step);
-    dcimgui_glfw.setCwd(dcimgui_generated.getDirectory());
-    cimgui.step.dependOn(&dcimgui_glfw.step);
-
-    const dcimgui_vulkan = b.addSystemCommand(&[_][]const u8{"python"});
-    dcimgui_vulkan.addFileArg(dear);
-    dcimgui_vulkan.addArgs(&[_][]const u8{ "-o", "dcimgui_impl_vulkan", "--backend", "--include" });
-    dcimgui_vulkan.addFileArg(imgui.path("imgui.h"));
-    dcimgui_vulkan.addFileArg(imgui.path("backends/imgui_impl_vulkan.h"));
-    dcimgui_vulkan.step.dependOn(&dcimgui.step);
-    dcimgui_vulkan.setCwd(dcimgui_generated.getDirectory());
-    cimgui.step.dependOn(&dcimgui_vulkan.step);
-
-    cimgui.addCSourceFiles(.{ .root = imgui.path("./"), .files = &[_][]const u8{
-        "imgui.cpp",
-        "imgui_draw.cpp",
-        "imgui_widgets.cpp",
-        "imgui_tables.cpp",
-        "imgui_demo.cpp",
-        "backends/imgui_impl_glfw.cpp",
-        "backends/imgui_impl_vulkan.cpp",
-    }, .flags = &[_][]const u8{} });
-    cimgui.addCSourceFiles(.{ .root = dcimgui_generated.getDirectory(), .files = &[_][]const u8{
-        "dcimgui.cpp",
-        "dcimgui_impl_glfw.cpp",
-        "dcimgui_impl_vulkan.cpp",
-    }, .flags = &[_][]const u8{} });
-    cimgui.addIncludePath(imgui.path("./"));
-    cimgui.addIncludePath(imgui.path("./backends"));
-    cimgui.addIncludePath(vulkan_headers.path("./include"));
-    cimgui.addIncludePath(dcimgui_generated.getDirectory());
-    cimgui.linkSystemLibrary("vulkan");
-    cimgui.linkSystemLibrary("glfw");
-    cimgui.linkLibC();
-    cimgui.linkLibCpp();
 
     const exe = step(b, .{
         .target = target,
         .optimize = optimize,
         .mode = .exe,
-        .vulkan_zig = vulkan_zig,
-        .cimgui = cimgui,
+        .vulkan_zig = vulkan.mod,
+        .cimgui = cimgui.lib,
         .imgui_dep = imgui,
-        .dcimgui_generated = dcimgui_generated,
+        .dcimgui_generated = cimgui.generated,
     });
     const hotlib = step(b, .{
         .target = target,
         .optimize = optimize,
         .mode = .hotlib,
-        .vulkan_zig = vulkan_zig,
-        .cimgui = cimgui,
+        .vulkan_zig = vulkan.mod,
+        .cimgui = cimgui.lib,
         .imgui_dep = imgui,
-        .dcimgui_generated = dcimgui_generated,
+        .dcimgui_generated = cimgui.generated,
     });
     const hotexe = step(b, .{
         .target = target,
         .optimize = optimize,
         .mode = .hotexe,
-        .vulkan_zig = vulkan_zig,
-        .cimgui = cimgui,
+        .vulkan_zig = vulkan.mod,
+        .cimgui = cimgui.lib,
         .imgui_dep = imgui,
-        .dcimgui_generated = dcimgui_generated,
+        .dcimgui_generated = cimgui.generated,
     });
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");
-    build_libs_step.dependOn(&cimgui.step);
-    build_libs_step.dependOn(&b.addInstallArtifact(cimgui, .{}).step);
+    build_libs_step.dependOn(&cimgui.lib.step);
+    build_libs_step.dependOn(&b.addInstallArtifact(cimgui.lib, .{}).step);
 
     const hot_build_step = b.step("build-hot", "Build the hot app");
     hot_build_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
