@@ -4,17 +4,20 @@
 
 #include <Jolt/Jolt.h>
 
+#include "Jolt/Physics/Body/MotionQuality.h"
+#include "Jolt/Physics/Body/MotionType.h"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/EActivation.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
-#include <Jolt/Physics/Body/BodyInterface.h>
 
 JPH_SUPPRESS_WARNINGS
 
@@ -122,31 +125,25 @@ class MyContactListener : public ContactListener {
 public:
   virtual ValidateResult OnContactValidate(const Body &inBody1, const Body &inBody2, RVec3Arg inBaseOffset,
                                            const CollideShapeResult &inCollisionResult) override {
-    cout << "Contact validate callback" << endl;
-
     // Allows you to ignore a contact before it is created
     return ValidateResult::AcceptAllContactsForThisBodyPair;
   }
 
   virtual void OnContactAdded(const Body &inBody1, const Body &inBody2, const ContactManifold &inManifold,
-                              ContactSettings &ioSettings) override {
-    cout << "A contact was added" << endl;
-  }
+                              ContactSettings &ioSettings) override {}
 
   virtual void OnContactPersisted(const Body &inBody1, const Body &inBody2, const ContactManifold &inManifold,
-                                  ContactSettings &ioSettings) override {
-    cout << "A contact was persisted" << endl;
-  }
+                                  ContactSettings &ioSettings) override {}
 
-  virtual void OnContactRemoved(const SubShapeIDPair &inSubShapePair) override { cout << "A contact was removed" << endl; }
+  virtual void OnContactRemoved(const SubShapeIDPair &inSubShapePair) override {}
 };
 
 // WOOPS: thread safety
 class MyBodyActivationListener : public BodyActivationListener {
 public:
-  virtual void OnBodyActivated(const BodyID &inBodyID, uint64 inBodyUserData) override { cout << "A body got activated" << endl; }
+  virtual void OnBodyActivated(const BodyID &inBodyID, uint64 inBodyUserData) override {}
 
-  virtual void OnBodyDeactivated(const BodyID &inBodyID, uint64 inBodyUserData) override { cout << "A body went to sleep" << endl; }
+  virtual void OnBodyDeactivated(const BodyID &inBodyID, uint64 inBodyUserData) override {}
 };
 
 class Physics {
@@ -199,49 +196,140 @@ public:
     physics_system.SetContactListener(&contact_listener);
   }
 
-  void optimize() {
-    physics_system.OptimizeBroadPhase();
-  }
+  void optimize() { physics_system.OptimizeBroadPhase(); }
 
-  BodyInterface& bodyi() {
-    return physics_system.GetBodyInterface();
-  }
+  BodyInterface &bodyi() { return physics_system.GetBodyInterface(); }
 
-  void update(float sim_time, int steps) {
-    physics_system.Update(sim_time, steps, temp_allocator, job_system);
-  }
+  void update(float sim_time, int steps) { physics_system.Update(sim_time, steps, temp_allocator, job_system); }
 };
 
 extern "C" {
 #include "jolt.h"
-
-void* physics_create() {
-  return Physics::create_new();
 }
 
-void physics_delete(void* p) {
-  auto physics = (Physics*)p;
+Vec3 vec3_cast(vec3 vec) { return Vec3(vec.x, vec.y, vec.z); }
+
+vec3 Vec3_cast(Vec3 vec) {
+  vec3 v;
+  v.x = vec.GetX();
+  v.y = vec.GetY();
+  v.z = vec.GetZ();
+  return v;
+}
+
+Vec4 vec4_cast(vec4 vec) { return Vec4(vec.x, vec.y, vec.z, vec.w); }
+
+vec4 Vec4_cast(Vec4 vec) {
+  vec4 v;
+  v.x = vec.GetX();
+  v.y = vec.GetY();
+  v.z = vec.GetZ();
+  v.w = vec.GetW();
+  return v;
+}
+
+vec4 Vec4_cast(Quat vec) {
+  vec4 v;
+  v.x = vec.GetX();
+  v.y = vec.GetY();
+  v.z = vec.GetZ();
+  v.w = vec.GetW();
+  return v;
+}
+
+extern "C" {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Waccess-private"
+
+ZPhysics physics_create() { return Physics::create_new(); }
+
+void physics_delete(ZPhysics p) {
+  auto physics = (Physics *)p;
   physics->delete_self();
 }
 
-void physics_start(void* p) {
-  auto physics = (Physics*)p;
+void physics_start(ZPhysics p) {
+  auto physics = (Physics *)p;
   physics->start();
 }
 
-void physics_optimize(void* p) {
-  auto physics = (Physics*)p;
+void physics_optimize(ZPhysics p) {
+  auto physics = (Physics *)p;
   physics->optimize();
 }
 
-void physics_update(void* p, float sim_time, int steps) {
-  auto physics = (Physics*)p;
+void physics_update(ZPhysics p, float sim_time, u32 steps) {
+  auto physics = (Physics *)p;
   physics->update(sim_time, steps);
+}
+
+u32 physics_add_body(ZPhysics p, ZBodySettings bsettings) {
+  auto physics = (Physics *)p;
+
+  BodyCreationSettings settings;
+  settings.mPosition = vec3_cast(bsettings.pos);
+  settings.mLinearVelocity = vec3_cast(bsettings.velocity);
+  settings.mAngularVelocity = vec3_cast(bsettings.angular_velocity);
+  settings.mMotionType = static_cast<EMotionType>(bsettings.motion_type);
+  settings.mMotionQuality = static_cast<EMotionQuality>(bsettings.motion_quality);
+  settings.mObjectLayer = Layers::MOVING;
+
+  switch (bsettings.shape_type) {
+  case SHAPE_SPHERE: {
+    Ref<SphereShapeSettings> sphere = new SphereShapeSettings();
+    sphere->mRadius = bsettings.shape.sphere.radius;
+    settings.SetShape(sphere->Create().Get());
+    settings.SetShapeSettings(sphere);
+  } break;
+  case SHAPE_BOX: {
+    Ref<BoxShapeSettings> box = new BoxShapeSettings();
+    box->mHalfExtent = vec3_cast(bsettings.shape.box.size);
+    settings.SetShape(box->Create().Get());
+    settings.SetShapeSettings(box);
+  } break;
+  default:
+    return 0;
+  }
+
+  BodyInterface &bi = physics->bodyi();
+  Body *b = bi.CreateBody(settings);
+  bi.AddBody(b->GetID(), EActivation::Activate);
+
+  return b->GetID().GetIndexAndSequenceNumber();
+}
+
+ZTransform physics_get_transform(ZPhysics p, u32 _bid) {
+  auto physics = (Physics *)p;
+  BodyID bid = BodyID(_bid);
+
+  BodyInterface &bi = physics->bodyi();
+  auto pos = bi.GetPosition(bid);
+  auto rot = bi.GetRotation(bid);
+
+  ZTransform zt;
+  zt.pos = Vec3_cast(pos);
+  zt.rot = Vec4_cast(rot);
+  return zt;
+}
+
+void physics_set_rotation(ZPhysics p, u32 _bid, vec4 rot) {
+  auto physics = (Physics *)p;
+  BodyID bid = BodyID(_bid);
+
+  BodyInterface &bi = physics->bodyi();
+  bi.SetRotation(bid, Quat(vec4_cast(rot).Normalized()), EActivation::Activate);
+}
+
+void physics_add_force(ZPhysics p, u32 _bid, vec3 force) {
+  auto physics = (Physics *)p;
+  BodyID bid = BodyID(_bid);
+  BodyInterface &bi = physics->bodyi();
+  bi.AddForce(bid, vec3_cast(force) * 100);
 }
 
 void testfn() {
   auto p = physics_create();
-  auto physics = (Physics*)p;
+  auto physics = (Physics *)p;
 
   physics->start();
 
@@ -285,4 +373,6 @@ void testfn() {
 
   physics_delete(p);
 }
+
+#pragma clang diagnostic pop
 }

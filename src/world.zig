@@ -2,6 +2,7 @@ const std = @import("std");
 
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
+const Vec3 = math.Vec3;
 
 const utils_mod = @import("utils.zig");
 
@@ -17,14 +18,80 @@ const EntityComponentStore = ecs_mod.EntityComponentStore;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+pub const Zphysics = struct {
+    pub const c = @cImport({
+        @cInclude("jolt.h");
+    });
+
+    phy: *anyopaque,
+
+    pub const BodyId = struct { bid: u32 };
+
+    pub fn init() !@This() {
+        return .{
+            .phy = c.physics_create() orelse return error.CouldNotInitializeJolt,
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        c.physics_delete(self.phy);
+    }
+
+    pub fn start(self: *@This()) !void {
+        c.physics_start(self.phy);
+    }
+
+    pub fn optimize(self: *@This()) void {
+        c.physics_optimize(self.phy);
+    }
+
+    pub fn update(self: *@This(), sim_time: f32, steps: u32) void {
+        c.physics_update(self.phy, sim_time, steps);
+    }
+
+    pub fn add_body(self: *@This(), settings: c.ZBodySettings) BodyId {
+        const bid = c.physics_add_body(self.phy, settings);
+        return .{ .bid = bid };
+    }
+
+    pub fn get_transform(self: *@This(), bid: BodyId) Components.Transform {
+        const transform = c.physics_get_transform(self.phy, bid.bid);
+        return .{
+            .pos = .{
+                .x = transform.pos.x,
+                .y = transform.pos.y,
+                .z = transform.pos.z,
+            },
+            .rotation = .{
+                .x = transform.rot.x,
+                .y = transform.rot.y,
+                .z = transform.rot.z,
+                .w = transform.rot.w,
+            },
+        };
+    }
+
+    pub fn apply_force(self: *@This(), bid: BodyId, force: Vec3) void {
+        c.physics_add_force(self.phy, bid.bid, .{ .x = force.x, .y = force.y, .z = force.z });
+    }
+
+    pub fn set_rotation(self: *@This(), bid: BodyId, rot: Vec4) void {
+        c.physics_set_rotation(self.phy, bid.bid, .{ .x = rot.x, .y = rot.y, .z = rot.z, .w = rot.w });
+    }
+};
+
 pub const World = struct {
     ecs: EntityComponentStore,
+    phy: Zphysics,
 
     pub fn init() !@This() {
         var self = @This(){
             .ecs = try EntityComponentStore.init(),
+            .phy = try Zphysics.init(),
         };
         errdefer self.deinit();
+
+        try self.phy.start();
 
         _ = try self.ecs.register([]const u8);
         _ = try self.ecs.register(math.Camera);
@@ -47,8 +114,18 @@ pub const World = struct {
 
     pub fn deinit(self: *@This()) void {
         self.ecs.deinit();
+        self.phy.deinit();
     }
 
+    pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
+        self.phy.update(sim_time, steps);
+
+        var it = try self.ecs.iterator(struct { t: Components.Transform, bid: Zphysics.BodyId });
+        while (it.next()) |e| {
+            const t = self.phy.get_transform(e.bid.*);
+            e.t.pos = t.pos;
+            e.t.rotation = t.rotation;
+        }
     }
 };
 

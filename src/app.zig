@@ -8,6 +8,7 @@ const ShaderUtils = utils.ShaderUtils;
 
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
+const Vec3 = math.Vec3;
 
 const assets_mod = @import("assets.zig");
 
@@ -47,6 +48,7 @@ const InstanceAllocator = resources_mod.InstanceAllocator;
 
 const C = struct {
     usingnamespace Components;
+    const BodyId = world_mod.Zphysics.BodyId;
 };
 
 const main = @import("main.zig");
@@ -370,6 +372,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .hold = true,
         },
         C.PlayerId{ .id = 0 },
+        world.phy.add_body(.{
+            .shape_type = world_mod.Zphysics.c.SHAPE_SPHERE,
+            .shape = .{ .sphere = .{ .radius = 1 } },
+            .pos = .{ .x = t.pos.x, .y = t.pos.y, .z = t.pos.z },
+            .motion_type = world_mod.Zphysics.c.MOTION_DYNAMIC,
+        }),
     });
 
     t = .{
@@ -382,6 +390,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         C.LastTransform{ .t = t },
         C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         C.StaticRender{ .mesh = plane_mesh_handle },
+        world.phy.add_body(.{
+            .shape_type = world_mod.Zphysics.c.SHAPE_BOX,
+            .shape = .{ .box = .{ .size = .{ .x = 50, .z = 50, .y = 1 } } },
+            .motion_type = world_mod.Zphysics.c.MOTION_STATIC,
+        }),
     });
     t = .{
         .pos = .{ .y = 50, .x = 50 },
@@ -1109,10 +1122,11 @@ pub const AppState = struct {
                             }
 
                             const rot = camera.rot_quat(player.controller.pitch, player.controller.yaw);
-                            // const fwd = rot.rotate_vector(camera.world_basis.fwd);
-                            // const right = rot.rotate_vector(camera.world_basis.right);
+                            const fwd = rot.rotate_vector(camera.world_basis.fwd);
+                            const right = rot.rotate_vector(camera.world_basis.right);
 
-                            player.t.rotation = rot;
+                            player.t.rotation = rot.normalize();
+                            app.world.phy.set_rotation(player.bid.*, player.t.rotation);
 
                             var speed = player.controller.speed;
                             if (kb.shift.pressed()) {
@@ -1126,16 +1140,16 @@ pub const AppState = struct {
                             // speed /= player.r.invmass;
 
                             if (kb.w.pressed()) {
-                                // player.r.force = fwd.scale(speed);
+                                app.world.phy.apply_force(player.bid.*, fwd.scale(speed).xyz());
                             }
                             if (kb.a.pressed()) {
-                                // player.r.force = right.scale(-speed);
+                                app.world.phy.apply_force(player.bid.*, right.scale(-speed).xyz());
                             }
                             if (kb.s.pressed()) {
-                                // player.r.force = fwd.scale(-speed);
+                                app.world.phy.apply_force(player.bid.*, fwd.scale(-speed).xyz());
                             }
                             if (kb.d.pressed()) {
-                                // player.r.force = right.scale(speed);
+                                app.world.phy.apply_force(player.bid.*, right.scale(speed).xyz());
                             }
                             if (kb.space.pressed()) {
                                 // player.r.force = .{};
@@ -1203,41 +1217,40 @@ pub const AppState = struct {
             }
         }
 
-        // {
-        //     self.physics.acctime += delta;
-        //     self.physics.interpolation_acctime += delta;
+        {
+            self.physics.acctime += delta;
+            self.physics.interpolation_acctime += delta;
 
-        //     while (self.physics.acctime >= self.physics.step) {
-        //         self.physics.acctime -= self.physics.step;
+            const steps = @divFloor(self.physics.acctime, self.physics.step);
+            if (steps >= 1) {
+                self.physics.acctime -= self.physics.step * steps;
 
-        //         if (self.physics.acctime < self.physics.step) {
-        //             self.physics.interpolation_acctime = self.physics.acctime;
-        //             var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
-        //             while (it.next()) |e| {
-        //                 e.ft.t = e.t.*;
-        //             }
-        //         }
+                // {
+                //     var it = try app.world.ecs.iterator(struct { r: C.Rigidbody });
+                //     while (it.next()) |e| {
+                //         if (!e.r.flags.pinned) {
+                //             const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
+                //             e.r.force = e.r.force.add(g);
+                //         }
+                //     }
+                // }
 
-        //         {
-        //             var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
-        //             while (it.next()) |e| {
-        //                 if (!e.r.flags.pinned) {
-        //                     const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
-        //                     e.r.force = e.r.force.add(g);
-        //                 }
-        //             }
-        //         }
+                try app.world.step(self.physics.step * steps, @intFromFloat(steps));
 
-        //         try app.world.step(self.physics.step);
-        //     }
+                self.physics.interpolation_acctime = self.physics.acctime;
+                var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform });
+                while (it.next()) |e| {
+                    e.ft.t = e.t.*;
+                }
+            }
 
-        //     {
-        //         var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
-        //         while (it.next()) |e| {
-        //             e.r.force = .{};
-        //         }
-        //     }
-        // }
+            // {
+            //     var it = try app.world.ecs.iterator(struct { r: C.Rigidbody });
+            //     while (it.next()) |e| {
+            //         e.r.force = .{};
+            //     }
+            // }
+        }
 
         {
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });

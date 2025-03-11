@@ -325,12 +325,13 @@ pub fn build(b: *std.Build) !void {
     build_libs_step.dependOn(&b.addInstallArtifact(libimgui.lib, .{}).step);
     build_libs_step.dependOn(&libjolt.lib.step);
     build_libs_step.dependOn(&b.addInstallArtifact(libjolt.lib, .{}).step);
+    build_libs_step.dependOn(&hotlib.step);
+    build_libs_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     build_libs_step.dependOn(compile_commands.step);
 
     const hot_build_step = b.step("build-hot", "Build the hot app");
     hot_build_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     hot_build_step.dependOn(b.getInstallStep());
-    hot_build_step.dependOn(compile_commands.step);
 
     const hot_run_cmd = b.addRunArtifact(hotexe);
     hot_run_cmd.step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
@@ -340,7 +341,6 @@ pub fn build(b: *std.Build) !void {
     }
     const hot_run_step = b.step("run-hot", "Run the hot app");
     hot_run_step.dependOn(&hot_run_cmd.step);
-    hot_run_step.dependOn(compile_commands.step);
 
     const exe_run_cmd = b.addRunArtifact(exe);
     exe_run_cmd.step.dependOn(&b.addInstallArtifact(exe, .{}).step);
@@ -349,5 +349,4 @@ pub fn build(b: *std.Build) !void {
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&exe_run_cmd.step);
-    run_step.dependOn(compile_commands.step);
 }

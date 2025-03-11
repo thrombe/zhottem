@@ -173,11 +173,6 @@ export fn hot_init() callconv(.c) ?*anyopaque {
     switch (options.mode) {
         .exe, .hotexe => return null,
         .hotlib => {
-            const jolt = @cImport({
-                @cInclude("jolt.h");
-            });
-            jolt.testfn();
-
             const app = HotApp.init() catch |e| {
                 utils_mod.dump_error(e);
                 return null;

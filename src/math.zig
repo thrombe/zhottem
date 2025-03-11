@@ -132,6 +132,10 @@ pub const Vec4 = extern struct {
         return .{ .x = t, .y = t, .z = t, .w = t };
     }
 
+    pub fn xyz(self: *const @This()) Vec3 {
+        return .{ .x = self.x, .y = self.y, .z = self.z };
+    }
+
     pub fn max3(self: *const @This()) f32 {
         return @max(self.x, @max(self.y, self.z));
     }
@@ -397,7 +401,7 @@ pub const Vec3 = extern struct {
         };
     }
 
-    pub fn to_buf(self: *const @This()) [4]f32 {
+    pub fn to_buf(self: *const @This()) [3]f32 {
         return .{ self.x, self.y, self.z };
     }
 
