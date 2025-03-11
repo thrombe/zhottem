@@ -365,57 +365,62 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.PlayerId{ .id = 0 },
     });
 
+    var t: Components.Transform = .{
+        .pos = .{ .y = -3 },
+        .scale = Vec4.splat3(50),
+    };
     _ = try world.ecs.insert(.{
         @as([]const u8, "floor"),
-        Components.Transform{
-            .pos = .{ .y = -3 },
-            .scale = Vec4.splat3(50),
-        },
-        Components.LastTransform{},
+        t,
+        Components.LastTransform{ .t = t },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
+    t = .{
+        .pos = .{ .y = 50, .x = 50 },
+        .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
+        .scale = Vec4.splat3(50),
+    };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
-        Components.Transform{
-            .pos = .{ .y = 50, .x = 50 },
-            .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
-            .scale = Vec4.splat3(50),
-        },
-        Components.LastTransform{},
+        t,
+        Components.LastTransform{ .t = t },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
+    t = .{
+        .pos = .{ .y = 50, .x = -50 },
+        .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
+        .scale = Vec4.splat3(50),
+    };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
-        Components.Transform{
-            .pos = .{ .y = 50, .x = -50 },
-            .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
-            .scale = Vec4.splat3(50),
-        },
-        Components.LastTransform{},
+        t,
+        Components.LastTransform{ .t = t },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
+    t = .{
+        .pos = .{ .y = 50, .z = 50 },
+        .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
+        .scale = Vec4.splat3(50),
+    };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
-        Components.Transform{
-            .pos = .{ .y = 50, .z = 50 },
-            .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
-            .scale = Vec4.splat3(50),
-        },
-        Components.LastTransform{},
+        t,
+        Components.LastTransform{ .t = t },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
+    t = .{
+        .pos = .{ .y = 50, .z = -50 },
+        .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
+        .scale = Vec4.splat3(50),
+    };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
-        Components.Transform{
-            .pos = .{ .y = 50, .z = -50 },
-            .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
-            .scale = Vec4.splat3(50),
-        },
-        Components.LastTransform{},
+        t,
+        Components.LastTransform{ .t = t },
         Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
