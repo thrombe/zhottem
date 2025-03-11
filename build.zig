@@ -224,7 +224,9 @@ fn step(b: *std.Build, v: struct {
 
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
-                .flags = &[_][]const u8{} ++ compile_commands_flags,
+                .flags = &[_][]const u8{
+                    "-fno-access-control",
+                } ++ compile_commands_flags,
                 .files = &[_][]const u8{
                     "jolt.cpp",
                 },
