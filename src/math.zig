@@ -285,6 +285,7 @@ pub const Vec3 = extern struct {
     x: f32 = 0,
     y: f32 = 0,
     z: f32 = 0,
+    __: f32 = 0,
 
     pub fn dot(self: *const @This(), other: @This()) f32 {
         return self.x * other.x +

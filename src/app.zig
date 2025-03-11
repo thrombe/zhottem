@@ -362,25 +362,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
             .hold = true,
         },
-        Components.Rigidbody{
-            .flags = .{ .player = true },
-            .invmass = 1.0,
-            .friction = 1.0,
-        },
-        Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
         Components.PlayerId{ .id = 0 },
     });
 
-    // _ = try world.ecs.insert(.{
-    //     Components.Rigidbody{
-    //         .flags = .{ .pinned = true },
-    //     },
-    //     Components.Transform{ .pos = .{ .y = -3 } },
-    //     Components.LastTransform{},
-    //     Components.Collider{ .sphere = .{ .radius = -10 } },
-    // });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .friction = 1, .invmass = 0 },
+        @as([]const u8, "floor"),
         Components.Transform{
             .pos = .{ .y = -3 },
             .scale = Vec4.splat3(50),
@@ -390,7 +376,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
+        @as([]const u8, "wall"),
         Components.Transform{
             .pos = .{ .y = 50, .x = 50 },
             .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
@@ -401,7 +387,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
+        @as([]const u8, "wall"),
         Components.Transform{
             .pos = .{ .y = 50, .x = -50 },
             .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
@@ -412,7 +398,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
+        @as([]const u8, "wall"),
         Components.Transform{
             .pos = .{ .y = 50, .z = 50 },
             .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
@@ -423,7 +409,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         Components.StaticRender{ .mesh = plane_mesh_handle },
     });
     _ = try world.ecs.insert(.{
-        Components.Rigidbody{ .flags = .{ .pinned = true }, .invmass = 0 },
+        @as([]const u8, "wall"),
         Components.Transform{
             .pos = .{ .y = 50, .z = -50 },
             .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
@@ -460,18 +446,18 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     const t1 = Components.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
     _ = try world.ecs.insert(.{
+        @as([]const u8, "ball"),
         t1,
         Components.LastTransform{ .t = t1 },
-        Components.Rigidbody{ .flags = .{}, .invmass = 1, .friction = 1 },
         Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
         Components.StaticRender{ .mesh = cube_mesh_handle },
     });
 
     const t2 = Components.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
     _ = try world.ecs.insert(.{
+        @as([]const u8, "ball"),
         t2,
         Components.LastTransform{ .t = t2 },
-        Components.Rigidbody{ .flags = .{}, .invmass = 1, .friction = 1 },
         Components.Collider{ .sphere = .{ .radius = 1 } },
         Components.StaticRender{ .mesh = cube_mesh_handle },
     });
@@ -1066,11 +1052,6 @@ pub const AppState = struct {
                                 .z = id.pos.z,
                             } } },
                             Components.Controller{},
-                            Components.Rigidbody{
-                                .flags = .{ .player = true },
-                                .invmass = 1.0,
-                                .friction = 1.0,
-                            },
                             Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
                             Components.StaticRender{ .mesh = app.handles.mesh.cube },
                             Components.PlayerId{ .id = id.id, .addr = e.addr },
@@ -1094,7 +1075,6 @@ pub const AppState = struct {
                             pid: Components.PlayerId,
                             controller: Components.Controller,
                             t: Components.Transform,
-                            r: Components.Rigidbody,
                             lt: Components.LastTransform,
                             shooter: Components.Shooter,
                         });
@@ -1116,8 +1096,8 @@ pub const AppState = struct {
                             }
 
                             const rot = camera.rot_quat(player.controller.pitch, player.controller.yaw);
-                            const fwd = rot.rotate_vector(camera.world_basis.fwd);
-                            const right = rot.rotate_vector(camera.world_basis.right);
+                            // const fwd = rot.rotate_vector(camera.world_basis.fwd);
+                            // const right = rot.rotate_vector(camera.world_basis.right);
 
                             player.t.rotation = rot;
 
@@ -1130,47 +1110,47 @@ pub const AppState = struct {
                             }
 
                             speed *= 50 * player.controller.speed;
-                            speed /= player.r.invmass;
+                            // speed /= player.r.invmass;
 
                             if (kb.w.pressed()) {
-                                player.r.force = fwd.scale(speed);
+                                // player.r.force = fwd.scale(speed);
                             }
                             if (kb.a.pressed()) {
-                                player.r.force = right.scale(-speed);
+                                // player.r.force = right.scale(-speed);
                             }
                             if (kb.s.pressed()) {
-                                player.r.force = fwd.scale(-speed);
+                                // player.r.force = fwd.scale(-speed);
                             }
                             if (kb.d.pressed()) {
-                                player.r.force = right.scale(speed);
+                                // player.r.force = right.scale(speed);
                             }
                             if (kb.space.pressed()) {
-                                player.r.force = .{};
-                                player.r.vel = .{};
+                                // player.r.force = .{};
+                                // player.r.vel = .{};
                             }
 
-                            {
-                                const T = struct { t: Components.Transform, r: Components.Rigidbody, c: Components.Collider };
-                                var t_min: ?f32 = null;
-                                var closest: ?ecs_mod.Type.pointer(T) = null;
-                                var it = try app.world.ecs.iterator(T);
-                                while (it.next()) |ent| {
-                                    if (!ent.r.flags.player and !ent.r.flags.pinned and mouse.left.pressed()) {
-                                        if (ent.c.raycast(ent.t, self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(1.1)), fwd)) |t| {
-                                            if (t_min == null) {
-                                                t_min = t;
-                                                closest = ent;
-                                            } else if (t_min.? > t) {
-                                                t_min = t;
-                                                closest = ent;
-                                            }
-                                        }
-                                    }
-                                }
-                                if (closest) |ent| {
-                                    ent.r.vel = ent.r.vel.add(fwd.scale(50));
-                                }
-                            }
+                            // {
+                            //     const T = struct { t: Components.Transform, c: Components.Collider };
+                            //     var t_min: ?f32 = null;
+                            //     var closest: ?ecs_mod.Type.pointer(T) = null;
+                            //     var it = try app.world.ecs.iterator(T);
+                            //     while (it.next()) |ent| {
+                            //         if (!ent.r.flags.player and !ent.r.flags.pinned and mouse.left.pressed()) {
+                            //             if (ent.c.raycast(ent.t, self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(1.1)), fwd)) |t| {
+                            //                 if (t_min == null) {
+                            //                     t_min = t;
+                            //                     closest = ent;
+                            //                 } else if (t_min.? > t) {
+                            //                     t_min = t;
+                            //                     closest = ent;
+                            //                 }
+                            //             }
+                            //         }
+                            //     }
+                            //     if (closest) |ent| {
+                            //         ent.r.vel = ent.r.vel.add(fwd.scale(50));
+                            //     }
+                            // }
 
                             if (player.shooter.try_shoot(mouse.right)) {
                                 // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
@@ -1180,47 +1160,18 @@ pub const AppState = struct {
                                 // @memset(bones, .{});
                                 // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
 
-                                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
-                                const t1 = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)).add(right.scale(1.0)), .scale = Vec4.splat3(rng.next()) };
-                                const e1 = try self.cmdbuf.insert(.{
-                                    @as([]const u8, "bullet"),
-                                    t1,
-                                    Components.LastTransform{ .t = t1 },
-                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                    Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
-                                    // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                                    Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                                    Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
-                                });
-                                const t2 = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)).add(right.scale(-1.0)), .scale = Vec4.splat3(rng.next()) };
-                                const e2 = try self.cmdbuf.insert(.{
-                                    @as([]const u8, "bullet"),
-                                    t2,
-                                    Components.LastTransform{ .t = t2 },
-                                    Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                    // Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
-                                    Components.Collider{ .sphere = .{ .radius = 1 } },
-                                    // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                                    Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                                    Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
-                                });
+                                // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
+                                // const t1 = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
                                 // _ = try self.cmdbuf.insert(.{
-                                //     Components.CableAttached{
-                                //         .a = e1,
-                                //         .b = e2,
-                                //         .length = 4,
-                                //         .restitution = 0.5,
-                                //     },
-                                //     Components.TimeDespawn{ .despawn_time = self.time + 4, .state = .alive },
+                                //     @as([]const u8, "bullet"),
+                                //     t1,
+                                //     Components.LastTransform{ .t = t1 },
+                                //     // Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
+                                //     Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+                                //     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                                //     Components.StaticRender{ .mesh = app.handles.mesh.cube },
+                                //     Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
                                 // });
-                                _ = try self.cmdbuf.insert(.{
-                                    Components.RodAttached{
-                                        .a = e1,
-                                        .b = e2,
-                                        .length = 4,
-                                    },
-                                    Components.TimeDespawn{ .despawn_time = self.time + 4, .state = .alive },
-                                });
                                 _ = try self.cmdbuf.insert(.{
                                     Components.TimeDespawn{
                                         .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),
@@ -1239,41 +1190,41 @@ pub const AppState = struct {
             }
         }
 
-        {
-            self.physics.acctime += delta;
-            self.physics.interpolation_acctime += delta;
+        // {
+        //     self.physics.acctime += delta;
+        //     self.physics.interpolation_acctime += delta;
 
-            while (self.physics.acctime >= self.physics.step) {
-                self.physics.acctime -= self.physics.step;
+        //     while (self.physics.acctime >= self.physics.step) {
+        //         self.physics.acctime -= self.physics.step;
 
-                if (self.physics.acctime < self.physics.step) {
-                    self.physics.interpolation_acctime = self.physics.acctime;
-                    var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
-                    while (it.next()) |e| {
-                        e.ft.t = e.t.*;
-                    }
-                }
+        //         if (self.physics.acctime < self.physics.step) {
+        //             self.physics.interpolation_acctime = self.physics.acctime;
+        //             var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform });
+        //             while (it.next()) |e| {
+        //                 e.ft.t = e.t.*;
+        //             }
+        //         }
 
-                {
-                    var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
-                    while (it.next()) |e| {
-                        if (!e.r.flags.pinned) {
-                            const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
-                            e.r.force = e.r.force.add(g);
-                        }
-                    }
-                }
+        //         {
+        //             var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
+        //             while (it.next()) |e| {
+        //                 if (!e.r.flags.pinned) {
+        //                     const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
+        //                     e.r.force = e.r.force.add(g);
+        //                 }
+        //             }
+        //         }
 
-                try app.world.step(self.physics.step);
-            }
+        //         try app.world.step(self.physics.step);
+        //     }
 
-            {
-                var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
-                while (it.next()) |e| {
-                    e.r.force = .{};
-                }
-            }
-        }
+        //     {
+        //         var it = try app.world.ecs.iterator(struct { r: Components.Rigidbody });
+        //         while (it.next()) |e| {
+        //             e.r.force = .{};
+        //         }
+        //     }
+        // }
 
         {
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
