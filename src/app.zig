@@ -45,6 +45,10 @@ const ResourceManager = resources_mod.ResourceManager;
 const InstanceManager = resources_mod.InstanceManager;
 const InstanceAllocator = resources_mod.InstanceAllocator;
 
+const C = struct {
+    usingnamespace Components;
+};
+
 const main = @import("main.zig");
 const allocator = main.allocator;
 
@@ -348,33 +352,36 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var world = try World.init();
     errdefer world.deinit();
+    var t: C.Transform = .{
+        .pos = .{ .y = 5 },
+    };
     const player_id = try world.ecs.insert(.{
         @as([]const u8, "player"),
         math.Camera.init(
             math.Camera.constants.basis.vulkan,
             math.Camera.constants.basis.opengl,
         ),
-        Components.Controller{},
-        Components.Transform{},
-        Components.LastTransform{},
-        Components.Shooter{
+        C.Controller{},
+        t,
+        C.LastTransform{ .t = t },
+        C.Shooter{
             .audio = audio_handles.shot,
             .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
             .hold = true,
         },
-        Components.PlayerId{ .id = 0 },
+        C.PlayerId{ .id = 0 },
     });
 
-    var t: Components.Transform = .{
+    t = .{
         .pos = .{ .y = -3 },
         .scale = Vec4.splat3(50),
     };
     _ = try world.ecs.insert(.{
         @as([]const u8, "floor"),
         t,
-        Components.LastTransform{ .t = t },
-        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.StaticRender{ .mesh = plane_mesh_handle },
+        C.LastTransform{ .t = t },
+        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        C.StaticRender{ .mesh = plane_mesh_handle },
     });
     t = .{
         .pos = .{ .y = 50, .x = 50 },
@@ -384,9 +391,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
-        Components.LastTransform{ .t = t },
-        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.StaticRender{ .mesh = plane_mesh_handle },
+        C.LastTransform{ .t = t },
+        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        C.StaticRender{ .mesh = plane_mesh_handle },
     });
     t = .{
         .pos = .{ .y = 50, .x = -50 },
@@ -396,9 +403,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
-        Components.LastTransform{ .t = t },
-        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.StaticRender{ .mesh = plane_mesh_handle },
+        C.LastTransform{ .t = t },
+        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        C.StaticRender{ .mesh = plane_mesh_handle },
     });
     t = .{
         .pos = .{ .y = 50, .z = 50 },
@@ -408,9 +415,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
-        Components.LastTransform{ .t = t },
-        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.StaticRender{ .mesh = plane_mesh_handle },
+        C.LastTransform{ .t = t },
+        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        C.StaticRender{ .mesh = plane_mesh_handle },
     });
     t = .{
         .pos = .{ .y = 50, .z = -50 },
@@ -420,9 +427,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
-        Components.LastTransform{ .t = t },
-        Components.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
-        Components.StaticRender{ .mesh = plane_mesh_handle },
+        C.LastTransform{ .t = t },
+        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
+        C.StaticRender{ .mesh = plane_mesh_handle },
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -442,32 +449,32 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     if (i > 2) break;
     //     _ = try world.ecs.insert(.{
     //         @as([]const u8, "persistent balls"),
-    //         Components.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
-    //         Components.Rigidbody{},
-    //         Components.Collider{ .sphere = .{ .radius = 1 } },
-    //         Components.AnimatedRender{ .model = sphere_model_handle },
+    //         C.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
+    //         C.Rigidbody{},
+    //         C.Collider{ .sphere = .{ .radius = 1 } },
+    //         C.AnimatedRender{ .model = sphere_model_handle },
     //     });
     // }
 
-    const t1 = Components.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
+    const t1 = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
     _ = try world.ecs.insert(.{
         @as([]const u8, "ball"),
         t1,
-        Components.LastTransform{ .t = t1 },
-        Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
-        Components.StaticRender{ .mesh = cube_mesh_handle },
+        C.LastTransform{ .t = t1 },
+        C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+        C.StaticRender{ .mesh = cube_mesh_handle },
     });
 
-    const t2 = Components.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
+    const t2 = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
     _ = try world.ecs.insert(.{
         @as([]const u8, "ball"),
         t2,
-        Components.LastTransform{ .t = t2 },
-        Components.Collider{ .sphere = .{ .radius = 1 } },
-        Components.StaticRender{ .mesh = cube_mesh_handle },
+        C.LastTransform{ .t = t2 },
+        C.Collider{ .sphere = .{ .radius = 1 } },
+        C.StaticRender{ .mesh = cube_mesh_handle },
     });
 
-    const player = try world.ecs.get(player_id, struct { transform: Components.Transform, camera: math.Camera, controller: Components.Controller });
+    const player = try world.ecs.get(player_id, struct { transform: C.Transform, camera: math.Camera, controller: C.Controller });
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
     errdefer uniforms.deinit(device);
 
@@ -860,11 +867,11 @@ pub const AppState = struct {
     fps_cap: u32 = 60,
 
     physics: struct {
-        step: f32 = 1.0 / 30.0,
+        step: f32 = 1.0 / 60.0,
         acctime: f32 = 0,
         interpolation_acctime: f32 = 0,
 
-        fn interpolated(self: *const @This(), lt: *const Components.LastTransform, t: *const Components.Transform) Components.Transform {
+        fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.Transform) C.Transform {
             return lt.lerp(t, self.interpolation_acctime / self.step);
         }
     } = .{},
@@ -910,7 +917,7 @@ pub const AppState = struct {
 
         var pexp = try app.world.ecs.explorer(app.handles.player);
         const camera = pexp.get_component(math.Camera).?;
-        const pid = pexp.get_component(Components.PlayerId).?;
+        const pid = pexp.get_component(C.PlayerId).?;
 
         {
             var mouse = &input.mouse;
@@ -984,7 +991,7 @@ pub const AppState = struct {
                             try app.socket.send(.{ .setid = .{ .id = self.client_count } }, e.addr);
                         },
                         .spawn_player => {
-                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, t: Components.Transform });
+                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.Transform });
                             while (it.next()) |p| {
                                 // notify new player about all other players.
                                 try app.socket.send(.{ .spawn_player = .{ .id = p.p.id, .pos = .{
@@ -1001,7 +1008,7 @@ pub const AppState = struct {
                         },
                         .despawn_player => {
                             // tell everyone this player left
-                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId });
+                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                             while (it.next()) |p| {
                                 if (p.p.addr) |addr| {
                                     try app.socket.send(e.event, addr);
@@ -1010,7 +1017,7 @@ pub const AppState = struct {
                         },
                         .input => |pinput| {
                             // send this player's inputs to everyone
-                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId });
+                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                             while (it.next()) |p| {
                                 if (p.p.id == pinput.id) continue;
                                 if (p.p.addr) |addr| {
@@ -1020,7 +1027,7 @@ pub const AppState = struct {
                         },
                         .quit => {
                             // tell everyone to quit themselves
-                            var it = try app.world.ecs.iterator(struct { p: Components.PlayerId });
+                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                             while (it.next()) |p| {
                                 if (p.p.addr) |addr| {
                                     try app.socket.send(e.event, addr);
@@ -1036,7 +1043,7 @@ pub const AppState = struct {
 
                 switch (e.event) {
                     .setid => |id| {
-                        const p = try app.world.ecs.get(app.handles.player, struct { p: Components.PlayerId, t: Components.Transform });
+                        const p = try app.world.ecs.get(app.handles.player, struct { p: C.PlayerId, t: C.Transform });
                         p.p.id = id.id;
                         try app.socket.send(.{ .spawn_player = .{ .id = id.id, .pos = .{
                             .x = p.t.pos.x,
@@ -1046,21 +1053,21 @@ pub const AppState = struct {
                     },
                     .spawn_player => |id| {
                         _ = try self.cmdbuf.insert(.{
-                            Components.Transform{ .pos = .{
+                            C.Transform{ .pos = .{
                                 .x = id.pos.x,
                                 .y = id.pos.y,
                                 .z = id.pos.z,
                             } },
-                            Components.LastTransform{ .t = .{ .pos = .{
+                            C.LastTransform{ .t = .{ .pos = .{
                                 .x = id.pos.x,
                                 .y = id.pos.y,
                                 .z = id.pos.z,
                             } } },
-                            Components.Controller{},
-                            Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
-                            Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                            Components.PlayerId{ .id = id.id, .addr = e.addr },
-                            Components.Shooter{
+                            C.Controller{},
+                            C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+                            C.StaticRender{ .mesh = app.handles.mesh.cube },
+                            C.PlayerId{ .id = id.id, .addr = e.addr },
+                            C.Shooter{
                                 .audio = app.handles.audio.shot,
                                 .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
                                 .hold = true,
@@ -1068,7 +1075,7 @@ pub const AppState = struct {
                         });
                     },
                     .despawn_player => |id| {
-                        var it = try app.world.ecs.iterator(struct { p: Components.PlayerId, entity: Entity });
+                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId, entity: Entity });
                         while (it.next()) |p| {
                             if (p.p.id == id.id) {
                                 try self.cmdbuf.delete(p.entity.*);
@@ -1077,11 +1084,12 @@ pub const AppState = struct {
                     },
                     .input => |pinput| {
                         var pit = try app.world.ecs.iterator(struct {
-                            pid: Components.PlayerId,
-                            controller: Components.Controller,
-                            t: Components.Transform,
-                            lt: Components.LastTransform,
-                            shooter: Components.Shooter,
+                            pid: C.PlayerId,
+                            controller: C.Controller,
+                            t: C.Transform,
+                            lt: C.LastTransform,
+                            shooter: C.Shooter,
+                            bid: C.BodyId,
                         });
 
                         while (pit.next()) |player| {
@@ -1135,7 +1143,7 @@ pub const AppState = struct {
                             }
 
                             // {
-                            //     const T = struct { t: Components.Transform, c: Components.Collider };
+                            //     const T = struct { t: C.Transform, c: C.Collider };
                             //     var t_min: ?f32 = null;
                             //     var closest: ?ecs_mod.Type.pointer(T) = null;
                             //     var it = try app.world.ecs.iterator(T);
@@ -1160,29 +1168,29 @@ pub const AppState = struct {
                             if (player.shooter.try_shoot(mouse.right)) {
                                 // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
                                 // errdefer allocator.free(bones);
-                                // const indices = try allocator.alloc(Components.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                                // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
                                 // errdefer allocator.free(indices);
                                 // @memset(bones, .{});
-                                // @memset(indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+                                // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
 
                                 // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
-                                // const t1 = Components.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
+                                // const t1 = C.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
                                 // _ = try self.cmdbuf.insert(.{
                                 //     @as([]const u8, "bullet"),
                                 //     t1,
-                                //     Components.LastTransform{ .t = t1 },
-                                //     // Components.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                //     Components.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
-                                //     // Components.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                                //     Components.StaticRender{ .mesh = app.handles.mesh.cube },
-                                //     Components.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
+                                //     C.LastTransform{ .t = t1 },
+                                //     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
+                                //     C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+                                //     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                                //     C.StaticRender{ .mesh = app.handles.mesh.cube },
+                                //     C.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
                                 // });
                                 _ = try self.cmdbuf.insert(.{
-                                    Components.TimeDespawn{
+                                    C.TimeDespawn{
                                         .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),
                                         .state = .alive,
                                     },
-                                    Components.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
+                                    C.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
                                 });
                             }
                         }
@@ -1232,14 +1240,14 @@ pub const AppState = struct {
         // }
 
         {
-            var it = try app.world.ecs.iterator(struct { id: Entity, ds: Components.TimeDespawn });
+            var it = try app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });
             while (it.next()) |e| {
                 switch (e.ds.state) {
                     .alive => {
                         if (e.ds.despawn_time < self.time) {
                             e.ds.state = .dying;
 
-                            try self.cmdbuf.add_component(e.id.*, Components.Sound{
+                            try self.cmdbuf.add_component(e.id.*, C.Sound{
                                 .start_frame = app.audio.ctx.ctx.frame_count,
                                 .audio = if (self.rng.random().boolean()) app.handles.audio.scream1 else app.handles.audio.scream2,
                                 .volume = 2.0,
@@ -1248,7 +1256,7 @@ pub const AppState = struct {
                     },
                     .dying => {
                         var exp = it.current_entity_explorer();
-                        if (exp.get_component(Components.Sound)) |s| {
+                        if (exp.get_component(C.Sound)) |s| {
                             if (s.start_frame + app.cpu_resources.audio.items[s.audio.index].data.len <= app.audio.ctx.ctx.frame_count) {
                                 e.ds.state = .dead;
                             }
@@ -1265,7 +1273,7 @@ pub const AppState = struct {
 
         {
             const animate = struct {
-                fn animate(ar: *Components.AnimatedRender, model: *assets_mod.Model, time: f32) bool {
+                fn animate(ar: *C.AnimatedRender, model: *assets_mod.Model, time: f32) bool {
                     const animation = model.animations[0];
                     const bones = model.bones;
                     const indices = ar.indices;
@@ -1324,7 +1332,7 @@ pub const AppState = struct {
                     return true;
                 }
 
-                fn apply(ar: *Components.AnimatedRender, ids: []const assets_mod.BoneId, bones: []assets_mod.Bone, t: math.Mat4x4) void {
+                fn apply(ar: *C.AnimatedRender, ids: []const assets_mod.BoneId, bones: []assets_mod.Bone, t: math.Mat4x4) void {
                     for (ids) |bone_id| {
                         ar.bones[bone_id] = t.mul_mat(ar.bones[bone_id]);
                         apply(ar, bones[bone_id].children, bones, ar.bones[bone_id]);
@@ -1332,15 +1340,15 @@ pub const AppState = struct {
                 }
             }.animate;
 
-            var it = try app.world.ecs.iterator(struct { m: Components.AnimatedRender });
+            var it = try app.world.ecs.iterator(struct { m: C.AnimatedRender });
             while (it.next()) |e| {
                 const model = &app.cpu_resources.models.items[app.handles.model.sphere.index];
-                const a: *Components.AnimatedRender = e.m;
+                const a: *C.AnimatedRender = e.m;
                 a.time += delta;
 
                 if (!animate(a, model, a.time)) {
                     a.time = 0;
-                    @memset(a.indices, std.mem.zeroes(Components.AnimatedRender.AnimationIndices));
+                    @memset(a.indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
                 }
             }
         }
@@ -1352,7 +1360,7 @@ pub const AppState = struct {
             };
 
             {
-                var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform, m: Components.StaticRender });
+                var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform, m: C.StaticRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.mesh);
                     if (instance) |instance_index| {
@@ -1369,7 +1377,7 @@ pub const AppState = struct {
             }
 
             {
-                var it = try app.world.ecs.iterator(struct { t: Components.Transform, ft: Components.LastTransform, m: Components.AnimatedRender });
+                var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform, m: C.AnimatedRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.model.mesh);
                     const model = &app.cpu_resources.models.items[e.m.model.index];
@@ -1403,9 +1411,9 @@ pub const AppState = struct {
 
             playing.samples_buf2.clearRetainingCapacity();
 
-            const player = try app.world.ecs.get(app.handles.player, struct { t: Components.Transform });
+            const player = try app.world.ecs.get(app.handles.player, struct { t: C.Transform });
             {
-                var it = try app.world.ecs.iterator(struct { sound: Components.Sound, t: Components.Transform });
+                var it = try app.world.ecs.iterator(struct { sound: C.Sound, t: C.Transform });
                 while (it.next()) |e| {
                     try playing.samples_buf2.append(.{
                         .handle = e.sound.audio,
@@ -1416,7 +1424,7 @@ pub const AppState = struct {
                 }
             }
             {
-                var it = try app.world.ecs.iterator(struct { sound: Components.StaticSound });
+                var it = try app.world.ecs.iterator(struct { sound: C.StaticSound });
                 while (it.next()) |e| {
                     try playing.samples_buf2.append(.{
                         .handle = e.sound.audio,
@@ -1429,7 +1437,7 @@ pub const AppState = struct {
         }
 
         {
-            const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: Components.Controller, lt: Components.LastTransform, transform: Components.Transform });
+            const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: C.Controller, lt: C.LastTransform, transform: C.Transform });
             app.uniforms.uniform_buffer = try self.uniforms(window, &self.physics.interpolated(player.lt, player.transform), player.camera, player.controller);
         }
 
@@ -1439,9 +1447,9 @@ pub const AppState = struct {
     fn uniforms(
         self: *@This(),
         window: *Engine.Window,
-        transform: *const Components.Transform,
+        transform: *const C.Transform,
         camera: *const math.Camera,
-        controller: *const Components.Controller,
+        controller: *const C.Controller,
     ) ![]u8 {
         const rot = camera.rot_quat(controller.pitch, controller.yaw);
 
@@ -1523,7 +1531,7 @@ pub const GuiState = struct {
     pub fn tick(self: *@This(), app: *App, state: *AppState, lap: u64) !void {
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        const player = try app.world.ecs.get(app.handles.player, struct { controller: Components.Controller });
+        const player = try app.world.ecs.get(app.handles.player, struct { controller: C.Controller });
 
         self.frame_times_i += 1;
         self.frame_times_i = @rem(self.frame_times_i, self.frame_times.len);
@@ -1540,7 +1548,7 @@ pub const GuiState = struct {
         }
     }
 
-    fn editState(self: *@This(), state: *AppState, controller: *Components.Controller) void {
+    fn editState(self: *@This(), state: *AppState, controller: *C.Controller) void {
         _ = self;
 
         var reset = false;
