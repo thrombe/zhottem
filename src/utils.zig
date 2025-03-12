@@ -57,6 +57,7 @@ pub const TypeId = extern struct {
             switch (Ti) {
                 .@"struct" => |t| {
                     for (t.fields) |field| {
+                        hasher.update(field.name);
                         hasher.update(std.mem.asBytes(&@as(u32, field.alignment)));
                         hasher.update(std.mem.asBytes(&TypeId._from_type(field.type)));
                     }

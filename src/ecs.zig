@@ -384,7 +384,7 @@ pub const EntityComponentStore = struct {
         }
 
         {
-            const compi = typ.index(self.entityid_component_id).?;
+            const compi = archetype.typ.index(self.entityid_component_id).?;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
             try self.entities.put(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
