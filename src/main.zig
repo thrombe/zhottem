@@ -90,7 +90,9 @@ const HotReloader = struct {
     }
 
     fn deinit(self: *@This()) void {
-        defer self.dylib.close();
+        // NOTE: closing the dylib makes the app crash at __run_exit_handlers when exiting
+        // defer self.dylib.close();
+
         defer _ = self.vtable.deinit(self.app);
         defer self.fs.deinit();
         defer allocator.free(self.hot_cache);
