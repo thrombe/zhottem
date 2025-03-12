@@ -24,17 +24,106 @@ pub const Zphysics = struct {
     });
 
     phy: *anyopaque,
+    alloc: *Alloc,
 
     pub const BodyId = struct { bid: u32 };
 
+    const Alloc = struct {
+        var state: *@This() = undefined;
+
+        mutex: std.Thread.Mutex = .{},
+        allocations: Allocations,
+
+        const Allocations = std.AutoHashMap(usize, struct { size: u32, alignment: u32 });
+
+        const alloc_alignment = 16;
+
+        fn init() !*@This() {
+            const self = try allocator.create(@This());
+            errdefer allocator.destroy(self);
+            state = self;
+
+            self.mutex = .{};
+            self.allocations = Allocations.init(allocator.*);
+            return self;
+        }
+
+        fn deinit(self: *@This()) void {
+            {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                self.allocations.deinit();
+            }
+            allocator.destroy(self);
+        }
+
+        fn allocate(size: usize) callconv(.C) ?*anyopaque {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+
+            const mem = allocator.allocWithOptions(u8, size, alloc_alignment, null) catch @panic("OOM");
+            state.allocations.put(@intFromPtr(mem.ptr), .{ .size = @intCast(mem.len), .alignment = alloc_alignment }) catch @panic("OOM");
+            return mem.ptr;
+        }
+
+        fn realloc(maybe_ptr: ?*anyopaque, reported_old_size: usize, new_size: usize) callconv(.C) ?*anyopaque {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+
+            const old_size = if (maybe_ptr != null) reported_old_size else 0;
+
+            const old_mem = if (old_size > 0)
+                @as([*]align(alloc_alignment) u8, @ptrCast(@alignCast(maybe_ptr)))[0..old_size]
+            else
+                @as([*]align(alloc_alignment) u8, undefined)[0..0];
+
+            const mem = allocator.realloc(old_mem, new_size) catch @panic("OOM");
+            _ = state.allocations.remove(@intFromPtr(mem.ptr));
+            state.allocations.put(@intFromPtr(mem.ptr), .{ .size = @intCast(mem.len), .alignment = alloc_alignment }) catch @panic("OOM");
+            return mem.ptr;
+        }
+
+        fn aligned_alloc(size: usize, alignment: usize) callconv(.C) ?*anyopaque {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+
+            const mem = allocator.rawAlloc(
+                size,
+                std.mem.Alignment.fromByteUnits(alignment),
+                @returnAddress(),
+            ) orelse @panic("OOM");
+            state.allocations.put(@intFromPtr(mem), .{ .size = @intCast(size), .alignment = @intCast(alignment) }) catch @panic("OOM");
+            return mem;
+        }
+
+        fn free(maybe_ptr: ?*anyopaque) callconv(.C) void {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+
+            const ptr = maybe_ptr orelse return;
+            const allocation = state.allocations.fetchRemove(@intFromPtr(ptr)) orelse return;
+            const size = allocation.value.size;
+            const mem = @as([*]u8, @ptrCast(@alignCast(ptr)))[0..size];
+            allocator.rawFree(mem, std.mem.Alignment.fromByteUnits(allocation.value.alignment), @returnAddress());
+        }
+    };
+
     pub fn init() !@This() {
         return .{
-            .phy = c.physics_create() orelse return error.CouldNotInitializeJolt,
+            .alloc = try Alloc.init(),
+            .phy = c.physics_create(.{
+                .allocfn = &Alloc.allocate,
+                .reallocfn = &Alloc.realloc,
+                .freefn = &Alloc.free,
+                .aligned_allocfn = &Alloc.aligned_alloc,
+                .aligned_freefn = &Alloc.free,
+            }) orelse return error.CouldNotInitializeJolt,
         };
     }
 
     pub fn deinit(self: *@This()) void {
         c.physics_delete(self.phy);
+        self.alloc.deinit();
     }
 
     pub fn start(self: *@This()) !void {

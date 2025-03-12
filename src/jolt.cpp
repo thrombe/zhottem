@@ -4,8 +4,10 @@
 
 #include <Jolt/Jolt.h>
 
+#include "Jolt/Core/Memory.h"
 #include "Jolt/Physics/Body/MotionQuality.h"
 #include "Jolt/Physics/Body/MotionType.h"
+#include "Jolt/Physics/Collision/Shape/Shape.h"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
@@ -146,6 +148,10 @@ public:
   virtual void OnBodyDeactivated(const BodyID &inBodyID, uint64 inBodyUserData) override {}
 };
 
+extern "C" {
+#include "jolt.h"
+}
+
 class Physics {
 public:
   const uint cMaxBodies = 65536;
@@ -153,8 +159,11 @@ public:
   const uint cMaxBodyPairs = 65536;
   const uint cMaxContactConstraints = 10240;
 
-  TempAllocatorImpl *temp_allocator = NULL;
-  JobSystemThreadPool *job_system = NULL;
+  Factory* factory = nullptr;
+  ZAllocator alloc;
+
+  TempAllocatorImpl *temp_allocator = nullptr;
+  JobSystemThreadPool *job_system = nullptr;
   PhysicsSystem physics_system;
 
   BPLayerInterfaceImpl broad_phase_layer_interface;
@@ -163,14 +172,20 @@ public:
   MyBodyActivationListener body_activation_listener;
   MyContactListener contact_listener;
 
-  static Physics *create_new() {
-    RegisterDefaultAllocator(); // see Memory.h
+  static Physics *create_new(ZAllocator alloc) {
+    Allocate = alloc.allocfn;
+    Reallocate = alloc.reallocfn;
+    Free = alloc.freefn;
+    AlignedAllocate = alloc.aligned_allocfn;
+    AlignedFree = alloc.aligned_freefn;
+
     Trace = TraceImpl;
     JPH_IF_ENABLE_ASSERTS(AssertFailed = AssertFailedImpl;)
     Factory::sInstance = new Factory(); // ser/deser
-    RegisterTypes();
 
+    RegisterTypes();
     Physics *p = new Physics();
+    p->factory = Factory::sInstance;
     p->temp_allocator = new TempAllocatorImpl(10 * 1024 * 1024);
     p->job_system = new JobSystemThreadPool(cMaxPhysicsJobs, cMaxPhysicsBarriers, thread::hardware_concurrency() - 1);
     return p;
@@ -182,9 +197,9 @@ public:
     Factory::sInstance = nullptr;
 
     delete temp_allocator;
-    temp_allocator = NULL;
+    temp_allocator = nullptr;
     delete job_system;
-    job_system = NULL;
+    job_system = nullptr;
 
     delete this;
   }
@@ -202,10 +217,6 @@ public:
 
   void update(float sim_time, int steps) { physics_system.Update(sim_time, steps, temp_allocator, job_system); }
 };
-
-extern "C" {
-#include "jolt.h"
-}
 
 Vec3 vec3_cast(vec3 vec) { return Vec3(vec.x, vec.y, vec.z); }
 
@@ -238,10 +249,10 @@ vec4 Vec4_cast(Quat vec) {
 }
 
 extern "C" {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Waccess-private"
 
-ZPhysics physics_create() { return Physics::create_new(); }
+ZPhysics physics_create(ZAllocator alloc) {
+  return Physics::create_new(alloc);
+}
 
 void physics_delete(ZPhysics p) {
   auto physics = (Physics *)p;
@@ -328,7 +339,7 @@ void physics_add_force(ZPhysics p, u32 _bid, vec3 force) {
 }
 
 void testfn() {
-  auto p = physics_create();
+  Physics* p = nullptr;
   auto physics = (Physics *)p;
 
   physics->start();
@@ -374,5 +385,4 @@ void testfn() {
   physics_delete(p);
 }
 
-#pragma clang diagnostic pop
 }

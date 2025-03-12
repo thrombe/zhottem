@@ -1,3 +1,4 @@
+#include<stdlib.h>
 
 typedef unsigned int u32;
 typedef int i32;
@@ -60,7 +61,21 @@ typedef struct {
 
 typedef void *ZPhysics;
 
-ZPhysics physics_create();
+typedef void *(*Zallocate_function)(size_t in_size);
+typedef void *(*Zreallocate_function)(void *in_block, size_t old_size, size_t new_size);
+typedef void (*Zfree_function)(void *in_block);
+typedef void *(*Zaligned_allocate_function)(size_t in_size, size_t in_alignment);
+typedef void (*Zaligned_free_function)(void *in_block);
+
+typedef struct {
+  Zallocate_function allocfn;
+  Zreallocate_function reallocfn;
+  Zfree_function freefn;
+  Zaligned_allocate_function aligned_allocfn;
+  Zaligned_free_function aligned_freefn;
+} ZAllocator;
+
+ZPhysics physics_create(ZAllocator alloc);
 void physics_start(ZPhysics p);
 void physics_delete(ZPhysics p);
 void physics_optimize(ZPhysics p);
