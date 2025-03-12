@@ -212,6 +212,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.PlayerId);
         _ = try self.ecs.register(Components.StaticRender);
         _ = try self.ecs.register(Components.AnimatedRender);
+        _ = try self.ecs.register(Zphysics.BodyId);
 
         return self;
     }
