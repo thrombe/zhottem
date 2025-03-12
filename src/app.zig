@@ -1221,7 +1221,8 @@ pub const AppState = struct {
             self.physics.acctime += delta;
             self.physics.interpolation_acctime += delta;
 
-            const steps = @divFloor(self.physics.acctime, self.physics.step);
+            var steps = @divFloor(self.physics.acctime, self.physics.step);
+            steps = @min(steps, 5); // no more than 5 steps per frame
             if (steps >= 1) {
                 self.physics.acctime -= self.physics.step * steps;
 
