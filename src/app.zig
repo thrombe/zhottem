@@ -594,6 +594,17 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.texture.deinit(device);
 }
 
+pub fn pre_reload(self: *@This()) !void {
+    try self.recorder.pre_reload();
+    try self.audio.pre_reload();
+}
+
+pub fn post_reload(self: *@This()) !void {
+    self.world.phy.post_reload();
+    try self.recorder.post_reload();
+    try self.audio.post_reload();
+}
+
 pub fn present(
     self: *@This(),
     dynamic_state: *RendererState,

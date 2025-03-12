@@ -50,6 +50,14 @@ pub fn deinit(self: *@This()) void {
     self.window.deinit();
 }
 
+pub fn pre_reload(self: *@This()) void {
+    self.window.pre_reload();
+}
+
+pub fn post_reload(self: *@This()) void {
+    self.window.post_reload();
+}
+
 pub const Audio = struct {
     pub fn init() !@This() {
         if (c.Pa_Initialize() != c.paNoError) {
@@ -91,6 +99,7 @@ pub const Audio = struct {
                 args: Args,
                 stream: *c.PaStream,
                 paused: bool = true,
+                pre_reload_paused: bool = false,
             };
 
             ctx: *CallbackContext,
@@ -187,6 +196,46 @@ pub const Audio = struct {
                 }
 
                 allocator.destroy(self.ctx);
+            }
+
+            pub fn pre_reload(self: *@This()) !void {
+                if (!self.ctx.paused) {
+                    try self.stop();
+                } else {
+                    self.ctx.pre_reload_paused = true;
+                }
+
+                if (c.Pa_CloseStream(self.ctx.stream) != c.paNoError) {
+                    return error.CouldNotCloseStream;
+                }
+            }
+
+            pub fn post_reload(self: *@This()) !void {
+                if (c.Pa_OpenDefaultStream(
+                    @ptrCast(&self.ctx.stream),
+                    switch (typ) {
+                        .output => 0,
+                        .input => 1,
+                    },
+                    switch (typ) {
+                        .output => 2,
+                        .input => 0,
+                    },
+                    c.paFloat32,
+                    self.ctx.args.sample_rate,
+                    self.ctx.args.frames_per_buffer,
+                    @ptrCast(&@This().callback),
+                    self.ctx,
+                ) != c.paNoError) {
+                    return error.CouldNotOpenStream;
+                }
+                errdefer _ = c.Pa_CloseStream(self.ctx.stream);
+
+                if (!self.ctx.pre_reload_paused) {
+                    try self.start();
+                }
+
+                self.ctx.pre_reload_paused = false;
             }
         };
     }
@@ -495,6 +544,26 @@ pub const Window = struct {
         return self;
     }
 
+    pub fn pre_reload(self: *@This()) void {
+        _ = c.glfwSetErrorCallback(null);
+
+        _ = c.glfwSetFramebufferSizeCallback(self.handle, null);
+        _ = c.glfwSetMouseButtonCallback(self.handle, null);
+        _ = c.glfwSetKeyCallback(self.handle, null);
+        _ = c.glfwSetCursorPosCallback(self.handle, null);
+    }
+
+    pub fn post_reload(self: *@This()) void {
+        Callbacks.global_window = self;
+
+        _ = c.glfwSetErrorCallback(&Callbacks.err);
+
+        _ = c.glfwSetFramebufferSizeCallback(self.handle, &Callbacks.resize);
+        _ = c.glfwSetMouseButtonCallback(self.handle, &Callbacks.mouse);
+        _ = c.glfwSetKeyCallback(self.handle, &Callbacks.key);
+        _ = c.glfwSetCursorPosCallback(self.handle, &Callbacks.cursor_pos);
+    }
+
     pub fn tick(self: *@This()) void {
         var w: c_int = undefined;
         var h: c_int = undefined;
@@ -584,11 +653,10 @@ pub const VulkanContext = struct {
             vk.extensions.khr_surface,
             vk.extensions.khr_swapchain,
             vk.extensions.khr_dynamic_rendering,
-
-            // EH: ?what are these
-            // vk.extensions.ext_validation_features,
-            // vk.extensions.ext_validation_flags,
-            // vk.extensions.ext_validation_cache,
+                // EH: ?what are these
+                // vk.extensions.ext_validation_features,
+                // vk.extensions.ext_validation_flags,
+                // vk.extensions.ext_validation_cache,
         };
 
         pub const BaseDispatch = vk.BaseWrapper(apis);

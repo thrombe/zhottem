@@ -76,6 +76,7 @@ typedef struct {
 } ZAllocator;
 
 ZPhysics physics_create(ZAllocator alloc);
+void physics_post_reload(ZPhysics p, ZAllocator alloc);
 void physics_start(ZPhysics p);
 void physics_delete(ZPhysics p);
 void physics_optimize(ZPhysics p);

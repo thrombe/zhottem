@@ -19,11 +19,15 @@ const HotVtable = struct {
     const Init = *const fn () callconv(.c) ?*anyopaque;
     const Deinit = *const fn (app: *anyopaque) callconv(.c) HotAction;
     const Tick = *const fn (app: *anyopaque) callconv(.c) HotAction;
+    const PreReload = *const fn (app: *anyopaque) callconv(.c) HotAction;
+    const PostReload = *const fn (app: *anyopaque) callconv(.c) HotAction;
 
     set_alloc: SetAlloc,
     init: Init,
     deinit: Deinit,
     tick: Tick,
+    pre_reload: PreReload,
+    post_reload: PostReload,
 
     fn from_dyn(dyn: *std.DynLib) !@This() {
         return .{
@@ -31,6 +35,8 @@ const HotVtable = struct {
             .init = dyn.lookup(Init, "hot_init") orelse return error.FuncNotFound,
             .deinit = dyn.lookup(Deinit, "hot_deinit") orelse return error.FuncNotFound,
             .tick = dyn.lookup(Tick, "hot_tick") orelse return error.FuncNotFound,
+            .pre_reload = dyn.lookup(PreReload, "hot_pre_reload") orelse return error.FuncNotFound,
+            .post_reload = dyn.lookup(PostReload, "hot_post_reload") orelse return error.FuncNotFound,
         };
     }
 };
@@ -109,6 +115,12 @@ const HotReloader = struct {
                     const cwd = std.fs.cwd();
                     try cwd.copyFile(self.libpath, cwd, new_path, .{});
 
+                    switch (self.vtable.pre_reload(self.app)) {
+                        .quit => return false,
+                        .nothing => {},
+                        .errored => return error.Errored,
+                    }
+
                     // _ = self.vtable.deinit(self.app);
                     self.dylib.close();
                     var dyn = try std.DynLib.open(new_path);
@@ -122,7 +134,11 @@ const HotReloader = struct {
                     self.dylib = dyn;
                     self.vtable = vtable;
                     self.vtable.set_alloc(@ptrCast(allocator));
-                    // self.app = self.vtable.init() orelse unreachable;
+                    switch (self.vtable.post_reload(self.app)) {
+                        .quit => return false,
+                        .nothing => {},
+                        .errored => return error.Errored,
+                    }
                 }
             }
         }
@@ -197,6 +213,42 @@ export fn hot_tick(_app: *anyopaque) callconv(.c) HotAction {
             };
 
             return if (res) .nothing else .quit;
+        },
+    }
+}
+
+export fn hot_pre_reload(_app: *anyopaque) callconv(.c) HotAction {
+    switch (options.mode) {
+        .exe, .hotexe => {
+            return .nothing;
+        },
+        .hotlib => {
+            const app: *HotApp = @ptrCast(@alignCast(_app));
+
+            app.pre_reload() catch |e| {
+                utils_mod.dump_error(e);
+                return .errored;
+            };
+
+            return .nothing;
+        },
+    }
+}
+
+export fn hot_post_reload(_app: *anyopaque) callconv(.c) HotAction {
+    switch (options.mode) {
+        .exe, .hotexe => {
+            return .nothing;
+        },
+        .hotlib => {
+            const app: *HotApp = @ptrCast(@alignCast(_app));
+
+            app.post_reload() catch |e| {
+                utils_mod.dump_error(e);
+                return .errored;
+            };
+
+            return .nothing;
         },
     }
 }
@@ -292,6 +344,16 @@ const HotApp = struct {
 
         try self.renderer_state.swapchain.waitForAllFences(&self.engine.graphics.device);
         try self.engine.graphics.device.deviceWaitIdle();
+    }
+
+    fn pre_reload(self: *@This()) !void {
+        self.engine.pre_reload();
+        try self.app.pre_reload();
+    }
+
+    fn post_reload(self: *@This()) !void {
+        self.engine.post_reload();
+        try self.app.post_reload();
     }
 
     fn tick(self: *@This()) !bool {

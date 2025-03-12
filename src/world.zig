@@ -57,6 +57,10 @@ pub const Zphysics = struct {
             allocator.destroy(self);
         }
 
+        fn reload(self: *@This()) void {
+            state = self;
+        }
+
         fn allocate(size: usize) callconv(.C) ?*anyopaque {
             state.mutex.lock();
             defer state.mutex.unlock();
@@ -124,6 +128,17 @@ pub const Zphysics = struct {
     pub fn deinit(self: *@This()) void {
         c.physics_delete(self.phy);
         self.alloc.deinit();
+    }
+
+    pub fn post_reload(self: *@This()) void {
+        self.alloc.reload();
+        c.physics_post_reload(self.phy, .{
+            .allocfn = &Alloc.allocate,
+            .reallocfn = &Alloc.realloc,
+            .freefn = &Alloc.free,
+            .aligned_allocfn = &Alloc.aligned_alloc,
+            .aligned_freefn = &Alloc.free,
+        });
     }
 
     pub fn start(self: *@This()) !void {

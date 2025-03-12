@@ -204,6 +204,19 @@ public:
     delete this;
   }
 
+  void post_reload(ZAllocator alloc) {
+    this->alloc = alloc;
+    Allocate = alloc.allocfn;
+    Reallocate = alloc.reallocfn;
+    Free = alloc.freefn;
+    AlignedAllocate = alloc.aligned_allocfn;
+    AlignedFree = alloc.aligned_freefn;
+
+    Trace = TraceImpl;
+    JPH_IF_ENABLE_ASSERTS(AssertFailed = AssertFailedImpl;)
+    Factory::sInstance = factory;
+  }
+
   void start() {
     physics_system.Init(cMaxBodies, cNumBodyMutexes, cMaxBodyPairs, cMaxContactConstraints, broad_phase_layer_interface,
                         object_vs_broadphase_layer_filter, object_vs_object_layer_filter);
@@ -252,6 +265,11 @@ extern "C" {
 
 ZPhysics physics_create(ZAllocator alloc) {
   return Physics::create_new(alloc);
+}
+
+void physics_post_reload(ZPhysics p, ZAllocator alloc) {
+  auto physics = (Physics *)p;
+  physics->post_reload(alloc);
 }
 
 void physics_delete(ZPhysics p) {
