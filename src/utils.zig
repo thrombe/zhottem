@@ -36,9 +36,16 @@ pub const TypeId = extern struct {
     }
 
     pub inline fn from_type(comptime T: type) @This() {
-        // const t = from_name(T);
-        const t = _from_type(T);
-        return t;
+        comptime {
+            var hasher = std.hash.Wyhash.init(0);
+
+            const name_hash = from_name(T);
+            hasher.update(std.mem.asBytes(&name_hash.id));
+            const type_hash = _from_type(T);
+            hasher.update(std.mem.asBytes(&type_hash.id));
+
+            return .{ .id = hasher.final() };
+        }
     }
 
     pub inline fn _from_type(comptime T: type) @This() {
