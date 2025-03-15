@@ -373,76 +373,101 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
         C.PlayerId{ .id = 0 },
         world.phy.add_body(.{
-            .shape_type = world_mod.Zphysics.c.SHAPE_SPHERE,
-            .shape = .{ .sphere = .{ .radius = 1 } },
-            .pos = .{ .x = t.pos.x, .y = t.pos.y, .z = t.pos.z },
-            .motion_type = world_mod.Zphysics.c.MOTION_DYNAMIC,
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .pos = t.pos.xyz(),
+            .rotation = t.rotation,
+            .motion_type = .dynamic,
+            .friction = 0.4,
         }),
     });
 
     t = .{
         .pos = .{ .y = -3 },
-        .scale = Vec4.splat3(50),
+        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try world.ecs.insert(.{
         @as([]const u8, "floor"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         C.StaticRender{ .mesh = plane_mesh_handle },
         world.phy.add_body(.{
-            .shape_type = world_mod.Zphysics.c.SHAPE_BOX,
-            .shape = .{ .box = .{ .size = .{ .x = 50, .z = 50, .y = 1 } } },
-            .motion_type = world_mod.Zphysics.c.MOTION_STATIC,
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.rotation,
         }),
     });
     t = .{
         .pos = .{ .y = 50, .x = 50 },
         .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
-        .scale = Vec4.splat3(50),
+        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         C.StaticRender{ .mesh = plane_mesh_handle },
+        world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
     });
     t = .{
         .pos = .{ .y = 50, .x = -50 },
         .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
-        .scale = Vec4.splat3(50),
+        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         C.StaticRender{ .mesh = plane_mesh_handle },
+        world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
     });
     t = .{
         .pos = .{ .y = 50, .z = 50 },
         .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
-        .scale = Vec4.splat3(50),
+        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         C.StaticRender{ .mesh = plane_mesh_handle },
+        world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
     });
     t = .{
         .pos = .{ .y = 50, .z = -50 },
         .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
-        .scale = Vec4.splat3(50),
+        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try world.ecs.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .plane = .{ .normal = .{ .y = 1 } } },
         C.StaticRender{ .mesh = plane_mesh_handle },
+        world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
     });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
@@ -469,22 +494,34 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     });
     // }
 
-    const t1 = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
+    t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
     _ = try world.ecs.insert(.{
         @as([]const u8, "ball"),
-        t1,
-        C.LastTransform{ .t = t1 },
+        t,
+        C.LastTransform{ .t = t },
         C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
         C.StaticRender{ .mesh = cube_mesh_handle },
+        world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
     });
 
-    const t2 = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
+    t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
     _ = try world.ecs.insert(.{
         @as([]const u8, "ball"),
-        t2,
-        C.LastTransform{ .t = t2 },
+        t,
+        C.LastTransform{ .t = t },
         C.Collider{ .sphere = .{ .radius = 1 } },
         C.StaticRender{ .mesh = cube_mesh_handle },
+        world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
     });
 
     const player = try world.ecs.get(player_id, struct { transform: C.Transform, camera: math.Camera, controller: C.Controller });
@@ -1076,17 +1113,15 @@ pub const AppState = struct {
                         } } }, e.addr);
                     },
                     .spawn_player => |id| {
+                        const t = C.Transform{ .pos = .{
+                            .x = id.pos.x,
+                            .y = id.pos.y,
+                            .z = id.pos.z,
+                        } };
                         _ = try self.cmdbuf.insert(.{
-                            C.Transform{ .pos = .{
-                                .x = id.pos.x,
-                                .y = id.pos.y,
-                                .z = id.pos.z,
-                            } },
-                            C.LastTransform{ .t = .{ .pos = .{
-                                .x = id.pos.x,
-                                .y = id.pos.y,
-                                .z = id.pos.z,
-                            } } },
+                            @as([]const u8, "player"),
+                            t,
+                            C.LastTransform{ .t = t },
                             C.Controller{},
                             C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
                             C.StaticRender{ .mesh = app.handles.mesh.cube },
@@ -1096,6 +1131,13 @@ pub const AppState = struct {
                                 .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
                                 .hold = true,
                             },
+                            app.world.phy.add_body(.{
+                                .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
+                                .pos = t.pos.xyz(),
+                                .rotation = t.rotation,
+                                .motion_type = .dynamic,
+                                .friction = 0.4,
+                            }),
                         });
                     },
                     .despawn_player => |id| {
@@ -1198,18 +1240,25 @@ pub const AppState = struct {
                                 // @memset(bones, .{});
                                 // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
 
-                                // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
-                                // const t1 = C.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
-                                // _ = try self.cmdbuf.insert(.{
-                                //     @as([]const u8, "bullet"),
-                                //     t1,
-                                //     C.LastTransform{ .t = t1 },
-                                //     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                //     C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
-                                //     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                                //     C.StaticRender{ .mesh = app.handles.mesh.cube },
-                                //     C.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
-                                // });
+                                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
+                                const t = C.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
+                                _ = try self.cmdbuf.insert(.{
+                                    @as([]const u8, "bullet"),
+                                    t,
+                                    C.LastTransform{ .t = t },
+                                    // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
+                                    // C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
+                                    // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
+                                    C.StaticRender{ .mesh = app.handles.mesh.cube },
+                                    C.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
+                                    app.world.phy.add_body(.{
+                                        .shape = .{ .box = .{ .size = t.scale.xyz() } },
+                                        .pos = t.pos.xyz(),
+                                        .velocity = fwd.xyz().scale(50),
+                                        .friction = 0.4,
+                                        .rotation = t.rotation,
+                                    }),
+                                });
                                 _ = try self.cmdbuf.insert(.{
                                     C.TimeDespawn{
                                         .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),

@@ -153,8 +153,8 @@ pub const Zphysics = struct {
         c.physics_update(self.phy, sim_time, steps);
     }
 
-    pub fn add_body(self: *@This(), settings: c.ZBodySettings) BodyId {
-        const bid = c.physics_add_body(self.phy, settings);
+    pub fn add_body(self: *@This(), settings: BodySettings) BodyId {
+        const bid = c.physics_add_body(self.phy, settings.type_struct());
         return .{ .bid = bid };
     }
 
@@ -176,12 +176,100 @@ pub const Zphysics = struct {
     }
 
     pub fn apply_force(self: *@This(), bid: BodyId, force: Vec3) void {
-        c.physics_add_force(self.phy, bid.bid, .{ .x = force.x, .y = force.y, .z = force.z });
+        c.physics_add_force(self.phy, bid.bid, helpers.to.vec3(force));
     }
 
     pub fn set_rotation(self: *@This(), bid: BodyId, rot: Vec4) void {
-        c.physics_set_rotation(self.phy, bid.bid, .{ .x = rot.x, .y = rot.y, .z = rot.z, .w = rot.w });
+        c.physics_set_rotation(self.phy, bid.bid, helpers.to.vec4(rot));
     }
+
+    const helpers = struct {
+        const to = struct {
+            fn vec3(t: anytype) c.vec3 {
+                return .{ .x = t.x, .y = t.y, .z = t.z };
+            }
+            fn vec4(t: anytype) c.vec4 {
+                return .{ .x = t.x, .y = t.y, .z = t.z, .w = t.w };
+            }
+        };
+    };
+
+    pub const ShapeSettings = union(enum) {
+        sphere: struct {
+            radius: f32,
+        },
+        box: struct {
+            size: Vec3,
+        },
+        capsule: struct {
+            half_height: f32,
+            radius: f32,
+        },
+
+        fn type_enum(self: *const @This()) c.ShapeType {
+            return switch (self.*) {
+                .sphere => c.SHAPE_SPHERE,
+                .box => c.SHAPE_BOX,
+                .capsule => c.SHAPE_CAPSULE,
+            };
+        }
+        fn type_union(self: @This()) c.ZShapeSettings {
+            return switch (self) {
+                .sphere => |s| .{ .sphere = .{ .radius = s.radius } },
+                .box => |s| .{ .box = .{ .size = helpers.to.vec3(s.size) } },
+                .capsule => |s| .{ .capsule = .{ .half_height = s.half_height, .radius = s.radius } },
+            };
+        }
+    };
+    pub const MotionType = enum {
+        static,
+        kinematic,
+        dynamic,
+
+        fn type_enum(self: @This()) c.MotionType {
+            return switch (self) {
+                .static => c.MOTION_STATIC,
+                .kinematic => c.MOTION_KINEMATIC,
+                .dynamic => c.MOTION_DYNAMIC,
+            };
+        }
+    };
+
+    pub const MotionQuality = enum {
+        discrete,
+        linear_cast,
+
+        fn type_enum(self: @This()) c.MotionType {
+            return switch (self) {
+                .discrete => c.MOTION_DISCRETE,
+                .linear_cast => c.MOTION_LINEAR_CAST,
+            };
+        }
+    };
+    pub const BodySettings = struct {
+        shape: ShapeSettings,
+        motion_type: MotionType = .dynamic,
+        motion_quality: MotionQuality = .discrete,
+        pos: Vec3 = .{},
+        rotation: Vec4 = Vec4.quat_identity_rot(),
+        velocity: Vec3 = .{},
+        angular_velocity: Vec3 = .{},
+        friction: f32 = 0,
+
+        fn type_struct(self: *const @This()) c.ZBodySettings {
+            return .{
+                .shape_type = self.shape.type_enum(),
+                .shape = self.shape.type_union(),
+                .motion_type = self.motion_type.type_enum(),
+                .motion_quality = self.motion_quality.type_enum(),
+                .pos = helpers.to.vec3(self.pos),
+                .rotation = helpers.to.vec4(self.rotation),
+                .velocity = helpers.to.vec3(self.velocity),
+                .angular_velocity = helpers.to.vec3(self.angular_velocity),
+                .friction = self.friction,
+            };
+        }
+    };
 };
 
 pub const World = struct {
