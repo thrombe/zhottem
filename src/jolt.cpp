@@ -7,6 +7,7 @@
 #include "Jolt/Core/Memory.h"
 #include "Jolt/Physics/Body/MotionQuality.h"
 #include "Jolt/Physics/Body/MotionType.h"
+#include "Jolt/Physics/Collision/Shape/CapsuleShape.h"
 #include "Jolt/Physics/Collision/Shape/Shape.h"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
@@ -159,7 +160,7 @@ public:
   const uint cMaxBodyPairs = 65536;
   const uint cMaxContactConstraints = 10240;
 
-  Factory* factory = nullptr;
+  Factory *factory = nullptr;
   ZAllocator alloc;
 
   TempAllocatorImpl *temp_allocator = nullptr;
@@ -263,9 +264,7 @@ vec4 Vec4_cast(Quat vec) {
 
 extern "C" {
 
-ZPhysics physics_create(ZAllocator alloc) {
-  return Physics::create_new(alloc);
-}
+ZPhysics physics_create(ZAllocator alloc) { return Physics::create_new(alloc); }
 
 void physics_post_reload(ZPhysics p, ZAllocator alloc) {
   auto physics = (Physics *)p;
@@ -297,11 +296,13 @@ u32 physics_add_body(ZPhysics p, ZBodySettings bsettings) {
 
   BodyCreationSettings settings;
   settings.mPosition = vec3_cast(bsettings.pos);
+  settings.mRotation = Quat(vec4_cast(bsettings.rotation).Normalized());
   settings.mLinearVelocity = vec3_cast(bsettings.velocity);
   settings.mAngularVelocity = vec3_cast(bsettings.angular_velocity);
   settings.mMotionType = static_cast<EMotionType>(bsettings.motion_type);
   settings.mMotionQuality = static_cast<EMotionQuality>(bsettings.motion_quality);
   settings.mObjectLayer = Layers::MOVING;
+  settings.mFriction = bsettings.friction;
 
   switch (bsettings.shape_type) {
   case SHAPE_SPHERE: {
@@ -315,6 +316,13 @@ u32 physics_add_body(ZPhysics p, ZBodySettings bsettings) {
     box->mHalfExtent = vec3_cast(bsettings.shape.box.size);
     settings.SetShape(box->Create().Get());
     settings.SetShapeSettings(box);
+  } break;
+  case SHAPE_CAPSULE: {
+    Ref<CapsuleShapeSettings> capsule = new CapsuleShapeSettings();
+    capsule->mHalfHeightOfCylinder = bsettings.shape.capsule.half_height;
+    capsule->mRadius = bsettings.shape.capsule.radius;
+    settings.SetShape(capsule->Create().Get());
+    settings.SetShapeSettings(capsule);
   } break;
   default:
     return 0;
@@ -357,7 +365,7 @@ void physics_add_force(ZPhysics p, u32 _bid, vec3 force) {
 }
 
 void testfn() {
-  Physics* p = nullptr;
+  Physics *p = nullptr;
   auto physics = (Physics *)p;
 
   physics->start();
@@ -402,5 +410,4 @@ void testfn() {
 
   physics_delete(p);
 }
-
 }

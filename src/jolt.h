@@ -20,6 +20,7 @@ typedef struct {
 typedef enum {
   SHAPE_SPHERE = 0,
   SHAPE_BOX,
+  SHAPE_CAPSULE,
 } ShapeType;
 
 typedef enum {
@@ -41,6 +42,11 @@ typedef union {
   struct {
     vec3 size;
   } box;
+
+  struct {
+    f32 half_height;
+    f32 radius;
+  } capsule;
 } ZShapeSettings;
 
 typedef struct {
@@ -50,8 +56,10 @@ typedef struct {
   MotionType motion_type;
   MotionQuality motion_quality;
   vec3 pos;
+  vec4 rotation;
   vec3 velocity;
   vec3 angular_velocity;
+  f32 friction;
 } ZBodySettings;
 
 typedef struct {
