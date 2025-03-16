@@ -373,7 +373,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
         C.PlayerId{ .id = 0 },
         world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
             .pos = t.pos.xyz(),
             .rotation = t.rotation,
             .motion_type = .dynamic,
@@ -1179,7 +1179,7 @@ pub const AppState = struct {
                             const right = rot.rotate_vector(camera.world_basis.right);
 
                             player.t.rotation = rot.normalize();
-                            app.world.phy.set_rotation(player.bid.*, player.t.rotation);
+                            // app.world.phy.set_rotation(player.bid.*, player.t.rotation);
 
                             var speed = player.controller.speed;
                             if (kb.shift.pressed()) {

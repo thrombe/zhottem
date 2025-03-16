@@ -7,7 +7,11 @@
 #include "Jolt/Core/Memory.h"
 #include "Jolt/Physics/Body/MotionQuality.h"
 #include "Jolt/Physics/Body/MotionType.h"
+#include "Jolt/Physics/Character/Character.h"
+#include "Jolt/Physics/Character/CharacterBase.h"
+#include "Jolt/Physics/Character/CharacterVirtual.h"
 #include "Jolt/Physics/Collision/Shape/CapsuleShape.h"
+#include "Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h"
 #include "Jolt/Physics/Collision/Shape/Shape.h"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
@@ -173,6 +177,9 @@ public:
   MyBodyActivationListener body_activation_listener;
   MyContactListener contact_listener;
 
+  CharacterVirtual *character = nullptr;
+  Vec3 character_force = Vec3();
+
   static Physics *create_new(ZAllocator alloc) {
     Allocate = alloc.allocfn;
     Reallocate = alloc.reallocfn;
@@ -229,7 +236,24 @@ public:
 
   BodyInterface &bodyi() { return physics_system.GetBodyInterface(); }
 
-  void update(float sim_time, int steps) { physics_system.Update(sim_time, steps, temp_allocator, job_system); }
+  void update(float sim_time, int steps) {
+    Vec3 velocity = character->GetLinearVelocity() + (physics_system.GetGravity() + character_force) * sim_time;
+    character->SetLinearVelocity(velocity);
+    character_force = Vec3();
+
+    CharacterVirtual::ExtendedUpdateSettings update_settings;
+    character->ExtendedUpdate(sim_time / steps, physics_system.GetGravity(), update_settings,
+                              physics_system.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
+                              physics_system.GetDefaultLayerFilter(Layers::MOVING), {}, {}, *temp_allocator);
+
+    // auto bodyi = physics_system.GetBodyInterface();
+    // bodyi.getbo
+
+    physics_system.Update(sim_time, steps, temp_allocator, job_system);
+    // if (character) {
+    //   character->PostSimulation(0.01);
+    // }
+  }
 };
 
 Vec3 vec3_cast(vec3 vec) { return Vec3(vec.x, vec.y, vec.z); }
@@ -321,8 +345,26 @@ u32 physics_add_body(ZPhysics p, ZBodySettings bsettings) {
     Ref<CapsuleShapeSettings> capsule = new CapsuleShapeSettings();
     capsule->mHalfHeightOfCylinder = bsettings.shape.capsule.half_height;
     capsule->mRadius = bsettings.shape.capsule.radius;
-    settings.SetShape(capsule->Create().Get());
+    Ref<Shape> shape = capsule->Create().Get();
+    settings.SetShape(shape);
     settings.SetShapeSettings(capsule);
+
+    // BodyInterface &bi = physics->bodyi();
+    // Body *b = bi.CreateBody(settings);
+    // bi.AddBody(b->GetID(), EActivation::Activate);
+    // return b->GetID().GetIndexAndSequenceNumber();
+
+    Ref<CharacterVirtualSettings> char_settings = new CharacterVirtualSettings();
+    char_settings->mShape =
+        RotatedTranslatedShapeSettings(Vec3(0, -(capsule->mHalfHeightOfCylinder + capsule->mRadius), 0), Quat::sIdentity(), shape)
+            .Create()
+            .Get();
+    char_settings->mInnerBodyShape = shape;
+    char_settings->mInnerBodyLayer = Layers::MOVING;
+    // settings->mSupportingVolume = Plane(Vec3::sAxisY(), -cCharacterRadiusStanding);
+    physics->character = new CharacterVirtual(char_settings, settings.mPosition, settings.mRotation, 0, &physics->physics_system);
+
+    return physics->character->GetInnerBodyID().GetIndexAndSequenceNumber();
   } break;
   default:
     return 0;
@@ -361,53 +403,12 @@ void physics_add_force(ZPhysics p, u32 _bid, vec3 force) {
   auto physics = (Physics *)p;
   BodyID bid = BodyID(_bid);
   BodyInterface &bi = physics->bodyi();
-  bi.AddForce(bid, vec3_cast(force) * 100);
-}
-
-void testfn() {
-  Physics *p = nullptr;
-  auto physics = (Physics *)p;
-
-  physics->start();
-
-  BoxShapeSettings floor_shape_settings(Vec3(100.0f, 1.0f, 100.0f));
-  floor_shape_settings.SetEmbedded();
-
-  ShapeSettings::ShapeResult floor_shape_result = floor_shape_settings.Create();
-  ShapeRefC floor_shape = floor_shape_result.Get();
-
-  BodyCreationSettings floor_settings(floor_shape, RVec3(0.0_r, -1.0_r, 0.0_r), Quat::sIdentity(), EMotionType::Static, Layers::NON_MOVING);
-  Body *floor = physics->bodyi().CreateBody(floor_settings); // nullcheck
-  physics->bodyi().AddBody(floor->GetID(), EActivation::DontActivate);
-
-  BodyCreationSettings sphere_settings(new SphereShape(0.5f), RVec3(0.0_r, 2.0_r, 0.0_r), Quat::sIdentity(), EMotionType::Dynamic,
-                                       Layers::MOVING);
-  BodyID sphere_id = physics->bodyi().CreateAndAddBody(sphere_settings, EActivation::Activate);
-  physics->bodyi().SetLinearVelocity(sphere_id, Vec3(0.0f, -5.0f, 0.0f));
-
-  // We simulate the physics world in discrete time steps. 60 Hz is a good rate
-  // to update the physics system.
-  const float cDeltaTime = 1.0f / 60.0f;
-
-  physics->physics_system.OptimizeBroadPhase();
-  uint step = 0;
-  while (physics->bodyi().IsActive(sphere_id)) {
-    ++step;
-
-    RVec3 position = physics->bodyi().GetCenterOfMassPosition(sphere_id);
-    Vec3 velocity = physics->bodyi().GetLinearVelocity(sphere_id);
-    cout << "Step " << step << ": Position = (" << position.GetX() << ", " << position.GetY() << ", " << position.GetZ()
-         << "), Velocity = (" << velocity.GetX() << ", " << velocity.GetY() << ", " << velocity.GetZ() << ")" << endl;
-
-    const int cCollisionSteps = 1;
-    physics->physics_system.Update(cDeltaTime, cCollisionSteps, physics->temp_allocator, physics->job_system);
+  if (bid == physics->character->GetInnerBodyID()) {
+    physics->character_force = vec3_cast(force);
+  } else {
+    bi.AddForce(bid, vec3_cast(force) * 100);
   }
-
-  physics->bodyi().RemoveBody(sphere_id);
-  physics->bodyi().DestroyBody(sphere_id);
-  physics->bodyi().RemoveBody(floor->GetID());
-  physics->bodyi().DestroyBody(floor->GetID());
-
-  physics_delete(p);
 }
+
+void testfn() {}
 }
