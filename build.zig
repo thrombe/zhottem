@@ -117,7 +117,19 @@ fn jolt_step(b: *std.Build, v: struct {
     target: ?std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     alloc: std.mem.Allocator,
-}) !struct { lib: *std.Build.Step.Compile } {
+}) !struct { lib: *std.Build.Step.Compile, options: *std.Build.Step.Options } {
+    const options = b.addOptions();
+    const jolt_options = .{
+        .use_double_precision = false,
+        .enable_asserts = v.optimize == .Debug,
+        .enable_cross_platform_determinism = false,
+        .enable_debug_renderer = false,
+    };
+
+    inline for (std.meta.fields(@TypeOf(jolt_options))) |field| {
+        options.addOption(field.type, field.name, @field(jolt_options, field.name));
+    }
+
     const jolt = b.addSharedLibrary(.{
         .name = "jolt",
         .target = v.target,
@@ -143,10 +155,10 @@ fn jolt_step(b: *std.Build, v: struct {
             "-fno-exceptions",
             "-fno-sanitize=undefined",
 
-            // "-DJPH_CROSS_PLATFORM_DETERMINISTIC",
-            // "-DJPH_DEBUG_RENDERER",
-            // "-DJPH_DOUBLE_PRECISION",
-            // "-DJPH_ENABLE_ASSERTS",
+            if (jolt_options.enable_cross_platform_determinism) "-DJPH_CROSS_PLATFORM_DETERMINISTIC" else "",
+            if (jolt_options.enable_debug_renderer) "-DJPH_DEBUG_RENDERER" else "",
+            if (jolt_options.use_double_precision) "-DJPH_DOUBLE_PRECISION" else "",
+            if (jolt_options.enable_asserts) "-DJPH_ENABLE_ASSERTS" else "",
         } ++ compile_commands_flags,
         .files = files.items,
     });
@@ -154,7 +166,7 @@ fn jolt_step(b: *std.Build, v: struct {
     jolt.linkLibC();
     jolt.linkLibCpp();
 
-    return .{ .lib = jolt };
+    return .{ .lib = jolt, .options = options };
 }
 
 const CompileMode = enum {
@@ -172,6 +184,7 @@ fn step(b: *std.Build, v: struct {
     imgui_dep: *std.Build.Dependency,
     dcimgui_generated: *std.Build.Step.WriteFile,
     jolt: *std.Build.Step.Compile,
+    jolt_options: *std.Build.Step.Options,
     jolt_dep: *std.Build.Dependency,
 }) *std.Build.Step.Compile {
     // see b.addSharedLibrary()
@@ -204,6 +217,7 @@ fn step(b: *std.Build, v: struct {
     options.addOption([]const u8, "hotlib_name", "libhot.so");
     options.addOption(CompileMode, "mode", v.mode);
     compile_step.root_module.addImport("build-options", options.createModule());
+    compile_step.root_module.addImport("jolt-options", v.jolt_options.createModule());
 
     switch (v.mode) {
         .exe, .hotlib => {
@@ -296,6 +310,7 @@ pub fn build(b: *std.Build) !void {
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
         .jolt = libjolt.lib,
+        .jolt_options = libjolt.options,
         .jolt_dep = jolt,
     });
     const hotlib = step(b, .{
@@ -307,6 +322,7 @@ pub fn build(b: *std.Build) !void {
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
         .jolt = libjolt.lib,
+        .jolt_options = libjolt.options,
         .jolt_dep = jolt,
     });
     const hotexe = step(b, .{
@@ -318,6 +334,7 @@ pub fn build(b: *std.Build) !void {
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
         .jolt = libjolt.lib,
+        .jolt_options = libjolt.options,
         .jolt_dep = jolt,
     });
 
