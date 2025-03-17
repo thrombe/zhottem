@@ -228,7 +228,8 @@ fn step(b: *std.Build, v: struct {
                     "-fno-access-control",
                 } ++ compile_commands_flags,
                 .files = &[_][]const u8{
-                    "jolt.cpp",
+                    "jolt/c.cpp",
+                    "jolt/extensions.cpp",
                 },
             });
 
