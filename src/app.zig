@@ -372,7 +372,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .hold = true,
         },
         C.PlayerId{ .id = 0 },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
             .pos = t.pos.xyz(),
             .rotation = t.rotation,
@@ -390,7 +390,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .motion_type = .static,
             .friction = 0.4,
@@ -407,7 +407,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .motion_type = .static,
             .friction = 0.4,
@@ -425,7 +425,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .motion_type = .static,
             .friction = 0.4,
@@ -443,7 +443,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .motion_type = .static,
             .friction = 0.4,
@@ -461,7 +461,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .motion_type = .static,
             .friction = 0.4,
@@ -501,7 +501,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         C.LastTransform{ .t = t },
         C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
         C.StaticRender{ .mesh = cube_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .friction = 0.4,
             .rotation = t.rotation,
@@ -516,7 +516,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         C.LastTransform{ .t = t },
         C.Collider{ .sphere = .{ .radius = 1 } },
         C.StaticRender{ .mesh = cube_mesh_handle },
-        world.phy.add_body(.{
+        try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
             .friction = 0.4,
             .rotation = t.rotation,
@@ -1131,7 +1131,7 @@ pub const AppState = struct {
                                 .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
                                 .hold = true,
                             },
-                            app.world.phy.add_body(.{
+                            try app.world.phy.add_body(.{
                                 .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
                                 .pos = t.pos.xyz(),
                                 .rotation = t.rotation,
@@ -1251,7 +1251,7 @@ pub const AppState = struct {
                                     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     C.StaticRender{ .mesh = app.handles.mesh.cube },
                                     C.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
-                                    app.world.phy.add_body(.{
+                                    try app.world.phy.add_body(.{
                                         .shape = .{ .box = .{ .size = t.scale.xyz() } },
                                         .pos = t.pos.xyz(),
                                         .velocity = fwd.xyz().scale(50),

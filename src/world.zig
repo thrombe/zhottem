@@ -19,181 +19,138 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 pub const Zphysics = struct {
-    pub const c = @cImport({
-        @cInclude("jolt.h");
-    });
+    const jolt = @import("jolt/jolt.zig");
 
-    phy: *anyopaque,
-    alloc: *Alloc,
+    phy: *jolt.PhysicsSystem,
+    global_state: ?jolt.GlobalState = null,
+    state: *State,
 
-    pub const BodyId = struct { bid: u32 };
+    const State = struct {
+        broadphase_layer_interface: Impl.MyBroadphaseLayerInterface = .init(),
+        obj_vs_broadphase_layer_interface: Impl.MyObjectVsBroadPhaseLayerFilter = .{},
+        obj_layer_pair_filter: Impl.MyObjectLayerPairFilter = .{},
+    };
 
-    const Alloc = struct {
-        var state: *@This() = undefined;
-
-        mutex: std.Thread.Mutex = .{},
-        allocations: Allocations,
-
-        const Allocations = std.AutoHashMap(usize, struct { size: u32, alignment: u32 });
-
-        const alloc_alignment = 16;
-
-        fn init() !*@This() {
-            const self = try allocator.create(@This());
-            errdefer allocator.destroy(self);
-            state = self;
-
-            self.mutex = .{};
-            self.allocations = Allocations.init(allocator.*);
-            return self;
-        }
-
-        fn deinit(self: *@This()) void {
-            {
-                self.mutex.lock();
-                defer self.mutex.unlock();
-                self.allocations.deinit();
-            }
-            allocator.destroy(self);
-        }
-
-        fn reload(self: *@This()) void {
-            state = self;
-        }
-
-        fn allocate(size: usize) callconv(.C) ?*anyopaque {
-            state.mutex.lock();
-            defer state.mutex.unlock();
-
-            const mem = allocator.allocWithOptions(u8, size, alloc_alignment, null) catch @panic("OOM");
-            state.allocations.put(@intFromPtr(mem.ptr), .{ .size = @intCast(mem.len), .alignment = alloc_alignment }) catch @panic("OOM");
-            return mem.ptr;
-        }
-
-        fn realloc(maybe_ptr: ?*anyopaque, reported_old_size: usize, new_size: usize) callconv(.C) ?*anyopaque {
-            state.mutex.lock();
-            defer state.mutex.unlock();
-
-            const old_size = if (maybe_ptr != null) reported_old_size else 0;
-
-            const old_mem = if (old_size > 0)
-                @as([*]align(alloc_alignment) u8, @ptrCast(@alignCast(maybe_ptr)))[0..old_size]
-            else
-                @as([*]align(alloc_alignment) u8, undefined)[0..0];
-
-            const mem = allocator.realloc(old_mem, new_size) catch @panic("OOM");
-            _ = state.allocations.remove(@intFromPtr(mem.ptr));
-            state.allocations.put(@intFromPtr(mem.ptr), .{ .size = @intCast(mem.len), .alignment = alloc_alignment }) catch @panic("OOM");
-            return mem.ptr;
-        }
-
-        fn aligned_alloc(size: usize, alignment: usize) callconv(.C) ?*anyopaque {
-            state.mutex.lock();
-            defer state.mutex.unlock();
-
-            const mem = allocator.rawAlloc(
-                size,
-                std.mem.Alignment.fromByteUnits(alignment),
-                @returnAddress(),
-            ) orelse @panic("OOM");
-            state.allocations.put(@intFromPtr(mem), .{ .size = @intCast(size), .alignment = @intCast(alignment) }) catch @panic("OOM");
-            return mem;
-        }
-
-        fn free(maybe_ptr: ?*anyopaque) callconv(.C) void {
-            state.mutex.lock();
-            defer state.mutex.unlock();
-
-            const ptr = maybe_ptr orelse return;
-            const allocation = state.allocations.fetchRemove(@intFromPtr(ptr)) orelse return;
-            const size = allocation.value.size;
-            const mem = @as([*]u8, @ptrCast(@alignCast(ptr)))[0..size];
-            allocator.rawFree(mem, std.mem.Alignment.fromByteUnits(allocation.value.alignment), @returnAddress());
-        }
+    pub const BodyId = struct {
+        id: jolt.BodyId,
     };
 
     pub fn init() !@This() {
-        return .{
-            .alloc = try Alloc.init(),
-            .phy = c.physics_create(.{
-                .allocfn = &Alloc.allocate,
-                .reallocfn = &Alloc.realloc,
-                .freefn = &Alloc.free,
-                .aligned_allocfn = &Alloc.aligned_alloc,
-                .aligned_freefn = &Alloc.free,
-            }) orelse return error.CouldNotInitializeJolt,
-        };
+        try jolt.init(allocator.*, .{});
+        errdefer jolt.deinit();
+
+        var state = try allocator.create(State);
+        errdefer allocator.destroy(state);
+        state.* = .{};
+
+        var ps = try jolt.PhysicsSystem.create(
+            state.broadphase_layer_interface.interface(),
+            state.obj_vs_broadphase_layer_interface.interface(),
+            state.obj_layer_pair_filter.interface(),
+            .{
+                .max_bodies = 65536,
+                .num_body_mutexes = 0,
+                .max_body_pairs = 65536,
+                .max_contact_constraints = 10240,
+            },
+        );
+        errdefer ps.destroy();
+
+        return .{ .phy = ps, .state = state };
     }
 
     pub fn deinit(self: *@This()) void {
-        c.physics_delete(self.phy);
-        self.alloc.deinit();
+        self.phy.destroy();
+        jolt.deinit();
+        allocator.destroy(self.state);
+    }
+
+    pub fn pre_reload(self: *@This()) void {
+        self.global_state = jolt.preReload();
     }
 
     pub fn post_reload(self: *@This()) void {
-        self.alloc.reload();
-        c.physics_post_reload(self.phy, .{
-            .allocfn = &Alloc.allocate,
-            .reallocfn = &Alloc.realloc,
-            .freefn = &Alloc.free,
-            .aligned_allocfn = &Alloc.aligned_alloc,
-            .aligned_freefn = &Alloc.free,
-        });
-    }
-
-    pub fn start(self: *@This()) !void {
-        c.physics_start(self.phy);
+        jolt.postReload(allocator.*, self.global_state.?);
+        self.global_state = null;
     }
 
     pub fn optimize(self: *@This()) void {
-        c.physics_optimize(self.phy);
+        self.phy.optimizeBroadPhase();
     }
 
-    pub fn update(self: *@This(), sim_time: f32, steps: u32) void {
-        c.physics_update(self.phy, sim_time, steps);
+    pub fn update(self: *@This(), sim_time: f32, steps: u32) !void {
+        try self.phy.update(sim_time, .{
+            .collision_steps = @intCast(steps),
+        });
     }
 
-    pub fn add_body(self: *@This(), settings: BodySettings) BodyId {
-        const bid = c.physics_add_body(self.phy, settings.type_struct());
-        return .{ .bid = bid };
+    pub fn add_body(self: *@This(), settings: BodySettings) !BodyId {
+        const bodyi = self.phy.getBodyInterfaceMut();
+        var body_settings = jolt.BodyCreationSettings{
+            .position = settings.pos.withw(0).to_buf(),
+            .linear_velocity = settings.velocity.withw(0).to_buf(),
+            .angular_velocity = settings.angular_velocity.withw(0).to_buf(),
+            .rotation = settings.rotation.to_buf(),
+            .motion_type = settings.motion_type,
+            .motion_quality = settings.motion_quality,
+            .friction = settings.friction,
+            .object_layer = Impl.object_layers.moving,
+        };
+
+        switch (settings.shape) {
+            .sphere => |s| {
+                const shape = try jolt.SphereShapeSettings.create(s.radius);
+                body_settings.shape = try shape.createShape();
+            },
+            .box => |s| {
+                const shape = try jolt.BoxShapeSettings.create(s.size.to_buf());
+                body_settings.shape = try shape.createShape();
+            },
+            .capsule => |s| {
+                const shape = try jolt.CapsuleShapeSettings.create(s.half_height, s.radius);
+                body_settings.shape = try shape.createShape();
+            },
+        }
+
+        return .{ .id = try bodyi.createAndAddBody(body_settings, .activate) };
     }
 
     pub fn get_transform(self: *@This(), bid: BodyId) Components.Transform {
-        const transform = c.physics_get_transform(self.phy, bid.bid);
+        const pos = self.phy.getBodyInterface().getPosition(bid.id);
+        const rot = self.phy.getBodyInterface().getRotation(bid.id);
         return .{
             .pos = .{
-                .x = transform.pos.x,
-                .y = transform.pos.y,
-                .z = transform.pos.z,
+                .x = pos[0],
+                .y = pos[1],
+                .z = pos[2],
             },
             .rotation = .{
-                .x = transform.rot.x,
-                .y = transform.rot.y,
-                .z = transform.rot.z,
-                .w = transform.rot.w,
+                .x = rot[0],
+                .y = rot[1],
+                .z = rot[2],
+                .w = rot[3],
             },
         };
     }
 
     pub fn apply_force(self: *@This(), bid: BodyId, force: Vec3) void {
-        c.physics_add_force(self.phy, bid.bid, helpers.to.vec3(force));
+        self.phy.getBodyInterfaceMut().addForce(bid.id, force.to_buf());
     }
 
     pub fn set_rotation(self: *@This(), bid: BodyId, rot: Vec4) void {
-        c.physics_set_rotation(self.phy, bid.bid, helpers.to.vec4(rot));
+        self.phy.getBodyInterfaceMut().setRotation(bid.id, rot.to_buf());
     }
 
-    const helpers = struct {
-        const to = struct {
-            fn vec3(t: anytype) c.vec3 {
-                return .{ .x = t.x, .y = t.y, .z = t.z };
-            }
-            fn vec4(t: anytype) c.vec4 {
-                return .{ .x = t.x, .y = t.y, .z = t.z, .w = t.w };
-            }
-        };
+    pub const BodySettings = struct {
+        shape: ShapeSettings,
+        motion_type: jolt.MotionType = .dynamic,
+        motion_quality: jolt.MotionQuality = .discrete,
+        pos: Vec3 = .{},
+        rotation: Vec4 = Vec4.quat_identity_rot(),
+        velocity: Vec3 = .{},
+        angular_velocity: Vec3 = .{},
+        friction: f32 = 0,
     };
-
     pub const ShapeSettings = union(enum) {
         sphere: struct {
             radius: f32,
@@ -205,70 +162,118 @@ pub const Zphysics = struct {
             half_height: f32,
             radius: f32,
         },
-
-        fn type_enum(self: *const @This()) c.ShapeType {
-            return switch (self.*) {
-                .sphere => c.SHAPE_SPHERE,
-                .box => c.SHAPE_BOX,
-                .capsule => c.SHAPE_CAPSULE,
-            };
-        }
-        fn type_union(self: @This()) c.ZShapeSettings {
-            return switch (self) {
-                .sphere => |s| .{ .sphere = .{ .radius = s.radius } },
-                .box => |s| .{ .box = .{ .size = helpers.to.vec3(s.size) } },
-                .capsule => |s| .{ .capsule = .{ .half_height = s.half_height, .radius = s.radius } },
-            };
-        }
-    };
-    pub const MotionType = enum {
-        static,
-        kinematic,
-        dynamic,
-
-        fn type_enum(self: @This()) c.MotionType {
-            return switch (self) {
-                .static => c.MOTION_STATIC,
-                .kinematic => c.MOTION_KINEMATIC,
-                .dynamic => c.MOTION_DYNAMIC,
-            };
-        }
     };
 
-    pub const MotionQuality = enum {
-        discrete,
-        linear_cast,
+    pub const Impl = struct {
+        pub const object_layers = struct {
+            pub const non_moving: jolt.ObjectLayer = 0;
+            pub const moving: jolt.ObjectLayer = 1;
+            pub const len: u32 = 2;
+        };
 
-        fn type_enum(self: @This()) c.MotionType {
-            return switch (self) {
-                .discrete => c.MOTION_DISCRETE,
-                .linear_cast => c.MOTION_LINEAR_CAST,
-            };
-        }
-    };
-    pub const BodySettings = struct {
-        shape: ShapeSettings,
-        motion_type: MotionType = .dynamic,
-        motion_quality: MotionQuality = .discrete,
-        pos: Vec3 = .{},
-        rotation: Vec4 = Vec4.quat_identity_rot(),
-        velocity: Vec3 = .{},
-        angular_velocity: Vec3 = .{},
-        friction: f32 = 0,
+        pub const broad_phase_layers = struct {
+            pub const non_moving: jolt.BroadPhaseLayer = 0;
+            pub const moving: jolt.BroadPhaseLayer = 1;
+            pub const len: u32 = 2;
+        };
 
-        fn type_struct(self: *const @This()) c.ZBodySettings {
-            return .{
-                .shape_type = self.shape.type_enum(),
-                .shape = self.shape.type_union(),
-                .motion_type = self.motion_type.type_enum(),
-                .motion_quality = self.motion_quality.type_enum(),
-                .pos = helpers.to.vec3(self.pos),
-                .rotation = helpers.to.vec4(self.rotation),
-                .velocity = helpers.to.vec3(self.velocity),
-                .angular_velocity = helpers.to.vec3(self.angular_velocity),
-                .friction = self.friction,
+        const MyBroadphaseLayerInterface = extern struct {
+            usingnamespace jolt.BroadPhaseLayerInterface.Methods(@This());
+            __v: *const jolt.BroadPhaseLayerInterface.VTable = &vtable,
+
+            object_to_broad_phase: [object_layers.len]jolt.BroadPhaseLayer = undefined,
+
+            const vtable = jolt.BroadPhaseLayerInterface.VTable{
+                .getNumBroadPhaseLayers = _getNumBroadPhaseLayers,
+                .getBroadPhaseLayer = if (@import("builtin").abi == .msvc)
+                    _getBroadPhaseLayerMsvc
+                else
+                    _getBroadPhaseLayer,
             };
-        }
+
+            fn init() MyBroadphaseLayerInterface {
+                var layer_interface: MyBroadphaseLayerInterface = .{};
+                layer_interface.object_to_broad_phase[object_layers.non_moving] = broad_phase_layers.non_moving;
+                layer_interface.object_to_broad_phase[object_layers.moving] = broad_phase_layers.moving;
+                return layer_interface;
+            }
+
+            fn _getNumBroadPhaseLayers(iself: *const jolt.BroadPhaseLayerInterface) callconv(.C) u32 {
+                const self = @as(*const MyBroadphaseLayerInterface, @ptrCast(iself));
+                return @as(u32, @intCast(self.object_to_broad_phase.len));
+            }
+
+            fn _getBroadPhaseLayer(
+                iself: *const jolt.BroadPhaseLayerInterface,
+                layer: jolt.ObjectLayer,
+            ) callconv(.C) jolt.BroadPhaseLayer {
+                const self = @as(*const MyBroadphaseLayerInterface, @ptrCast(iself));
+                return self.object_to_broad_phase[@as(usize, @intCast(layer))];
+            }
+
+            fn _getBroadPhaseLayerMsvc(
+                iself: *const jolt.BroadPhaseLayerInterface,
+                out_layer: *jolt.BroadPhaseLayer,
+                layer: jolt.ObjectLayer,
+            ) callconv(.C) *const jolt.BroadPhaseLayer {
+                const self = @as(*const MyBroadphaseLayerInterface, @ptrCast(iself));
+                out_layer.* = self.object_to_broad_phase[@as(usize, @intCast(layer))];
+                return out_layer;
+            }
+        };
+
+        const MyObjectVsBroadPhaseLayerFilter = extern struct {
+            usingnamespace jolt.ObjectVsBroadPhaseLayerFilter.Methods(@This());
+            __v: *const jolt.ObjectVsBroadPhaseLayerFilter.VTable = &vtable,
+
+            const vtable = jolt.ObjectVsBroadPhaseLayerFilter.VTable{ .shouldCollide = _shouldCollide };
+
+            fn _shouldCollide(
+                _: *const jolt.ObjectVsBroadPhaseLayerFilter,
+                layer1: jolt.ObjectLayer,
+                layer2: jolt.BroadPhaseLayer,
+            ) callconv(.C) bool {
+                return switch (layer1) {
+                    object_layers.non_moving => layer2 == broad_phase_layers.moving,
+                    object_layers.moving => true,
+                    else => unreachable,
+                };
+            }
+        };
+
+        const MyObjectLayerPairFilter = extern struct {
+            usingnamespace jolt.ObjectLayerPairFilter.Methods(@This());
+            __v: *const jolt.ObjectLayerPairFilter.VTable = &vtable,
+
+            const vtable = jolt.ObjectLayerPairFilter.VTable{ .shouldCollide = _shouldCollide };
+
+            fn _shouldCollide(
+                _: *const jolt.ObjectLayerPairFilter,
+                object1: jolt.ObjectLayer,
+                object2: jolt.ObjectLayer,
+            ) callconv(.C) bool {
+                return switch (object1) {
+                    object_layers.non_moving => object2 == object_layers.moving,
+                    object_layers.moving => true,
+                    else => unreachable,
+                };
+            }
+        };
+
+        const MyPhysicsStepListener = extern struct {
+            usingnamespace jolt.PhysicsStepListener.Methods(@This());
+            __v: *const jolt.PhysicsStepListener.VTable = &vtable,
+            steps_heard: u32 = 0,
+
+            const vtable = jolt.PhysicsStepListener.VTable{ .onStep = _onStep };
+
+            fn _onStep(psl: *jolt.PhysicsStepListener, delta_time: f32, physics_system: *jolt.PhysicsSystem) callconv(.C) void {
+                _ = delta_time;
+                _ = physics_system;
+                const self = @as(*MyPhysicsStepListener, @ptrCast(psl));
+                self.steps_heard += 1;
+            }
+        };
     };
 };
 
@@ -282,8 +287,6 @@ pub const World = struct {
             .phy = try Zphysics.init(),
         };
         errdefer self.deinit();
-
-        try self.phy.start();
 
         _ = try self.ecs.register([]const u8);
         _ = try self.ecs.register(math.Camera);
@@ -311,7 +314,7 @@ pub const World = struct {
     }
 
     pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
-        self.phy.update(sim_time, steps);
+        try self.phy.update(sim_time, steps);
 
         var it = try self.ecs.iterator(struct { t: Components.Transform, bid: Zphysics.BodyId });
         while (it.next()) |e| {

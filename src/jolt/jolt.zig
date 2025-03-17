@@ -221,6 +221,9 @@ pub const BroadPhaseLayerInterface = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const BroadPhaseLayerInterface {
+                return @ptrCast(self);
+            }
             pub inline fn getNumBroadPhaseLayers(self: *const T) u32 {
                 return @as(*const BroadPhaseLayerInterface.VTable, @ptrCast(self.__v))
                     .getNumBroadPhaseLayers(@as(*const BroadPhaseLayerInterface, @ptrCast(self)));
@@ -264,6 +267,9 @@ pub const ObjectVsBroadPhaseLayerFilter = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const ObjectVsBroadPhaseLayerFilter {
+                return @ptrCast(self);
+            }
             pub inline fn shouldCollide(self: *const T, layer1: ObjectLayer, layer2: BroadPhaseLayer) bool {
                 return @as(*const ObjectVsBroadPhaseLayerFilter.VTable, @ptrCast(self.__v))
                     .shouldCollide(@as(*const ObjectVsBroadPhaseLayerFilter, @ptrCast(self)), layer1, layer2);
@@ -296,6 +302,9 @@ pub const BroadPhaseLayerFilter = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const BroadPhaseLayerFilter {
+                return @ptrCast(self);
+            }
             pub inline fn shouldCollide(self: *const T, layer: BroadPhaseLayer) bool {
                 return @as(*const BroadPhaseLayerFilter.VTable, @ptrCast(self.__v))
                     .shouldCollide(@as(*const BroadPhaseLayerFilter, @ptrCast(self)), layer);
@@ -326,6 +335,9 @@ pub const ObjectLayerPairFilter = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const ObjectLayerPairFilter {
+                return @ptrCast(self);
+            }
             pub inline fn shouldCollide(self: *const T, layer1: ObjectLayer, layer2: ObjectLayer) bool {
                 return @as(*const ObjectLayerPairFilter.VTable, @ptrCast(self.__v))
                     .shouldCollide(@as(*const ObjectLayerPairFilter, @ptrCast(self)), layer1, layer2);
@@ -353,6 +365,9 @@ pub const ObjectLayerFilter = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const ObjectLayerFilter {
+                return @ptrCast(self);
+            }
             pub inline fn shouldCollide(self: *const T, layer: ObjectLayer) bool {
                 return @as(*const ObjectLayerFilter.VTable, @ptrCast(self.__v))
                     .shouldCollide(@as(*const ObjectLayerFilter, @ptrCast(self)), layer);
@@ -378,6 +393,9 @@ pub const PhysicsStepListener = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const PhysicsStepListener {
+                return @ptrCast(self);
+            }
             pub inline fn onStep(self: *const T, delta_time: f32, physics_system: *PhysicsSystem) void {
                 return @as(*const PhysicsStepListener.VTable, @ptrCast(self.__v))
                     .onStep(@as(*PhysicsStepListener, @ptrCast(self)), delta_time, physics_system);
@@ -403,6 +421,9 @@ pub const BodyActivationListener = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const BodyActivationListener {
+                return @ptrCast(self);
+            }
             pub inline fn onBodyActivated(
                 self: *T,
                 body_id: *const BodyId,
@@ -452,6 +473,9 @@ pub const CharacterContactListener = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const CharacterContactListener {
+                return @ptrCast(self);
+            }
             pub inline fn OnAdjustBodyVelocity(
                 self: *const T,
                 character: *const CharacterVirtual,
@@ -663,6 +687,9 @@ pub const ContactListener = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const ContactListener {
+                return @ptrCast(self);
+            }
             pub inline fn onContactValidate(
                 self: *T,
                 body1: *const Body,
@@ -759,6 +786,9 @@ pub const BodyFilter = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const BodyFilter {
+                return @ptrCast(self);
+            }
             pub inline fn shouldCollide(self: *const T, body_id: *const BodyId) bool {
                 return @as(*const BodyFilter.VTable, @ptrCast(self.__v))
                     .shouldCollide(@as(*const BodyFilter, @ptrCast(self)), body_id);
@@ -792,6 +822,9 @@ pub const ShapeFilter = extern struct {
 
     pub fn Methods(comptime T: type) type {
         return extern struct {
+            pub inline fn interface(self: *const T) *const ShapeFilter {
+                return @ptrCast(self);
+            }
             pub inline fn shouldCollide(
                 self: *const T,
                 receiving_body_id: u32,
