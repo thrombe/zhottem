@@ -302,13 +302,15 @@ static_assert(offsetof(JPH::RayCastResult, mBodyID) == offsetof(JPC_RayCastResul
 static_assert(offsetof(JPH::RayCastResult, mFraction) == offsetof(JPC_RayCastResult, fraction));
 static_assert(offsetof(JPH::RayCastResult, mSubShapeID2) == offsetof(JPC_RayCastResult, sub_shape_id));
 
-static_assert(offsetof(JPH::RayCastSettings, mBackFaceMode) == offsetof(JPC_RayCastSettings, back_face_mode));
+static_assert(offsetof(JPH::RayCastSettings, mBackFaceModeTriangles) == offsetof(JPC_RayCastSettings, back_face_mode_triangles));
+static_assert(offsetof(JPH::RayCastSettings, mBackFaceModeConvex) == offsetof(JPC_RayCastSettings, back_face_mode_convex));
 static_assert(offsetof(JPH::RayCastSettings, mTreatConvexAsSolid) ==
     offsetof(JPC_RayCastSettings, treat_convex_as_solid));
 
 static_assert(offsetof(JPH::CharacterBaseSettings, mRefCount) == offsetof(JPC_CharacterBaseSettings, ref_count));
 static_assert(offsetof(JPH::CharacterBaseSettings, mShape) == offsetof(JPC_CharacterBaseSettings, shape));
 static_assert(offsetof(JPH::CharacterSettings, mGravityFactor) == offsetof(JPC_CharacterSettings, gravity_factor));
+static_assert(offsetof(JPH::CharacterSettings, mAllowedDOFs) == offsetof(JPC_CharacterSettings, allowed_DOFs));
 static_assert(offsetof(JPH::CharacterVirtualSettings, mMaxNumHits) ==
     offsetof(JPC_CharacterVirtualSettings, max_num_hits));
 

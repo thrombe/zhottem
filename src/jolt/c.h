@@ -505,6 +505,7 @@ typedef struct JPC_CharacterSettings
     float mass;
     float friction;
     float gravity_factor;
+    JPC_AllowedDOFs allowed_DOFs;
 } JPC_CharacterSettings;
 
 // NOTE: Needs to be kept in sync
@@ -652,7 +653,8 @@ typedef struct JPC_RayCastResult
 // NOTE: Needs to be kept in sync with JPH::RayCastSettings
 typedef struct JPC_RayCastSettings
 {
-    JPC_BackFaceMode back_face_mode;
+    JPC_BackFaceMode back_face_mode_triangles;
+    JPC_BackFaceMode back_face_mode_convex;
     bool             treat_convex_as_solid;
 } JPC_RayCastSettings;
 
