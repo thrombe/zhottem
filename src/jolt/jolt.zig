@@ -2749,7 +2749,7 @@ pub const CharacterVirtual = opaque {
         c.JPC_CharacterVirtual_GetGroundVelocity(@as(*const c.JPC_CharacterVirtual, @ptrCast(character)), &velocity);
         return velocity;
     }
-    pub fn isNormal(character: *CharacterVirtual) bool {
+    pub fn isSupported(character: *CharacterVirtual) bool {
         return c.JPC_CharacterVirtual_IsSupported(@as(*c.JPC_CharacterVirtual, @ptrCast(character)));
     }
     pub fn getGroundNormal(character: *CharacterVirtual) [3]f32 {
