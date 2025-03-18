@@ -356,10 +356,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
     errdefer world.deinit();
+    var cmdbuf = world.ecs.deferred();
+    defer cmdbuf.deinit();
+
     var t: C.Transform = .{
         .pos = .{ .y = 5 },
     };
-    const player_id = try world.ecs.insert(.{
+    const player_id = try cmdbuf.insert(.{
         @as([]const u8, "player"),
         math.Camera.init(
             math.Camera.constants.basis.vulkan,
@@ -384,7 +387,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .pos = .{ .y = -3 },
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "floor"),
         t,
         C.LastTransform{ .t = t },
@@ -401,7 +404,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
@@ -419,7 +422,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
@@ -437,7 +440,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
@@ -455,7 +458,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "wall"),
         t,
         C.LastTransform{ .t = t },
@@ -493,7 +496,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // }
 
     t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "ball"),
         t,
         C.LastTransform{ .t = t },
@@ -507,7 +510,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
 
     t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
-    _ = try world.ecs.insert(.{
+    _ = try cmdbuf.insert(.{
         @as([]const u8, "ball"),
         t,
         C.LastTransform{ .t = t },
@@ -519,6 +522,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .pos = t.pos.xyz(),
         }),
     });
+    try cmdbuf.apply(@ptrCast(&world));
 
     const player = try world.ecs.get(player_id, struct { transform: C.Transform, camera: math.Camera, controller: C.Controller });
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
@@ -1534,7 +1538,7 @@ pub const AppState = struct {
             app.uniforms.uniform_buffer = try self.uniforms(window, &self.physics.interpolated(player.lt, player.transform), player.camera, player.controller);
         }
 
-        try self.cmdbuf.apply();
+        try self.cmdbuf.apply(@ptrCast(&app.world));
     }
 
     fn uniforms(

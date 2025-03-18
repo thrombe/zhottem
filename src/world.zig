@@ -33,11 +33,19 @@ pub const Jphysics = struct {
 
     pub const BodyId = struct {
         id: jolt.BodyId,
+
+        pub fn deinit_with_context(self: *@This(), ctx: *World) void {
+            ctx.phy.phy.getBodyInterfaceMut().removeAndDestroyBody(self.id);
+        }
     };
     pub const CharacterBody = struct {
         character: *jolt.CharacterVirtual,
         force: Vec3 = .{},
         impulse: Vec3 = .{},
+
+        pub fn deinit(self: *@This()) void {
+            self.character.destroy();
+        }
     };
 
     pub fn init(up: Vec3) !@This() {
@@ -119,7 +127,8 @@ pub const Jphysics = struct {
             },
         }
 
-        return .{ .id = try bodyi.createAndAddBody(body_settings, .activate) };
+        const bid = try bodyi.createAndAddBody(body_settings, .activate);
+        return .{ .id = bid };
     }
 
     pub fn add_character(self: *@This(), v: struct {
@@ -321,9 +330,11 @@ pub const World = struct {
 
     pub fn init(up: Vec3) !@This() {
         var self = @This(){
-            .ecs = try EntityComponentStore.init(),
-            .phy = try Jphysics.init(up),
+            .phy = undefined,
+            .ecs = undefined,
         };
+        self.phy = try Jphysics.init(up);
+        self.ecs = try EntityComponentStore.init(@ptrCast(&self));
         errdefer self.deinit();
 
         _ = try self.ecs.register([]const u8);
@@ -345,7 +356,7 @@ pub const World = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        self.ecs.deinit();
+        self.ecs.deinit(@ptrCast(self));
         self.phy.deinit();
     }
 
