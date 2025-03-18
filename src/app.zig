@@ -374,13 +374,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .hold = true,
         },
         C.PlayerId{ .id = 0 },
-        // try world.phy.add_body(.{
-        //     .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
-        //     .pos = t.pos.xyz(),
-        //     .rotation = t.rotation,
-        //     .motion_type = .dynamic,
-        //     .friction = 0.4,
-        // }),
         try world.phy.add_character(.{
             .pos = t.pos.xyz(),
             .rot = t.rotation,
@@ -1134,12 +1127,9 @@ pub const AppState = struct {
                                 .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
                                 .hold = true,
                             },
-                            try app.world.phy.add_body(.{
-                                .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
+                            try app.world.phy.add_character(.{
                                 .pos = t.pos.xyz(),
-                                .rotation = t.rotation,
-                                .motion_type = .dynamic,
-                                .friction = 0.4,
+                                .rot = t.rotation,
                             }),
                         });
                     },
@@ -1184,7 +1174,7 @@ pub const AppState = struct {
                             const right = rot.rotate_vector(camera.world_basis.right);
 
                             player.t.rotation = rot.normalize();
-                            // app.world.phy.set_rotation(player.bid.*, player.t.rotation);
+                            char.character.setRotation(player.t.rotation.to_buf());
 
                             var speed = player.controller.speed;
                             if (kb.shift.pressed()) {
@@ -1195,7 +1185,6 @@ pub const AppState = struct {
                             }
 
                             speed *= 50 * player.controller.speed;
-                            // speed /= player.r.invmass;
 
                             if (char.character.getGroundState() == .on_ground) {
                                 if (kb.w.pressed()) {
