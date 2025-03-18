@@ -38,7 +38,7 @@ const ecs_mod = @import("ecs.zig");
 const Entity = ecs_mod.Entity;
 
 const world_mod = @import("world.zig");
-const jolt = world_mod.Zphysics.jolt;
+const jolt = world_mod.Jphysics.jolt;
 const World = world_mod.World;
 const Components = world_mod.Components;
 
@@ -49,8 +49,8 @@ const InstanceAllocator = resources_mod.InstanceAllocator;
 
 const C = struct {
     usingnamespace Components;
-    const BodyId = world_mod.Zphysics.BodyId;
-    const CharacterBody = world_mod.Zphysics.CharacterBody;
+    const BodyId = world_mod.Jphysics.BodyId;
+    const CharacterBody = world_mod.Jphysics.CharacterBody;
 };
 
 const main = @import("main.zig");

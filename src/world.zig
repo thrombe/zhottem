@@ -18,7 +18,7 @@ const EntityComponentStore = ecs_mod.EntityComponentStore;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-pub const Zphysics = struct {
+pub const Jphysics = struct {
     pub const jolt = @import("jolt/jolt.zig");
 
     phy: *jolt.PhysicsSystem,
@@ -131,12 +131,21 @@ pub const Zphysics = struct {
         const shape = try jolt.CapsuleShapeSettings.create(v.half_height, v.radius);
         defer shape.release();
 
-        const rotated = try jolt.DecoratedShapeSettings.createRotatedTranslated(shape.asShapeSettings(), Vec4.quat_identity_rot().to_buf(), (Vec3{ .y = -v.half_height - v.radius }).to_buf());
+        const rotated = try jolt.DecoratedShapeSettings.createRotatedTranslated(
+            shape.asShapeSettings(),
+            Vec4.quat_identity_rot().to_buf(),
+            (Vec3{ .y = -v.half_height - v.radius }).to_buf(),
+        );
         settings.base.shape = try rotated.createShape();
         settings.inner_body_shape = try shape.createShape();
         settings.inner_body_layer = Impl.object_layers.moving;
 
-        const character = try jolt.CharacterVirtual.create(settings, v.pos.to_buf(), v.rot.to_buf(), self.phy);
+        const character = try jolt.CharacterVirtual.create(
+            settings,
+            v.pos.to_buf(),
+            v.rot.to_buf(),
+            self.phy,
+        );
 
         return .{ .character = character };
     }
@@ -305,7 +314,7 @@ pub const Zphysics = struct {
 
 pub const World = struct {
     ecs: EntityComponentStore,
-    phy: Zphysics,
+    phy: Jphysics,
 
     pub fn init() !@This() {
         var self = @This(){
@@ -326,8 +335,8 @@ pub const World = struct {
         _ = try self.ecs.register(Components.PlayerId);
         _ = try self.ecs.register(Components.StaticRender);
         _ = try self.ecs.register(Components.AnimatedRender);
-        _ = try self.ecs.register(Zphysics.BodyId);
-        _ = try self.ecs.register(Zphysics.CharacterBody);
+        _ = try self.ecs.register(Jphysics.BodyId);
+        _ = try self.ecs.register(Jphysics.CharacterBody);
 
         return self;
     }
@@ -340,16 +349,16 @@ pub const World = struct {
     pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
         try self.phy.update(sim_time, steps);
 
-        var it = try self.ecs.iterator(struct { t: Components.Transform, bid: Zphysics.BodyId });
+        var it = try self.ecs.iterator(struct { t: Components.Transform, bid: Jphysics.BodyId });
         while (it.next()) |e| {
             const t = self.phy.get_transform(e.bid.*);
             e.t.pos = t.pos;
             e.t.rotation = t.rotation;
         }
 
-        var player_it = try self.ecs.iterator(struct { t: Components.Transform, char: Zphysics.CharacterBody });
+        var player_it = try self.ecs.iterator(struct { t: Components.Transform, char: Jphysics.CharacterBody });
         while (player_it.next()) |e| {
-            const char: *Zphysics.CharacterBody = e.char;
+            const char: *Jphysics.CharacterBody = e.char;
             char.force = .{};
             const pos = Vec3.from_buf(char.character.getPosition());
             const rot = Vec4.from_buf(char.character.getRotation());
