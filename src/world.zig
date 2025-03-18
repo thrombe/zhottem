@@ -37,6 +37,7 @@ pub const Jphysics = struct {
     pub const CharacterBody = struct {
         character: *jolt.CharacterVirtual,
         force: Vec3 = .{},
+        impulse: Vec3 = .{},
     };
 
     pub fn init(up: Vec3) !@This() {
@@ -362,6 +363,7 @@ pub const World = struct {
         while (player_it.next()) |e| {
             const char: *Jphysics.CharacterBody = e.char;
             char.force = .{};
+            char.impulse = .{};
             const pos = Vec3.from_buf(char.character.getPosition());
             const rot = Vec4.from_buf(char.character.getRotation());
             e.t.pos = pos.withw(0);

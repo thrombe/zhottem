@@ -1167,6 +1167,7 @@ pub const AppState = struct {
                             const kb = pinput.input.keys;
                             const mouse = pinput.input.mouse;
 
+                            const char: *C.CharacterBody = player.char;
                             player.controller.did_move = kb.w.pressed() or kb.a.pressed() or kb.s.pressed() or kb.d.pressed();
                             player.controller.did_rotate = @abs(mouse.dx) + @abs(mouse.dy) > 0.0001;
 
@@ -1178,6 +1179,7 @@ pub const AppState = struct {
                             }
 
                             const rot = camera.rot_quat(player.controller.pitch, player.controller.yaw);
+                            const up = rot.rotate_vector(camera.world_basis.up);
                             const fwd = rot.rotate_vector(camera.world_basis.fwd);
                             const right = rot.rotate_vector(camera.world_basis.right);
 
@@ -1195,21 +1197,24 @@ pub const AppState = struct {
                             speed *= 50 * player.controller.speed;
                             // speed /= player.r.invmass;
 
-                            if (kb.w.pressed()) {
-                                player.char.force = player.char.force.add(fwd.scale(speed).xyz());
-                            }
-                            if (kb.a.pressed()) {
-                                player.char.force = player.char.force.add(right.scale(-speed).xyz());
-                            }
-                            if (kb.s.pressed()) {
-                                player.char.force = player.char.force.add(fwd.scale(-speed).xyz());
-                            }
-                            if (kb.d.pressed()) {
-                                player.char.force = player.char.force.add(right.scale(speed).xyz());
+                            if (char.character.getGroundState() == .on_ground) {
+                                if (kb.w.pressed()) {
+                                    player.char.force = player.char.force.add(fwd.scale(speed).xyz());
+                                }
+                                if (kb.a.pressed()) {
+                                    player.char.force = player.char.force.add(right.scale(-speed).xyz());
+                                }
+                                if (kb.s.pressed()) {
+                                    player.char.force = player.char.force.add(fwd.scale(-speed).xyz());
+                                }
+                                if (kb.d.pressed()) {
+                                    player.char.force = player.char.force.add(right.scale(speed).xyz());
+                                }
                             }
                             if (kb.space.pressed()) {
-                                // player.r.force = .{};
-                                // player.r.vel = .{};
+                                if (char.character.getGroundState() == .on_ground) {
+                                    char.impulse = up.xyz().scale(10);
+                                }
                             }
 
                             // {
@@ -1310,7 +1315,12 @@ pub const AppState = struct {
                     if (char.character.getGroundState() == .on_ground) {
                         const ground = Vec3.from_buf(char.character.getGroundNormal());
                         vel = vel.sub(ground.scale(vel.dot(ground)));
+
+                        // friction
+                        vel = vel.scale(0.9);
                     }
+
+                    vel = vel.add(char.impulse);
                     char.character.setLinearVelocity(vel.to_buf());
 
                     const update_settings: jolt.CharacterVirtual.ExtendedUpdateSettings = .{};
