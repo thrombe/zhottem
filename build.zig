@@ -121,7 +121,8 @@ fn jolt_step(b: *std.Build, v: struct {
     const options = b.addOptions();
     const jolt_options = .{
         .use_double_precision = false,
-        .enable_asserts = v.optimize == .Debug,
+        // .enable_asserts = v.optimize == .Debug,
+        .enable_asserts = false,
         .enable_cross_platform_determinism = false,
         .enable_debug_renderer = false,
     };
@@ -154,6 +155,7 @@ fn jolt_step(b: *std.Build, v: struct {
             "-std=c++17",
             "-fno-exceptions",
             "-fno-sanitize=undefined",
+            "-fno-access-control",
 
             if (jolt_options.enable_cross_platform_determinism) "-DJPH_CROSS_PLATFORM_DETERMINISTIC" else "",
             if (jolt_options.enable_debug_renderer) "-DJPH_DEBUG_RENDERER" else "",
@@ -239,6 +241,9 @@ fn step(b: *std.Build, v: struct {
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
                 .flags = &[_][]const u8{
+                    "-std=c++17",
+                    "-fno-exceptions",
+                    "-fno-sanitize=undefined",
                     "-fno-access-control",
                 } ++ compile_commands_flags,
                 .files = &[_][]const u8{
