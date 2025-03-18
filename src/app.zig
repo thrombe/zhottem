@@ -635,6 +635,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
 }
 
 pub fn pre_reload(self: *@This()) !void {
+    self.world.phy.pre_reload();
     try self.recorder.pre_reload();
     try self.audio.pre_reload();
 }
