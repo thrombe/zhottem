@@ -354,7 +354,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const sphere_instance_handle = try cpu.batch_reserve(100);
     try instance_manager.instances.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
 
-    var world = try World.init();
+    var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
     errdefer world.deinit();
     var t: C.Transform = .{
         .pos = .{ .y = 5 },

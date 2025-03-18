@@ -39,7 +39,7 @@ pub const Jphysics = struct {
         force: Vec3 = .{},
     };
 
-    pub fn init() !@This() {
+    pub fn init(up: Vec3) !@This() {
         try jolt.init(allocator.*, .{});
         errdefer jolt.deinit();
 
@@ -59,6 +59,8 @@ pub const Jphysics = struct {
             },
         );
         errdefer ps.destroy();
+
+        ps.setGravity(up.scale(-16).to_buf());
 
         return .{ .phy = ps, .state = state };
     }
@@ -316,10 +318,10 @@ pub const World = struct {
     ecs: EntityComponentStore,
     phy: Jphysics,
 
-    pub fn init() !@This() {
+    pub fn init(up: Vec3) !@This() {
         var self = @This(){
             .ecs = try EntityComponentStore.init(),
-            .phy = try Zphysics.init(),
+            .phy = try Jphysics.init(up),
         };
         errdefer self.deinit();
 
