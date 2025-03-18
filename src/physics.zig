@@ -112,6 +112,38 @@ const Components = struct {
             }
         };
     };
+
+    pub const Collider = union(enum) {
+        sphere: Sphere,
+        plane: Plane,
+        cuboid: Cuboid,
+
+        pub const Sphere = struct {
+            center: Vec4 = .{},
+            radius: f32,
+        };
+        pub const Plane = struct {
+            normal: Vec4 = .{ .y = 1 },
+            offset: f32 = 0,
+        };
+        pub const Cuboid = struct {
+            center: Vec4 = .{},
+            half_extent: Vec4,
+        };
+    };
+
+    pub const CableAttached = struct {
+        length: f32,
+        restitution: f32,
+        a: Entity,
+        b: Entity,
+    };
+
+    pub const RodAttached = struct {
+        length: f32,
+        a: Entity,
+        b: Entity,
+    };
 };
 
 pub const EntityCollider = struct {

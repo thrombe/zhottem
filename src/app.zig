@@ -489,7 +489,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //         @as([]const u8, "persistent balls"),
     //         C.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
     //         C.Rigidbody{},
-    //         C.Collider{ .sphere = .{ .radius = 1 } },
     //         C.AnimatedRender{ .model = sphere_model_handle },
     //     });
     // }
@@ -499,7 +498,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         @as([]const u8, "ball"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
         C.StaticRender{ .mesh = cube_mesh_handle },
         try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -514,7 +512,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         @as([]const u8, "ball"),
         t,
         C.LastTransform{ .t = t },
-        C.Collider{ .sphere = .{ .radius = 1 } },
         C.StaticRender{ .mesh = cube_mesh_handle },
         try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -1123,7 +1120,6 @@ pub const AppState = struct {
                             t,
                             C.LastTransform{ .t = t },
                             C.Controller{},
-                            C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
                             C.StaticRender{ .mesh = app.handles.mesh.cube },
                             C.PlayerId{ .id = id.id, .addr = e.addr },
                             C.Shooter{
@@ -1247,7 +1243,6 @@ pub const AppState = struct {
                                     t,
                                     C.LastTransform{ .t = t },
                                     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                    // C.Collider{ .cuboid = .{ .half_extent = Vec4.splat3(1) } },
                                     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     C.StaticRender{ .mesh = app.handles.mesh.cube },
                                     C.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },

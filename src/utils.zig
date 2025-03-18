@@ -108,7 +108,7 @@ pub const TypeId = extern struct {
                     hasher.update(std.mem.asBytes(&@as(u32, t.len)));
                     hasher.update(std.mem.asBytes(&TypeId._from_type(t.child)));
                 },
-                .bool, .void => {},
+                .bool, .void, .@"opaque" => {},
                 else => @compileLog("can't do TypeIds on this type yet: " ++ @typeName(T)),
             }
 
@@ -521,6 +521,7 @@ pub const FsFuse = struct {
                 // flags |= c.AttributeModified;
                 // flags |= c.MovedFrom;
                 flags |= c.MovedTo;
+                // flags |= c.CloseWrite;
 
                 for (events[0..@intCast(num)]) |event| {
                     for (event.flags[0..event.flags_num]) |f| {

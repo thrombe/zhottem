@@ -296,9 +296,6 @@ pub const World = struct {
         _ = try self.ecs.register(Components.StaticSound);
         _ = try self.ecs.register(Components.Transform);
         _ = try self.ecs.register(Components.LastTransform);
-        _ = try self.ecs.register(Components.Collider);
-        _ = try self.ecs.register(Components.CableAttached);
-        _ = try self.ecs.register(Components.RodAttached);
         _ = try self.ecs.register(Components.TimeDespawn);
         _ = try self.ecs.register(Components.PlayerId);
         _ = try self.ecs.register(Components.StaticRender);
@@ -401,38 +398,6 @@ pub const Components = struct {
         pos: Vec4,
         start_frame: u64,
         volume: f32 = 1.0,
-    };
-
-    pub const Collider = union(enum) {
-        sphere: Sphere,
-        plane: Plane,
-        cuboid: Cuboid,
-
-        pub const Sphere = struct {
-            center: Vec4 = .{},
-            radius: f32,
-        };
-        pub const Plane = struct {
-            normal: Vec4 = .{ .y = 1 },
-            offset: f32 = 0,
-        };
-        pub const Cuboid = struct {
-            center: Vec4 = .{},
-            half_extent: Vec4,
-        };
-    };
-
-    pub const CableAttached = struct {
-        length: f32,
-        restitution: f32,
-        a: Entity,
-        b: Entity,
-    };
-
-    pub const RodAttached = struct {
-        length: f32,
-        a: Entity,
-        b: Entity,
     };
 
     // TODO: better despawn strategy.
