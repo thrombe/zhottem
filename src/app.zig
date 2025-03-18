@@ -1259,6 +1259,7 @@ pub const AppState = struct {
                                         .velocity = fwd.xyz().scale(50),
                                         .friction = 0.4,
                                         .rotation = t.rotation,
+                                        .motion_quality = .linear_cast,
                                     }),
                                 });
                                 _ = try self.cmdbuf.insert(.{
