@@ -19,7 +19,7 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 pub const Zphysics = struct {
-    const jolt = @import("jolt/jolt.zig");
+    pub const jolt = @import("jolt/jolt.zig");
 
     phy: *jolt.PhysicsSystem,
     global_state: ?jolt.GlobalState = null,
@@ -33,6 +33,10 @@ pub const Zphysics = struct {
 
     pub const BodyId = struct {
         id: jolt.BodyId,
+    };
+    pub const CharacterBody = struct {
+        character: *jolt.CharacterVirtual,
+        force: Vec3 = .{},
     };
 
     pub fn init() !@This() {
@@ -113,6 +117,28 @@ pub const Zphysics = struct {
         }
 
         return .{ .id = try bodyi.createAndAddBody(body_settings, .activate) };
+    }
+
+    pub fn add_character(self: *@This(), v: struct {
+        pos: Vec3 = .{},
+        rot: Vec4 = .quat_identity_rot(),
+        half_height: f32 = 1.0,
+        radius: f32 = 0.4,
+    }) !CharacterBody {
+        const settings = try jolt.CharacterVirtualSettings.create();
+        defer settings.release();
+
+        const shape = try jolt.CapsuleShapeSettings.create(v.half_height, v.radius);
+        defer shape.release();
+
+        const rotated = try jolt.DecoratedShapeSettings.createRotatedTranslated(shape.asShapeSettings(), Vec4.quat_identity_rot().to_buf(), (Vec3{ .y = -v.half_height - v.radius }).to_buf());
+        settings.base.shape = try rotated.createShape();
+        settings.inner_body_shape = try shape.createShape();
+        settings.inner_body_layer = Impl.object_layers.moving;
+
+        const character = try jolt.CharacterVirtual.create(settings, v.pos.to_buf(), v.rot.to_buf(), self.phy);
+
+        return .{ .character = character };
     }
 
     pub fn get_transform(self: *@This(), bid: BodyId) Components.Transform {
@@ -301,6 +327,7 @@ pub const World = struct {
         _ = try self.ecs.register(Components.StaticRender);
         _ = try self.ecs.register(Components.AnimatedRender);
         _ = try self.ecs.register(Zphysics.BodyId);
+        _ = try self.ecs.register(Zphysics.CharacterBody);
 
         return self;
     }
@@ -318,6 +345,16 @@ pub const World = struct {
             const t = self.phy.get_transform(e.bid.*);
             e.t.pos = t.pos;
             e.t.rotation = t.rotation;
+        }
+
+        var player_it = try self.ecs.iterator(struct { t: Components.Transform, char: Zphysics.CharacterBody });
+        while (player_it.next()) |e| {
+            const char: *Zphysics.CharacterBody = e.char;
+            char.force = .{};
+            const pos = Vec3.from_buf(char.character.getPosition());
+            const rot = Vec4.from_buf(char.character.getRotation());
+            e.t.pos = pos.withw(0);
+            e.t.rotation = rot;
         }
     }
 };

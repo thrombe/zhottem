@@ -38,6 +38,7 @@ const ecs_mod = @import("ecs.zig");
 const Entity = ecs_mod.Entity;
 
 const world_mod = @import("world.zig");
+const jolt = world_mod.Zphysics.jolt;
 const World = world_mod.World;
 const Components = world_mod.Components;
 
@@ -49,6 +50,7 @@ const InstanceAllocator = resources_mod.InstanceAllocator;
 const C = struct {
     usingnamespace Components;
     const BodyId = world_mod.Zphysics.BodyId;
+    const CharacterBody = world_mod.Zphysics.CharacterBody;
 };
 
 const main = @import("main.zig");
@@ -372,12 +374,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .hold = true,
         },
         C.PlayerId{ .id = 0 },
-        try world.phy.add_body(.{
-            .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
+        // try world.phy.add_body(.{
+        //     .shape = .{ .capsule = .{ .radius = 0.4, .half_height = 1 } },
+        //     .pos = t.pos.xyz(),
+        //     .rotation = t.rotation,
+        //     .motion_type = .dynamic,
+        //     .friction = 0.4,
+        // }),
+        try world.phy.add_character(.{
             .pos = t.pos.xyz(),
-            .rotation = t.rotation,
-            .motion_type = .dynamic,
-            .friction = 0.4,
+            .rot = t.rotation,
         }),
     });
 
@@ -1151,7 +1157,7 @@ pub const AppState = struct {
                             t: C.Transform,
                             lt: C.LastTransform,
                             shooter: C.Shooter,
-                            bid: C.BodyId,
+                            char: C.CharacterBody,
                         });
 
                         while (pit.next()) |player| {
@@ -1189,16 +1195,16 @@ pub const AppState = struct {
                             // speed /= player.r.invmass;
 
                             if (kb.w.pressed()) {
-                                app.world.phy.apply_force(player.bid.*, fwd.scale(speed).xyz());
+                                player.char.force = player.char.force.add(fwd.scale(speed).xyz());
                             }
                             if (kb.a.pressed()) {
-                                app.world.phy.apply_force(player.bid.*, right.scale(-speed).xyz());
+                                player.char.force = player.char.force.add(right.scale(-speed).xyz());
                             }
                             if (kb.s.pressed()) {
-                                app.world.phy.apply_force(player.bid.*, fwd.scale(-speed).xyz());
+                                player.char.force = player.char.force.add(fwd.scale(-speed).xyz());
                             }
                             if (kb.d.pressed()) {
-                                app.world.phy.apply_force(player.bid.*, right.scale(speed).xyz());
+                                player.char.force = player.char.force.add(right.scale(speed).xyz());
                             }
                             if (kb.space.pressed()) {
                                 // player.r.force = .{};
@@ -1291,6 +1297,23 @@ pub const AppState = struct {
                 //     }
                 // }
 
+                var player_it = try app.world.ecs.iterator(struct { char: C.CharacterBody });
+                while (player_it.next()) |e| {
+                    const char: *C.CharacterBody = e.char;
+                    char.force = char.force.add(Vec3.from_buf(app.world.phy.phy.getGravity()));
+
+                    var vel = Vec3.from_buf(char.character.getLinearVelocity());
+                    vel = vel.add(char.force.scale(self.physics.step));
+
+                    if (char.character.getGroundState() == .on_ground) {
+                        const ground = Vec3.from_buf(char.character.getGroundNormal());
+                        vel = vel.sub(ground.scale(vel.dot(ground)));
+                    }
+                    char.character.setLinearVelocity(vel.to_buf());
+
+                    const update_settings: jolt.CharacterVirtual.ExtendedUpdateSettings = .{};
+                    char.character.extendedUpdate(self.physics.step, (Vec3{ .y = -1 }).to_buf(), &update_settings, .{});
+                }
                 try app.world.step(self.physics.step * steps, @intFromFloat(steps));
 
                 self.physics.interpolation_acctime = self.physics.acctime;
