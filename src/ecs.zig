@@ -169,18 +169,17 @@ pub const Archetype = struct {
         };
     }
 
-    pub fn swap_remove(self: *@This(), component_sizes: []u16, vtables: []EntityComponentStore.ComponentVtable, index: usize) void {
+    pub fn swap_remove(self: *@This(), component_sizes: []u16, vtables: []EntityComponentStore.ComponentVtable, index: usize, deleted: bool) void {
         var it = self.typ.iterator(component_sizes);
 
         for (self.components) |*comp| {
             const compid = it.next().?;
 
+            const to_delete = comp.items[index * compid.size ..][0..compid.size];
+            if (deleted) vtables[compid.id].maybe_deinit(@ptrCast(to_delete.ptr));
+
             if ((index + 1) * compid.size != comp.items.len) {
-                const to_delete = comp.items[index * compid.size ..][0..compid.size];
                 const last = comp.items[comp.items.len - compid.size ..];
-
-                vtables[compid.id].maybe_deinit(@ptrCast(to_delete.ptr));
-
                 @memcpy(to_delete, last);
             }
 
@@ -417,9 +416,9 @@ pub const EntityComponentStore = struct {
         return t;
     }
 
-    fn swap_remove(self: *@This(), ae: ArchetypeEntity) void {
+    fn swap_remove(self: *@This(), ae: ArchetypeEntity, deleted: bool) void {
         const archetype = &self.archetypes.items[ae.archetype];
-        defer archetype.swap_remove(self.component_sizes.items, self.vtables.items, ae.entity_index);
+        defer archetype.swap_remove(self.component_sizes.items, self.vtables.items, ae.entity_index, deleted);
 
         if (archetype.count - 1 != ae.entity_index) {
             const entity_ci = archetype.typ.index(self.entityid_component_id).?;
@@ -430,7 +429,7 @@ pub const EntityComponentStore = struct {
 
     pub fn delete(self: *@This(), entity: Entity) !void {
         const ae = self.entities.fetchSwapRemove(entity) orelse return error.EntityNotFound;
-        self.swap_remove(ae.value);
+        self.swap_remove(ae.value, true);
     }
 
     pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
@@ -454,7 +453,7 @@ pub const EntityComponentStore = struct {
         const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
         const archetype = &self.archetypes.items[archeid];
         defer {
-            self.swap_remove(ae.value_ptr.*);
+            self.swap_remove(ae.value_ptr.*, false);
             ae.value_ptr.* = .{
                 .archetype = archeid,
                 .entity_index = archetype.count,
@@ -497,7 +496,7 @@ pub const EntityComponentStore = struct {
         const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
         const archetype = &self.archetypes.items[archeid];
         defer {
-            self.swap_remove(ae.value_ptr.*);
+            self.swap_remove(ae.value_ptr.*, false);
             ae.value_ptr.* = .{
                 .archetype = archeid,
                 .entity_index = archetype.count,
@@ -511,7 +510,9 @@ pub const EntityComponentStore = struct {
         while (curr_archetype.components.len > j) : (j += 1) {
             const curr_compid = it.next().?;
 
-            if (!std.meta.eql(compid, curr_compid)) {
+            if (std.meta.eql(compid, curr_compid)) {
+                self.vtables.items[compid.id].maybe_deinit(@ptrCast(curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size].ptr));
+            } else {
                 defer i += 1;
                 try archetype.components[i].appendSlice(curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size]);
             }
