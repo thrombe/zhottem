@@ -3378,6 +3378,18 @@ JPC_CharacterVirtual_ExtendedUpdate(JPC_CharacterVirtual *in_character,
         *reinterpret_cast<JPH::TempAllocator *>(in_temp_allocator));
 }
 //--------------------------------------------------------------------------------------------------
+JPC_API void
+JPC_CharacterVirtual_GetGroundNormal(const JPC_CharacterVirtual *in_character, float out_ground_normal[3])
+{
+    storeVec3(out_ground_normal, toJph(in_character)->GetGroundNormal());
+}
+//--------------------------------------------------------------------------------------------------
+JPC_API bool
+JPC_CharacterVirtual_IsSupported(const JPC_CharacterVirtual *in_character)
+{
+    return toJph(in_character)->IsSupported();
+}
+//--------------------------------------------------------------------------------------------------
 JPC_API JPC_CharacterGroundState
 JPC_CharacterVirtual_GetGroundState(JPC_CharacterVirtual *in_character)
 {

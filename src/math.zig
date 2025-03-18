@@ -275,6 +275,11 @@ pub const Vec4 = extern struct {
         return .{ self.x, self.y, self.z, self.w };
     }
 
+    pub fn from_buf(buf: anytype) @This() {
+        if (comptime buf.len > 4) @compileError("buffer is too long for Vec4");
+        return .{ .x = buf[0], .y = buf[1], .z = buf[2], .w = buf[3] };
+    }
+
     pub fn random(rng: *const Rng) @This() {
         return .{
             .x = rng.next(),
@@ -403,6 +408,11 @@ pub const Vec3 = extern struct {
 
     pub fn to_buf(self: *const @This()) [3]f32 {
         return .{ self.x, self.y, self.z };
+    }
+
+    pub fn from_buf(buf: anytype) @This() {
+        if (comptime buf.len > 3) @compileError("buffer is too long for Vec3");
+        return .{ .x = buf[0], .y = buf[1], .z = buf[2] };
     }
 
     pub fn random(rng: *const Rng) @This() {
