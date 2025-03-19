@@ -182,16 +182,26 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         pub fn fill(self: *@This(), frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
             const min = 1.0;
             const max = 100.0;
-            var dist = self.pos.length();
-            dist = @min(max, @max(min, dist));
+            const original_dist = self.pos.length();
+            const dist = @min(max, @max(min, original_dist));
 
             const att = self.volume / dist;
 
-            // const angle = std.math.atan2(0, self.pos.x);
-            // const pan = (angle + std.math.pi) / std.math.tau;
-            const pan = 1.0;
-            const left = 1.0 - pan;
-            const right = pan;
+            const right_dot = 0.5 * if (original_dist > 0.01) self.pos.x / original_dist else 0.0;
+            var left = 0.5 - right_dot;
+            var right = 0.5 + right_dot;
+
+            // rescale in [0, 1]
+            left *= 2;
+            right *= 2;
+
+            // 20% audio always leaks into the other ear
+            left = left * 0.8 + 0.2;
+            right = right * 0.8 + 0.2;
+
+            // if close, we leak more
+            left = @min(1.0, left + 1.0 / @max(0.01, original_dist));
+            right = @min(1.0, right + 1.0 / @max(0.01, original_dist));
 
             const sample = samples[self.handle.index].data;
             var index = frame_count - self.start_frame;
