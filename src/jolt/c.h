@@ -510,11 +510,11 @@ typedef struct JPC_CharacterBaseSettings
 {
     _JPC_REFTARGET_HEADER_ALIGN_16;
 
-    vec3   up;
-    vec4   supporting_volume;
-    float               max_slope_angle;
-    bool                enhanced_internal_edge_removal;
-    const JPC_Shape *   shape;
+    vec3 up;
+    vec4 supporting_volume;
+    float max_slope_angle;
+    bool enhanced_internal_edge_removal;
+    const JPC_Shape * shape;
 } JPC_CharacterBaseSettings;
 
 // NOTE: Needs to be kept in sync
@@ -533,22 +533,22 @@ typedef struct JPC_CharacterVirtualSettings
 {
     JPC_CharacterBaseSettings base;
     JPC_CharacterID char_id;
-    float               mass;
-    float               max_strength;
-    vec3   shape_offset;
-    JPC_BackFaceMode    back_face_mode;
-    float               predictive_contact_distance;
-    uint32_t            max_collision_iterations;
-    uint32_t            max_constraint_iterations;
-    float               min_time_remaining;
-    float               collision_tolerance;
-    float               character_padding;
-    uint32_t            max_num_hits;
-    float               hit_reduction_cos_max_angle;
-    float               penetration_recovery_speed;
-    const JPC_Shape *   inner_body_shape;
+    float mass;
+    float max_strength;
+    vec3 shape_offset;
+    JPC_BackFaceMode back_face_mode;
+    float predictive_contact_distance;
+    uint32_t max_collision_iterations;
+    uint32_t max_constraint_iterations;
+    float min_time_remaining;
+    float collision_tolerance;
+    float character_padding;
+    uint32_t max_num_hits;
+    float hit_reduction_cos_max_angle;
+    float penetration_recovery_speed;
+    const JPC_Shape* inner_body_shape;
     JPC_BodyID inner_body_id;
-    JPC_ObjectLayer     inner_body_layer;
+    JPC_ObjectLayer inner_body_layer;
 } JPC_CharacterVirtualSettings;
 
 // NOTE: Needs to be kept in sync with JPH::SubShapeIDCreator
@@ -955,8 +955,8 @@ typedef struct JPC_CharacterContactListenerVTable
                       const JPC_CharacterVirtual *in_character,
                       const JPC_Body *in_body2,
                       const JPC_SubShapeID *sub_shape_id,
-                          rvec3 contact_position,
-                           vec3 contact_normal,
+                      rvec3 contact_position,
+                      vec3 contact_normal,
                       JPC_CharacterContactSettings *io_settings);
 
     // Required, *cannot* be NULL.
@@ -966,7 +966,7 @@ typedef struct JPC_CharacterContactListenerVTable
                           const JPC_BodyID *body,
                           const JPC_SubShapeID *sub_shape_id,
                           rvec3 contact_position,
-                           vec3 contact_normal,
+                          vec3 contact_normal,
                           JPC_CharacterContactSettings *io_settings);
 
     // Required, *cannot* be NULL.
@@ -982,8 +982,8 @@ typedef struct JPC_CharacterContactListenerVTable
                                const JPC_CharacterVirtual *in_character,
                                const JPC_CharacterVirtual *in_other_character,
                                const JPC_SubShapeID *sub_shape_id,
-                          rvec3 contact_position,
-                           vec3 contact_normal,
+                               rvec3 contact_position,
+                               vec3 contact_normal,
                                JPC_CharacterContactSettings *io_settings);
 
     // Required, *cannot* be NULL.
@@ -992,8 +992,8 @@ typedef struct JPC_CharacterContactListenerVTable
                                     const JPC_CharacterVirtual *character,
                                     const JPC_CharacterVirtual *other_character,
                                     const JPC_SubShapeID *sub_shape_id,
-                          rvec3 contact_position,
-                           vec3 contact_normal,
+                                    rvec3 contact_position,
+                                    vec3 contact_normal,
                                     JPC_CharacterContactSettings *io_settings);
 
     // Required, *cannot* be NULL.
@@ -1010,8 +1010,8 @@ typedef struct JPC_CharacterContactListenerVTable
                       const JPC_Body *in_body2,
                       const JPC_SubShapeID *sub_shape_id,
                       rvec3 contact_position,
-                       vec3 contact_normal,
-                       vec3 contact_velocity,
+                      vec3 contact_normal,
+                      vec3 contact_velocity,
                       const JPC_PhysicsMaterial *contact_material,
                                vec3 character_velocity_in,
                                vec3* character_velocity_out);
