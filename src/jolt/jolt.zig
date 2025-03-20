@@ -2,7 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const options = @import("jolt-options");
-const c = @cImport({
+pub const c = @cImport({
     if (options.use_double_precision) @cDefine("JPH_DOUBLE_PRECISION", "");
     if (options.enable_asserts) @cDefine("JPH_ENABLE_ASSERTS", "");
     if (options.enable_cross_platform_determinism) @cDefine("JPH_CROSS_PLATFORM_DETERMINISTIC", "");
@@ -26,6 +26,7 @@ pub const SharedMutex = opaque {};
 
 pub const BroadPhaseLayer = c.JPC_BroadPhaseLayer;
 pub const ObjectLayer = c.JPC_ObjectLayer;
+pub const CharacterId = c.JPC_CharacterID;
 pub const BodyId = c.JPC_BodyID;
 pub const SubShapeId = c.JPC_SubShapeID;
 
@@ -479,9 +480,9 @@ pub const CharacterContactListener = extern struct {
             pub inline fn OnAdjustBodyVelocity(
                 self: *const T,
                 character: *const CharacterVirtual,
-                body: *const Body,
-                io_linear_velocity: *[3]f32,
-                io_angular_velocity: *[3]f32,
+                body: *const BodyId,
+                io_linear_velocity: *c.vec3,
+                io_angular_velocity: *c.vec3,
             ) void {
                 return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnAdjustBodyVelocity(
                     @as(*CharacterContactListener, @ptrCast(self)),
@@ -494,7 +495,7 @@ pub const CharacterContactListener = extern struct {
             pub inline fn OnContactValidate(
                 self: *const T,
                 character: *const CharacterVirtual,
-                body: *const Body,
+                body: *const BodyId,
                 sub_shape_id: *const SubShapeId,
             ) bool {
                 return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnContactValidate(
@@ -520,10 +521,10 @@ pub const CharacterContactListener = extern struct {
             pub inline fn OnContactAdded(
                 self: *const T,
                 character: *const CharacterVirtual,
-                body: *const Body,
+                body: *const BodyId,
                 sub_shape_id: *const SubShapeId,
-                contact_position: *const [3]Real,
-                contact_normal: *const [3]f32,
+                contact_position: c.rvec3,
+                contact_normal: c.vec3,
                 io_settings: *CharacterContactSettings,
             ) void {
                 return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnContactAdded(
@@ -541,8 +542,8 @@ pub const CharacterContactListener = extern struct {
                 character: *const CharacterVirtual,
                 other_character: *const CharacterVirtual,
                 sub_shape_id: *const SubShapeId,
-                contact_position: *const [3]Real,
-                contact_normal: *const [3]f32,
+                contact_position: c.rvec3,
+                contact_normal: c.vec3,
                 io_settings: *CharacterContactSettings,
             ) void {
                 return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnCharacterContactAdded(
@@ -558,14 +559,14 @@ pub const CharacterContactListener = extern struct {
             pub inline fn OnContactSolve(
                 self: *const T,
                 character: *const CharacterVirtual,
-                body: *const Body,
+                body: *const BodyId,
                 sub_shape_id: *const SubShapeId,
-                contact_position: *const [3]Real,
-                contact_normal: *const [3]f32,
-                contact_velocity: *const [3]f32,
+                contact_position: c.rvec3,
+                contact_normal: c.vec3,
+                contact_velocity: c.vecc3,
                 contact_material: *const Material,
-                character_velocity: *const [3]f32,
-                character_velocity_out: *[3]f32,
+                character_velocity: c.vec3,
+                character_velocity_out: *c.vec3,
             ) void {
                 return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnContactSolve(
                     @as(*CharacterContactListener, @ptrCast(self)),
@@ -585,12 +586,12 @@ pub const CharacterContactListener = extern struct {
                 character: *const CharacterVirtual,
                 other_character: *const CharacterVirtual,
                 sub_shape_id: *const SubShapeId,
-                contact_position: *const [3]Real,
-                contact_normal: *const [3]f32,
-                contact_velocity: *const [3]f32,
+                contact_position: c.rvec3,
+                contact_normal: c.vec3,
+                contact_velocity: c.vecc3,
                 contact_material: *const Material,
-                character_velocity: *const [3]f32,
-                character_velocity_out: *[3]f32,
+                character_velocity: c.vec3,
+                character_velocity_out: *c.vec3,
             ) void {
                 return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnCharacterContactSolve(
                     @as(*CharacterContactListener, @ptrCast(self)),
@@ -605,6 +606,70 @@ pub const CharacterContactListener = extern struct {
                     character_velocity_out,
                 );
             }
+            pub inline fn OnContactPersisted(
+                self: *const T,
+                character: *const CharacterVirtual,
+                body: *const BodyId,
+                sub_shape_id: *const SubShapeId,
+                contact_position: c.rvec3,
+                contact_normal: c.vec3,
+                io_settings: *CharacterContactSettings,
+            ) void {
+                return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnContactPersisted(
+                    @as(*CharacterContactListener, @ptrCast(self)),
+                    character,
+                    body,
+                    sub_shape_id,
+                    contact_position,
+                    contact_normal,
+                    io_settings,
+                );
+            }
+            pub inline fn OnContactRemoved(
+                self: *const T,
+                character: *const CharacterVirtual,
+                body: *const BodyId,
+                sub_shape_id2: *const SubShapeId,
+            ) void {
+                return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnContactRemoved(
+                    @as(*CharacterContactListener, @ptrCast(self)),
+                    character,
+                    body,
+                    sub_shape_id2,
+                );
+            }
+            pub inline fn OnCharacterContactPersisted(
+                self: *const T,
+                character: *const CharacterVirtual,
+                other_character: *const CharacterVirtual,
+                sub_shape_id2: *const SubShapeId,
+                contact_position: c.rvec3,
+                contact_normal: c.vec3,
+                io_settings: *CharacterContactSettings,
+            ) void {
+                return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnCharacterContactPersisted(
+                    @as(*CharacterContactListener, @ptrCast(self)),
+                    character,
+                    other_character,
+                    sub_shape_id2,
+                    contact_position,
+                    contact_normal,
+                    io_settings,
+                );
+            }
+            pub inline fn OnCharacterContactRemoved(
+                self: *const T,
+                character: *const CharacterVirtual,
+                other_character_id: *const CharacterId,
+                sub_shape_id2: *const SubShapeId,
+            ) void {
+                return @as(*const CharacterContactListener.VTable, @ptrCast(self.__v)).OnCharacterContactRemoved(
+                    @as(*CharacterContactListener, @ptrCast(self)),
+                    character,
+                    other_character_id,
+                    sub_shape_id2,
+                );
+            }
         };
     }
 
@@ -613,14 +678,14 @@ pub const CharacterContactListener = extern struct {
         OnAdjustBodyVelocity: *const fn (
             self: *CharacterContactListener,
             character: *const CharacterVirtual,
-            body: *const Body,
-            io_linear_velocity: *[3]f32,
-            io_angular_velocity: *[3]f32,
+            body: *const BodyId,
+            io_linear_velocity: *c.vec3,
+            io_angular_velocity: *c.vec3,
         ) callconv(.C) void,
         OnContactValidate: *const fn (
             self: *CharacterContactListener,
             character: *const CharacterVirtual,
-            body: *const Body,
+            body: *const BodyId,
             sub_shape_id: *const SubShapeId,
         ) callconv(.C) bool,
         OnCharacterContactValidate: *const fn (
@@ -632,44 +697,74 @@ pub const CharacterContactListener = extern struct {
         OnContactAdded: *const fn (
             self: *CharacterContactListener,
             character: *const CharacterVirtual,
-            body: *const Body,
+            body: *const BodyId,
             sub_shape_id: *const SubShapeId,
-            contact_position: *const [3]Real,
-            contact_normal: *const [3]f32,
+            contact_position: c.rvec3,
+            contact_normal: c.vec3,
             io_settings: *CharacterContactSettings,
+        ) callconv(.C) void,
+        OnContactPersisted: *const fn (
+            self: *CharacterContactListener,
+            character: *const CharacterVirtual,
+            body: *const BodyId,
+            sub_shape_id: *const SubShapeId,
+            contact_position: c.rvec3,
+            contact_normal: c.vec3,
+            io_settings: *CharacterContactSettings,
+        ) callconv(.C) void,
+        OnContactRemoved: *const fn (
+            self: *CharacterContactListener,
+            character: *const CharacterVirtual,
+            body: *const BodyId,
+            sub_shape_id2: *const SubShapeId,
         ) callconv(.C) void,
         OnCharacterContactAdded: *const fn (
             self: *CharacterContactListener,
             character: *const CharacterVirtual,
             other_character: *const CharacterVirtual,
             sub_shape_id: *const SubShapeId,
-            contact_position: *const [3]Real,
-            contact_normal: *const [3]f32,
+            contact_position: c.rvec3,
+            contact_normal: c.vec3,
             io_settings: *CharacterContactSettings,
+        ) callconv(.C) void,
+        OnCharacterContactPersisted: *const fn (
+            self: *CharacterContactListener,
+            character: *const CharacterVirtual,
+            other_character: *const CharacterVirtual,
+            sub_shape_id2: *const SubShapeId,
+            contact_position: c.rvec3,
+            contact_normal: c.vec3,
+            io_settings: *CharacterContactSettings,
+        ) callconv(.C) void,
+        OnCharacterContactRemoved: *const fn (
+            self: *CharacterContactListener,
+            character: *const CharacterVirtual,
+            other_character_id: *const CharacterId,
+            sub_shape_id2: *const SubShapeId,
         ) callconv(.C) void,
         OnContactSolve: *const fn (
             self: *CharacterContactListener,
             character: *const CharacterVirtual,
-            body: *const Body,
+            body: *const BodyId,
             sub_shape_id: *const SubShapeId,
-            contact_position: *const [3]Real,
-            contact_normal: *const [3]f32,
-            contact_velocity: *const [3]f32,
+            contact_position: c.rvec3,
+            contact_normal: c.vec3,
+            contact_velocity: c.vec3,
             contact_material: *const Material,
-            character_velocity: *const [3]f32,
-            character_velocity_out: *[3]f32,
+            character_velocity: c.vec3,
+            character_velocity_out: *c.vec3,
         ) callconv(.C) void,
         OnCharacterContactSolve: *const fn (
             self: *CharacterContactListener,
             character: *const CharacterVirtual,
             other_character: *const CharacterVirtual,
             sub_shape_id: *const SubShapeId,
-            contact_position: *const [3]Real,
-            contact_normal: *const [3]f32,
-            contact_velocity: *const [3]f32,
+            contact_position: c.rvec3,
+            contact_normal: c.vec3,
+            contact_velocity: c.vec3,
             contact_material: *const Material,
-            character_velocity: *const [3]f32,
-            character_velocity_out: *[3]f32,
+            character_velocity: c.vec3,
+            character_velocity_out: *c.vec3,
         ) callconv(.C) void,
     };
 
@@ -1080,7 +1175,7 @@ pub const BodyCreationSettings = extern struct {
     inertia_multiplier: f32 = 1.0,
     mass_properties_override: MassProperties = .{},
     reserved: ?*const anyopaque = null,
-    shape: ?*const Shape = null,
+    shape: ?*Shape = null,
 
     comptime {
         assert(@sizeOf(BodyCreationSettings) == @sizeOf(c.JPC_BodyCreationSettings));
@@ -1101,8 +1196,8 @@ pub const CharacterContactSettings = extern struct {
 
 pub const CharacterBaseSettings = extern struct {
     __header: RefTargetHeader(16),
-    up: [4]f32 align(16), // 4th element is ignored
-    supporting_volume: [4]f32 align(16), // JPH::Plane - 4th element is used
+    up: c.vec3,
+    supporting_volume: c.vec4, // JPH::Plane
     max_slope_angle: f32,
     enhanced_internal_edge_removal: bool,
     shape: *Shape, // must provide valid shape (such as the typical capsule)
@@ -1152,9 +1247,10 @@ pub const CharacterVirtualSettings = extern struct {
     }
 
     base: CharacterBaseSettings,
+    char_id: CharacterId,
     mass: f32,
     max_strength: f32,
-    shape_offset: [4]f32 align(16), // 4th element is ignored
+    shape_offset: c.vec3,
     back_face_mode: BackFaceMode,
     predictive_contact_distance: f32,
     max_collision_iterations: u32,
@@ -1166,6 +1262,7 @@ pub const CharacterVirtualSettings = extern struct {
     hit_reduction_cos_max_angle: f32,
     penetration_recovery_speed: f32,
     inner_body_shape: ?*Shape,
+    inner_body_id: BodyId,
     inner_body_layer: ObjectLayer,
 
     comptime {
