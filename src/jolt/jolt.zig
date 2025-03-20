@@ -48,6 +48,18 @@ comptime {
 const TempAllocator = opaque {};
 const JobSystem = opaque {};
 
+pub inline fn vtableFrom(comptime vtable: type, comptime typ: type) vtable {
+    var table: vtable = undefined;
+    inline for (@typeInfo(vtable).@"struct".fields) |field| {
+        if (@hasDecl(typ, field.name)) {
+            @field(table, field.name) = &@field(typ, field.name);
+        } else {
+            @field(table, field.name) = .{};
+        }
+    }
+    return table;
+}
+
 /// Check if this is a valid body pointer.
 /// When a body is freed the memory that the pointer occupies is reused to store a freelist.
 /// NOTE: This function is *not* protected by a lock, use with care!

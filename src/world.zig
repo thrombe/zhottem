@@ -29,6 +29,9 @@ pub const Jphysics = struct {
         broadphase_layer_interface: Impl.MyBroadphaseLayerInterface = .init(),
         obj_vs_broadphase_layer_interface: Impl.MyObjectVsBroadPhaseLayerFilter = .{},
         obj_layer_pair_filter: Impl.MyObjectLayerPairFilter = .{},
+        character_contact_listener: Impl.MyCharacterContactListener = .{},
+        object_layer_filter: Impl.MyObjectLayerFilter = .{},
+        broadphase_layer_filter: Impl.MyBroadphaseLayerFilter = .{},
     };
 
     pub const BodyId = struct {
@@ -115,17 +118,31 @@ pub const Jphysics = struct {
         switch (settings.shape) {
             .sphere => |s| {
                 const shape = try jolt.SphereShapeSettings.create(s.radius);
+                defer shape.release();
                 body_settings.shape = try shape.createShape();
             },
             .box => |s| {
                 const shape = try jolt.BoxShapeSettings.create(s.size.to_buf());
+                defer shape.release();
                 body_settings.shape = try shape.createShape();
             },
             .capsule => |s| {
                 const shape = try jolt.CapsuleShapeSettings.create(s.half_height, s.radius);
+                defer shape.release();
+                body_settings.shape = try shape.createShape();
+            },
+            .mesh => |s| {
+                const shape = try jolt.MeshShapeSettings.create(
+                    @ptrCast(s.vertex_buffer.ptr),
+                    @intCast(s.vertex_buffer.len / 3),
+                    @sizeOf(f32),
+                    s.index_buffer,
+                );
+                defer shape.release();
                 body_settings.shape = try shape.createShape();
             },
         }
+        errdefer body_settings.shape.?.release();
 
         const bid = try bodyi.createAndAddBody(body_settings, .activate);
         return .{ .id = bid };
@@ -148,6 +165,7 @@ pub const Jphysics = struct {
             Vec4.quat_identity_rot().to_buf(),
             (Vec3{ .y = -v.half_height - v.radius }).to_buf(),
         );
+        defer rotated.release();
         settings.base.shape = try rotated.createShape();
         settings.inner_body_shape = try shape.createShape();
         settings.inner_body_layer = Impl.object_layers.moving;
@@ -158,6 +176,8 @@ pub const Jphysics = struct {
             v.rot.to_buf(),
             self.phy,
         );
+        errdefer character.destroy();
+        character.setListener(@ptrCast(@constCast(self.state.character_contact_listener.interface())));
 
         return .{ .character = character };
     }
@@ -222,6 +242,219 @@ pub const Jphysics = struct {
             pub const non_moving: jolt.BroadPhaseLayer = 0;
             pub const moving: jolt.BroadPhaseLayer = 1;
             pub const len: u32 = 2;
+        };
+
+        const MyCharacterContactListener = extern struct {
+            usingnamespace jolt.CharacterContactListener.Methods(@This());
+            __v: *const jolt.CharacterContactListener.VTable = &vtable,
+            const vtable = jolt.vtableFrom(jolt.CharacterContactListener.VTable, @This());
+
+            pub fn OnContactSolve(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                body: *const jolt.BodyId,
+                sub_shape_id: *const jolt.SubShapeId,
+                contact_position: jolt.c.rvec3,
+                contact_normal: jolt.c.vec3,
+                contact_velocity: jolt.c.vec3,
+                contact_material: *const jolt.Material,
+                character_velocity: jolt.c.vec3,
+                character_velocity_out: *jolt.c.vec3,
+            ) callconv(.C) void {
+                _ = character;
+                _ = body;
+                _ = sub_shape_id;
+                _ = contact_position;
+                _ = contact_normal;
+                _ = contact_velocity;
+                _ = contact_material;
+                const self: *@This() = @ptrCast(iself);
+                _ = self;
+
+                _ = character_velocity;
+                _ = character_velocity_out;
+            }
+
+            pub fn OnAdjustBodyVelocity(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                body: *const jolt.BodyId,
+                io_linear_velocity: *jolt.c.vec3,
+                io_angular_velocity: *jolt.c.vec3,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = body;
+                _ = io_linear_velocity;
+                _ = io_angular_velocity;
+            }
+            pub fn OnContactValidate(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                body: *const jolt.BodyId,
+                sub_shape_id: *const jolt.SubShapeId,
+            ) callconv(.C) bool {
+                _ = iself;
+                _ = character;
+                _ = body;
+                _ = sub_shape_id;
+                return true;
+            }
+            pub fn OnCharacterContactValidate(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                other_character: *const jolt.CharacterVirtual,
+                sub_shape_id: *const jolt.SubShapeId,
+            ) callconv(.C) bool {
+                _ = iself;
+                _ = character;
+                _ = other_character;
+                _ = sub_shape_id;
+                return true;
+            }
+            pub fn OnContactAdded(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                body: *const jolt.BodyId,
+                sub_shape_id: *const jolt.SubShapeId,
+                contact_position: jolt.c.rvec3,
+                contact_normal: jolt.c.vec3,
+                io_settings: *jolt.CharacterContactSettings,
+            ) callconv(.C) void {
+                _ = iself;
+                // _ = character;
+                _ = body;
+                _ = sub_shape_id;
+                _ = contact_position;
+                _ = contact_normal;
+                // _ = io_settings;
+
+                io_settings.can_push_character = false;
+
+                std.debug.print("{any}\n", .{character.getLinearVelocity()});
+            }
+            pub fn OnCharacterContactAdded(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                other_character: *const jolt.CharacterVirtual,
+                sub_shape_id: *const jolt.SubShapeId,
+                contact_position: jolt.c.rvec3,
+                contact_normal: jolt.c.vec3,
+                io_settings: *jolt.CharacterContactSettings,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = other_character;
+                _ = sub_shape_id;
+                _ = contact_position;
+                _ = contact_normal;
+                _ = io_settings;
+            }
+            pub fn OnCharacterContactSolve(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                other_character: *const jolt.CharacterVirtual,
+                sub_shape_id: *const jolt.SubShapeId,
+                contact_position: jolt.c.rvec3,
+                contact_normal: jolt.c.vec3,
+                contact_velocity: jolt.c.vec3,
+                contact_material: *const jolt.Material,
+                character_velocity: jolt.c.vec3,
+                character_velocity_out: *jolt.c.vec3,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = other_character;
+                _ = sub_shape_id;
+                _ = contact_position;
+                _ = contact_normal;
+                _ = contact_velocity;
+                _ = contact_material;
+                _ = character_velocity;
+                _ = character_velocity_out;
+            }
+            pub fn OnContactPersisted(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                body: *const jolt.BodyId,
+                sub_shape_id: *const jolt.SubShapeId,
+                contact_position: jolt.c.rvec3,
+                contact_normal: jolt.c.vec3,
+                io_settings: *jolt.CharacterContactSettings,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = body;
+                _ = sub_shape_id;
+                _ = contact_position;
+                _ = contact_normal;
+                _ = io_settings;
+            }
+            pub fn OnContactRemoved(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                body: *const jolt.BodyId,
+                sub_shape_id2: *const jolt.SubShapeId,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = body;
+                _ = sub_shape_id2;
+            }
+            pub fn OnCharacterContactPersisted(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                other_character: *const jolt.CharacterVirtual,
+                sub_shape_id2: *const jolt.SubShapeId,
+                contact_position: jolt.c.rvec3,
+                contact_normal: jolt.c.vec3,
+                io_settings: *jolt.CharacterContactSettings,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = other_character;
+                _ = sub_shape_id2;
+                _ = contact_position;
+                _ = contact_normal;
+                _ = io_settings;
+            }
+            pub fn OnCharacterContactRemoved(
+                iself: *jolt.CharacterContactListener,
+                character: *const jolt.CharacterVirtual,
+                other_character_id: *const jolt.CharacterId,
+                sub_shape_id2: *const jolt.SubShapeId,
+            ) callconv(.C) void {
+                _ = iself;
+                _ = character;
+                _ = other_character_id;
+                _ = sub_shape_id2;
+            }
+        };
+
+        // TODO: fix
+        const MyObjectLayerFilter = extern struct {
+            usingnamespace jolt.ObjectLayerFilter.Methods(@This());
+            __v: *const jolt.ObjectLayerFilter.VTable = &vtable,
+            const vtable = jolt.vtableFrom(jolt.ObjectLayerFilter.VTable, @This());
+
+            pub fn shouldCollide(self: *const jolt.ObjectLayerFilter, layer: jolt.ObjectLayer) callconv(.C) bool {
+                _ = self;
+                _ = layer;
+                return true;
+            }
+        };
+
+        // TODO: fix
+        const MyBroadphaseLayerFilter = extern struct {
+            usingnamespace jolt.BroadPhaseLayerFilter.Methods(@This());
+            __v: *const jolt.BroadPhaseLayerFilter.VTable = &vtable,
+            const vtable = jolt.vtableFrom(jolt.BroadPhaseLayerFilter.VTable, struct {
+                pub fn shouldCollide(self: *const jolt.BroadPhaseLayerFilter, layer: jolt.BroadPhaseLayer) callconv(.C) bool {
+                    _ = self;
+                    _ = layer;
+                    return true;
+                }
+            });
         };
 
         const MyBroadphaseLayerInterface = extern struct {
