@@ -146,7 +146,8 @@ pub const Jphysics = struct {
                 body_settings.shape = try shape.createShape();
             },
         }
-        errdefer body_settings.shape.?.release();
+        // it is refcounted so we release this one
+        defer body_settings.shape.?.release();
 
         const bid = try bodyi.createAndAddBody(body_settings, .activate);
         return .{ .id = bid };
