@@ -196,7 +196,7 @@ pub const Archetype = struct {
             const compid = it.next().?;
 
             var i: usize = 0;
-            while ((i + 1) * compid.size < comp.items.len) : (i += 1) {
+            while ((i + 1) * compid.size <= comp.items.len) : (i += 1) {
                 vtables[compid.id].maybe_deinit(comp.items[i * compid.size ..][0..compid.size].ptr, ctx);
             }
             comp.deinit();
