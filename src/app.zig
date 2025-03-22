@@ -81,11 +81,73 @@ texture_img: utils.ImageMagick.UnormImage,
 texture: Image,
 
 handles: Handles,
+assets: Assets,
+
+const Assets = struct {
+    dance: assets_mod.Gltf,
+    bunny: assets_mod.Model,
+
+    sphere_gltf: assets_mod.Gltf,
+    sphere: assets_mod.Model,
+
+    well_gltf: assets_mod.Gltf,
+    well: assets_mod.Model,
+
+    cube: assets_mod.Mesh,
+    plane: assets_mod.Mesh,
+    // toilet: assets_mod.Mesh,
+
+    fn init() !@This() {
+        var bunny_glb = try assets_mod.Gltf.parse_glb("./assets/dance.glb");
+        errdefer bunny_glb.deinit();
+        const bunny = try bunny_glb.to_model("Cube.015", "metarig");
+
+        var well_glb = try assets_mod.Gltf.parse_glb("./assets/well.glb");
+        errdefer well_glb.deinit();
+        const well = try well_glb.to_model("well", null);
+
+        // var toilet = try assets_mod.ObjParser.mesh_from_file("./assets/object.obj");
+        // errdefer toilet.deinit();
+
+        var cube = try assets_mod.Mesh.cube();
+        errdefer cube.deinit();
+
+        var plane = try assets_mod.Mesh.plane();
+        errdefer plane.deinit();
+
+        var sphere_gltf = try assets_mod.Gltf.parse_glb("./assets/sphere.glb");
+        errdefer sphere_gltf.deinit();
+        const sphere = try sphere_gltf.to_model("Icosphere", null);
+
+        return .{
+            .dance = bunny_glb,
+            .bunny = bunny,
+
+            .sphere_gltf = sphere_gltf,
+            .sphere = sphere,
+
+            .well_gltf = well_glb,
+            .well = well,
+
+            .cube = cube,
+            .plane = plane,
+            // .toilet = toilet,
+        };
+    }
+
+    fn deinit(self: *@This()) void {
+        inline for (@typeInfo(@This()).@"struct".fields) |field| {
+            if (comptime @hasDecl(field.type, "deinit")) {
+                @field(self, field.name).deinit();
+            }
+        }
+    }
+};
 
 const Handles = struct {
     player: Entity,
     model: struct {
-        sphere: ResourceManager.ModelHandle,
+        bunny: ResourceManager.ModelHandle,
     },
     mesh: struct {
         cube: ResourceManager.MeshResourceHandle,
@@ -100,6 +162,18 @@ const Handles = struct {
         scream1: ResourceManager.AudioHandle,
         scream2: ResourceManager.AudioHandle,
         shot: ResourceManager.AudioHandle,
+
+        fn init(cpu: *ResourceManager.CpuResources) !@This() {
+            return .{
+                .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/boom.wav")),
+                .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/bruh.wav")),
+                .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/long-reload.wav")),
+                .short_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/short-reload.wav")),
+                .scream1 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream1.wav")),
+                .scream2 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream2.wav")),
+                .shot = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/shot.wav")),
+            };
+        }
     };
 };
 
@@ -314,37 +388,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
-    var gltf = try assets_mod.Gltf.parse_glb("./assets/dance.glb");
-    // defer gltf.deinit();
-    // const model = try gltf.to_model("Cube.015", "metarig");
-    const sphere = try gltf.to_model("Cube.015", "metarig");
-
-    // var object = try mesh.ObjParser.mesh_from_file("./assets/object.obj");
-    // defer object.deinit();
-
-    var cube = try assets_mod.Mesh.cube();
-    defer cube.deinit();
-
-    var plane = try assets_mod.Mesh.plane();
-    defer plane.deinit();
-
-    // var sphere_gltf = try mesh_mod.Gltf.parse_glb("./assets/sphere.glb");
-    // defer sphere_gltf.deinit();
-    // const sphere = try sphere_gltf.to_model();
-    // defer sphere.deinit();
+    var assets = try Assets.init();
+    errdefer assets.deinit();
 
     var cpu = ResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
-    const audio_handles = Handles.AudioHandles{
-        .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/boom.wav")),
-        .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/bruh.wav")),
-        .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/long-reload.wav")),
-        .short_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/short-reload.wav")),
-        .scream1 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream1.wav")),
-        .scream2 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream2.wav")),
-        .shot = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/shot.wav")),
-    };
+    const audio_handles = try Handles.AudioHandles.init(&cpu);
 
     const bones_handle = try cpu.reserve_bones(1500);
 
@@ -352,17 +402,40 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer instance_manager.deinit();
 
     const cube_instance_handle = try cpu.batch_reserve(1000);
-    const cube_mesh_handle = try cpu.add_mesh(&cube);
-    try instance_manager.instances.append(.{ .mesh = cube_mesh_handle, .instances = cube_instance_handle });
+    const cube_mesh_handle = try cpu.add_mesh(&assets.cube);
+    try instance_manager.instances.append(.{
+        .mesh = cube_mesh_handle,
+        .instances = cube_instance_handle,
+    });
 
-    const plane_mesh_handle = try cpu.add_mesh(&plane);
+    const plane_mesh_handle = try cpu.add_mesh(&assets.plane);
     const plane_instance_handle = try cpu.batch_reserve(10);
-    try instance_manager.instances.append(.{ .mesh = plane_mesh_handle, .instances = plane_instance_handle });
+    try instance_manager.instances.append(.{
+        .mesh = plane_mesh_handle,
+        .instances = plane_instance_handle,
+    });
 
-    const sphere_model_handle = try cpu.add_model(sphere);
-    const sphere_mesh_handle = sphere_model_handle.mesh;
-    const sphere_instance_handle = try cpu.batch_reserve(100);
-    try instance_manager.instances.append(.{ .mesh = sphere_mesh_handle, .instances = sphere_instance_handle });
+    const sphere_mesh_handle = try cpu.add_mesh(&assets.sphere.mesh);
+    const sphere_instance_handle = try cpu.batch_reserve(10);
+    try instance_manager.instances.append(.{
+        .mesh = sphere_mesh_handle,
+        .instances = sphere_instance_handle,
+    });
+
+    const well_mesh_handle = try cpu.add_mesh(&assets.well.mesh);
+    const well_instance_handle = try cpu.batch_reserve(10);
+    try instance_manager.instances.append(.{
+        .mesh = well_mesh_handle,
+        .instances = well_instance_handle,
+    });
+
+    const bunny_model_handle = try cpu.add_model(assets.bunny);
+    const bunny_mesh_handle = bunny_model_handle.mesh;
+    const bunny_instance_handle = try cpu.batch_reserve(100);
+    try instance_manager.instances.append(.{
+        .mesh = bunny_mesh_handle,
+        .instances = bunny_instance_handle,
+    });
 
     var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
     errdefer world.deinit();
@@ -527,9 +600,52 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         C.StaticRender{ .mesh = cube_mesh_handle },
         try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .friction = 0.0,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+        }),
+    });
+
+    // const bones = try allocator.alloc(math.Mat4x4, assets.well.bones.len);
+    // errdefer allocator.free(bones);
+    // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.well.bones.len);
+    // errdefer allocator.free(indices);
+    // @memset(bones, .{});
+    // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
+    t = C.Transform{ .pos = .{ .z = -4, .y = 50 }, .scale = Vec4.splat3(0.5) };
+    _ = try cmdbuf.insert(.{
+        @as([]const u8, "ball"),
+        t,
+        C.LastTransform{ .t = t },
+        C.StaticRender{ .mesh = sphere_mesh_handle },
+        // C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
+        try world.phy.add_body(.{
+            .shape = .{ .mesh = .{
+                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.sphere.mesh.faces)),
+                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.sphere.mesh.vertices)),
+            } },
             .friction = 0.4,
             .rotation = t.rotation,
             .pos = t.pos.xyz(),
+        }),
+    });
+
+    t = C.Transform{ .pos = .{ .z = -16, .y = 3 }, .scale = Vec4.splat3(1.0) };
+    _ = try cmdbuf.insert(.{
+        @as([]const u8, "well"),
+        t,
+        C.LastTransform{ .t = t },
+        C.StaticRender{ .mesh = well_mesh_handle },
+        // C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
+        try world.phy.add_body(.{
+            .shape = .{ .mesh = .{
+                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.well.mesh.faces)),
+                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.well.mesh.vertices)),
+            } },
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+            .motion_type = .static,
         }),
     });
     try cmdbuf.apply(@ptrCast(&world));
@@ -607,10 +723,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .texture_img = image,
         .texture = gpu_img,
 
+        .assets = assets,
         .handles = .{
             .player = player_id,
             .model = .{
-                .sphere = sphere_model_handle,
+                .bunny = bunny_model_handle,
             },
             .mesh = .{
                 .cube = cube_mesh_handle,
@@ -627,6 +744,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
+    defer self.assets.deinit();
     defer self.cpu_resources.deinit();
     defer self.gpu_resources.deinit(device);
     defer self.instance_manager.deinit();
@@ -1188,7 +1306,7 @@ pub const AppState = struct {
                             const right = rot.rotate_vector(camera.world_basis.right);
 
                             player.t.rotation = rot.normalize();
-                            char.character.setRotation(player.t.rotation.to_buf());
+                            // char.character.setRotation(player.t.rotation.to_buf());
 
                             var speed = player.controller.speed;
                             if (kb.shift.pressed()) {
@@ -1251,7 +1369,7 @@ pub const AppState = struct {
                                 // @memset(bones, .{});
                                 // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
 
-                                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.2, .max = 0.4 });
+                                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
                                 const t = C.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
                                 _ = try self.cmdbuf.insert(.{
                                     @as([]const u8, "bullet"),
@@ -1260,7 +1378,7 @@ pub const AppState = struct {
                                     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
                                     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     C.StaticRender{ .mesh = app.handles.mesh.cube },
-                                    C.TimeDespawn{ .despawn_time = self.time + 5, .state = .alive },
+                                    C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive },
                                     try app.world.phy.add_body(.{
                                         .shape = .{ .box = .{ .size = t.scale.xyz() } },
                                         .pos = t.pos.xyz(),
@@ -1449,7 +1567,7 @@ pub const AppState = struct {
 
             var it = try app.world.ecs.iterator(struct { m: C.AnimatedRender });
             while (it.next()) |e| {
-                const model = &app.cpu_resources.models.items[app.handles.model.sphere.index];
+                const model = &app.cpu_resources.models.items[app.handles.model.bunny.index];
                 const a: *C.AnimatedRender = e.m;
                 a.time += delta;
 
