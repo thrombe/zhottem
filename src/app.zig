@@ -612,7 +612,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // errdefer allocator.free(indices);
     // @memset(bones, .{});
     // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
-    t = C.Transform{ .pos = .{ .z = -4, .y = 50 }, .scale = Vec4.splat3(0.5) };
+    t = C.Transform{ .pos = .{ .z = 4, .y = 50 }, .scale = Vec4.splat3(0.5) };
     _ = try cmdbuf.insert(.{
         @as([]const u8, "ball"),
         t,
@@ -630,7 +630,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    t = C.Transform{ .pos = .{ .z = -16, .y = 3 }, .scale = Vec4.splat3(1.0) };
+    t = C.Transform{ .pos = .{ .z = 16, .y = 3 }, .scale = Vec4.splat3(1.0) };
     _ = try cmdbuf.insert(.{
         @as([]const u8, "well"),
         t,
@@ -1445,7 +1445,17 @@ pub const AppState = struct {
                     char.character.setLinearVelocity(vel.to_buf());
 
                     const update_settings: jolt.CharacterVirtual.ExtendedUpdateSettings = .{};
-                    char.character.extendedUpdate(self.physics.step, (Vec3{ .y = -1 }).to_buf(), &update_settings, .{});
+                    char.character.extendedUpdate(
+                        self.physics.step * steps,
+                        (Vec3{ .y = -1 }).to_buf(),
+                        &update_settings,
+                        .{
+                            // .broad_phase_layer_filter = app.world.phy.state.broadphase_layer_filter.interface(),
+                            // .object_layer_filter = app.world.phy.state.object_layer_filter.interface(),
+                            // body_filter: ?*const BodyFilter = null,
+                            // shape_filter: ?*const ShapeFilter = null,
+                        },
+                    );
                 }
                 try app.world.step(self.physics.step * steps, @intFromFloat(steps));
 
