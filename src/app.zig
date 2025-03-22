@@ -614,19 +614,36 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    // const bones = try allocator.alloc(math.Mat4x4, assets.well.bones.len);
-    // errdefer allocator.free(bones);
-    // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.well.bones.len);
-    // errdefer allocator.free(indices);
-    // @memset(bones, .{});
-    // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
-    t = C.Transform{ .pos = .{ .z = 4, .y = 50 }, .scale = Vec4.splat3(0.5) };
+    const bones = try allocator.alloc(math.Mat4x4, assets.bunny.bones.len);
+    errdefer allocator.free(bones);
+    const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.bunny.bones.len);
+    errdefer allocator.free(indices);
+    @memset(bones, .{});
+    @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
+    t = C.Transform{ .pos = .{ .x = 20, .y = 5 } };
+    _ = try cmdbuf.insert(.{
+        @as([]const u8, "dance"),
+        t,
+        C.LastTransform{ .t = t },
+        C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
+        try world.phy.add_body(.{
+            .shape = .{ .mesh = .{
+                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.bunny.mesh.faces)),
+                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.bunny.mesh.vertices)),
+            } },
+            .friction = 0.4,
+            .rotation = t.rotation,
+            .pos = t.pos.xyz(),
+            .motion_type = .static,
+        }),
+    });
+
+    t = C.Transform{ .pos = .{ .z = 4, .y = 50 } };
     _ = try cmdbuf.insert(.{
         @as([]const u8, "ball"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = sphere_mesh_handle },
-        // C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
         try world.phy.add_body(.{
             .shape = .{ .mesh = .{
                 .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.sphere.mesh.faces)),
@@ -638,7 +655,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    t = C.Transform{ .pos = .{ .z = 16, .y = 3 }, .scale = Vec4.splat3(1.0) };
+    t = C.Transform{ .pos = .{ .z = 16, .y = 3 } };
     _ = try cmdbuf.insert(.{
         @as([]const u8, "well"),
         t,
