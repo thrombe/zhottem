@@ -15,14 +15,12 @@ const HotAction = enum(u8) {
 };
 
 const HotVtable = struct {
-    const SetAlloc = *const fn (alloc: *anyopaque) callconv(.c) void;
     const Init = *const fn () callconv(.c) ?*anyopaque;
     const Deinit = *const fn (app: *anyopaque) callconv(.c) HotAction;
     const Tick = *const fn (app: *anyopaque) callconv(.c) HotAction;
     const PreReload = *const fn (app: *anyopaque) callconv(.c) HotAction;
     const PostReload = *const fn (app: *anyopaque) callconv(.c) HotAction;
 
-    set_alloc: SetAlloc,
     init: Init,
     deinit: Deinit,
     tick: Tick,
@@ -31,7 +29,6 @@ const HotVtable = struct {
 
     fn from_dyn(dyn: *std.DynLib) !@This() {
         return .{
-            .set_alloc = dyn.lookup(SetAlloc, "set_alloc") orelse return error.FuncNotFound,
             .init = dyn.lookup(Init, "hot_init") orelse return error.FuncNotFound,
             .deinit = dyn.lookup(Deinit, "hot_deinit") orelse return error.FuncNotFound,
             .tick = dyn.lookup(Tick, "hot_tick") orelse return error.FuncNotFound,
@@ -71,7 +68,6 @@ const HotReloader = struct {
 
         const vtable = try HotVtable.from_dyn(&dyn);
 
-        vtable.set_alloc(@ptrCast(allocator));
         const app = vtable.init() orelse return error.CouldNotInitApp;
         errdefer _ = vtable.deinit(app);
 
@@ -135,7 +131,6 @@ const HotReloader = struct {
 
                     self.dylib = dyn;
                     self.vtable = vtable;
-                    self.vtable.set_alloc(@ptrCast(allocator));
                     switch (self.vtable.post_reload(self.app)) {
                         .quit => return false,
                         .nothing => {},
@@ -155,6 +150,7 @@ const HotReloader = struct {
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
     allocator.* = gpa.allocator();
 
     switch (options.mode) {
@@ -173,18 +169,8 @@ pub fn main() !void {
         },
     }
 
-    // no defer cuz we don't want to print leaks when we error out
+    // no defer if we don't want to print leaks when we error out
     // _ = gpa.deinit();
-}
-
-export fn set_alloc(_alloc: *anyopaque) callconv(.c) void {
-    switch (options.mode) {
-        .exe, .hotexe => {},
-        .hotlib => {
-            const alloc: @TypeOf(allocator) = @ptrCast(@alignCast(_alloc));
-            allocator.* = alloc.*;
-        },
-    }
 }
 
 export fn hot_init() callconv(.c) ?*anyopaque {
@@ -295,6 +281,7 @@ const HotApp = struct {
     const GuiState = application.GuiState;
     const RendererState = application.RendererState;
 
+    gpa: Gpa,
     engine: Engine,
     gui_engine: GuiEngine,
     app_state: AppState,
@@ -304,8 +291,17 @@ const HotApp = struct {
     gui_renderer: GuiEngine.GuiRenderer,
     timer: std.time.Timer,
 
+    const Gpa = std.heap.GeneralPurposeAllocator(.{});
+
     fn init() !*@This() {
-        const self = try allocator.create(@This());
+        const self = blk: {
+            var gpa = Gpa{};
+            const self = try gpa.allocator().create(@This());
+            self.gpa = gpa;
+
+            allocator.* = self.gpa.allocator();
+            break :blk self;
+        };
         errdefer allocator.destroy(self);
 
         self.engine = try Engine.init();
@@ -336,7 +332,11 @@ const HotApp = struct {
     }
 
     fn deinit(self: *@This()) !void {
-        defer allocator.destroy(self);
+        defer {
+            var gpa = self.gpa;
+            gpa.allocator().destroy(self);
+            _ = gpa.deinit();
+        }
         defer self.engine.deinit();
         defer self.gui_engine.deinit();
         defer self.app_state.deinit();
@@ -354,6 +354,7 @@ const HotApp = struct {
     }
 
     fn post_reload(self: *@This()) !void {
+        allocator.* = self.gpa.allocator();
         self.engine.post_reload();
         try self.app.post_reload();
     }
