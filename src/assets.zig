@@ -323,17 +323,17 @@ pub const Gltf = struct {
     }
 
     fn parse_mesh(self: *@This(), mesh: *Info.MeshInfo) !Mesh {
-        var vertices = std.ArrayList([3]f32).init(allocator.*);
+        var vertices = std.ArrayList([3]f32).init(self.alloc);
         errdefer vertices.deinit();
-        var normals = std.ArrayList([3]f32).init(allocator.*);
+        var normals = std.ArrayList([3]f32).init(self.alloc);
         errdefer normals.deinit();
-        var uvs = std.ArrayList([2]f32).init(allocator.*);
+        var uvs = std.ArrayList([2]f32).init(self.alloc);
         errdefer uvs.deinit();
-        var weights = std.ArrayList([4]f32).init(allocator.*);
+        var weights = std.ArrayList([4]f32).init(self.alloc);
         defer weights.deinit();
-        var joints = std.ArrayList([4]u32).init(allocator.*);
+        var joints = std.ArrayList([4]u32).init(self.alloc);
         defer joints.deinit();
-        var faces = std.ArrayList([3]u32).init(allocator.*);
+        var faces = std.ArrayList([3]u32).init(self.alloc);
         errdefer faces.deinit();
 
         for (mesh.primitives) |prim| {
@@ -425,8 +425,8 @@ pub const Gltf = struct {
             const indices = prim.indices.?;
             if (self.accessor(indices).matches_typ(u16)) {
                 const slice = try self.get_slice(indices, [3]u16);
-                const duped = try allocator.alloc([3]u32, slice.len);
-                defer allocator.free(duped);
+                const duped = try self.alloc.alloc([3]u32, slice.len);
+                defer self.alloc.free(duped);
                 for (0..duped.len) |i| {
                     duped[i][0] = slice[i][0] + base;
                     duped[i][1] = slice[i][1] + base;
@@ -440,12 +440,12 @@ pub const Gltf = struct {
                 return error.BadIndexType;
             }
         }
-        var bones = std.ArrayList([]VertexBone).init(allocator.*);
+        var bones = std.ArrayList([]VertexBone).init(self.alloc);
         errdefer bones.deinit();
 
         for (joints.items, weights.items) |b, w| {
-            const bone = try allocator.alloc(VertexBone, 4);
-            errdefer allocator.free(bone);
+            const bone = try self.alloc.alloc(VertexBone, 4);
+            errdefer self.alloc.free(bone);
 
             for (0..4) |i| {
                 bone[i].bone = b[i];
@@ -456,7 +456,7 @@ pub const Gltf = struct {
         }
 
         return .{
-            .name = try allocator.dupe(u8, mesh.name),
+            .name = try self.alloc.dupe(u8, mesh.name),
             .vertices = try vertices.toOwnedSlice(),
             .normals = try normals.toOwnedSlice(),
             .uvs = try uvs.toOwnedSlice(),
@@ -471,7 +471,7 @@ pub const Gltf = struct {
         const skini = maybe_skini orelse return .{
             .mesh = mesh,
             .bones = try bones.toOwnedSlice(),
-            .animations = try allocator.alloc(Animation, 0),
+            .animations = try self.alloc.alloc(Animation, 0),
         };
 
         if (skini.inverseBindMatrices) |ibm| {
@@ -530,14 +530,14 @@ pub const Gltf = struct {
         var animations = std.ArrayList(Animation).init(self.alloc);
 
         const info = &self.info.value;
-        const animations_info = info.animations orelse return try allocator.alloc(Animation, 0);
+        const animations_info = info.animations orelse return try self.alloc.alloc(Animation, 0);
         for (animations_info) |anim| {
             const name = anim.name orelse continue;
             const bone_keyframes = try self.alloc.alloc(BoneAnimation, joint_to_bone.count());
             @memset(bone_keyframes, BoneAnimation{
-                .translation_keyframes = std.ArrayList(Keyframe).init(allocator.*),
-                .rotation_keyframes = std.ArrayList(Keyframe).init(allocator.*),
-                .scale_keyframes = std.ArrayList(Keyframe).init(allocator.*),
+                .translation_keyframes = std.ArrayList(Keyframe).init(self.alloc),
+                .rotation_keyframes = std.ArrayList(Keyframe).init(self.alloc),
+                .scale_keyframes = std.ArrayList(Keyframe).init(self.alloc),
             });
 
             for (anim.channels) |channel| {
@@ -592,7 +592,7 @@ pub const Gltf = struct {
             }
 
             try animations.append(.{
-                .name = try allocator.dupe(u8, name),
+                .name = try self.alloc.dupe(u8, name),
                 .bones = bone_keyframes,
             });
         }
