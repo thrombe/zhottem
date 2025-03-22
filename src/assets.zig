@@ -311,9 +311,9 @@ pub const Gltf = struct {
         allocator.destroy(self.arena);
     }
 
-    pub fn to_model(self: *@This(), mesh_name: []const u8, skin_name: []const u8) !Model {
+    pub fn to_model(self: *@This(), mesh_name: []const u8, skin_name: ?[]const u8) !Model {
         const meshi = self.find_mesh(mesh_name) orelse return error.MeshNotFound;
-        const skini = self.find_skin(skin_name) orelse return error.SkinNotFound;
+        const skini = if (skin_name) |name| self.find_skin(name) else null;
 
         var mesh = try self.parse_mesh(meshi);
         errdefer mesh.deinit();
@@ -465,8 +465,14 @@ pub const Gltf = struct {
         };
     }
 
-    fn parse_model(self: *@This(), mesh: Mesh, skini: *Info.SkinInfo) !Model {
+    fn parse_model(self: *@This(), mesh: Mesh, maybe_skini: ?*Info.SkinInfo) !Model {
         var bones = std.ArrayList(Bone).init(self.alloc);
+
+        const skini = maybe_skini orelse return .{
+            .mesh = mesh,
+            .bones = try bones.toOwnedSlice(),
+            .animations = try allocator.alloc(Animation, 0),
+        };
 
         if (skini.inverseBindMatrices) |ibm| {
             const matrices = try self.get_slice(ibm, [16]f32);
