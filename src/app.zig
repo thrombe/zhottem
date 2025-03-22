@@ -588,7 +588,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "ball"),
+        @as([]const u8, "block"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = cube_mesh_handle },
@@ -602,7 +602,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "ball"),
+        @as([]const u8, "block"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = cube_mesh_handle },

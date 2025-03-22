@@ -237,9 +237,9 @@ pub const EntityComponentStore = struct {
         deinit_with_context: ?*const fn (ptr: *anyopaque, ctx: *anyopaque) void = null,
 
         fn from(component: type) @This() {
-            switch (component) {
-                []const u8 => return .{ .name = @typeName(component) },
-                else => return .{
+            const vtable: @This() = switch (component) {
+                []const u8 => .{ .name = @typeName(component) },
+                else => .{
                     .name = @typeName(component),
                     // TODO: these will not update when hot reloaded.
                     //  - this can be made to work by adding .reload() methods to things that have pointers.
@@ -250,10 +250,18 @@ pub const EntityComponentStore = struct {
                     .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
                     .deinit_with_context = if (comptime @hasDecl(component, "deinit_with_context")) @ptrCast(&component.deinit_with_context) else null,
                 },
-            }
+            };
+
+            std.debug.print("{s}: {any}\n", .{ vtable.name, .{ vtable.deinit, vtable.deinit_with_context } });
+
+            return vtable;
         }
 
         fn maybe_deinit(self: *const @This(), ptr: *anyopaque, ctx: *anyopaque) void {
+            if (std.mem.eql(u8, self.name, "[]const u8")) {
+                std.debug.print("deleting entity: {s}\n", .{@as(*[]const u8, @ptrCast(@alignCast(ptr))).*});
+            }
+
             if (self.deinit_with_context) |deinitfn| {
                 deinitfn(ptr, ctx);
             } else if (self.deinit) |deinitfn| {
@@ -323,7 +331,8 @@ pub const EntityComponentStore = struct {
         };
         if (!comp.found_existing) {
             comp.value_ptr.* = compid;
-            try self.vtables.append(ComponentVtable.from(component));
+            const vtable = ComponentVtable.from(component);
+            try self.vtables.append(vtable);
             try self.component_sizes.append(compid.size);
         }
         return compid;
