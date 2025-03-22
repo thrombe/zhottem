@@ -218,6 +218,14 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         };
     }
 
+    pub fn deinit(self: *@This()) void {
+        _ = self.playing.lock.fuse();
+        defer _ = self.playing.lock.unfuse();
+
+        self.playing.samples.deinit();
+        self.playing.samples_buf2.deinit();
+    }
+
     pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
         _ = flags;
         _ = timeinfo;
