@@ -382,21 +382,26 @@ pub const EntityComponentStore = struct {
 
     fn insert_reserved(self: *@This(), eid: Entity, components: anytype, ctx: *anyopaque) !void {
         const component_ids = try self.components_from(@TypeOf(components));
-        const typ = Type{ .components = component_ids | Type.mask(self.entityid_component_id) };
+        const _typ = (Type{ .components = component_ids });
+        const typ = _typ.inserted(self.entityid_component_id).?;
 
         const archeid = try self.get_archetype(typ, ctx);
         const archetype = &self.archetypes.items[archeid];
         defer archetype.count += 1;
 
         inline for (@typeInfo(@TypeOf(components)).@"struct".fields) |field| {
+            const f = @field(components, field.name);
+            if (comptime field.type == Entity) {
+                std.debug.assert(std.meta.eql(eid, f));
+            }
+
             const compid = try self.get_component_id(field.type);
             const compi = archetype.typ.index(compid).?;
-            const f = @field(components, field.name);
             const bytes = std.mem.asBytes(&f);
             try archetype.components[compi].appendSlice(bytes);
         }
 
-        {
+        if (_typ.components != typ.components) {
             const compi = archetype.typ.index(self.entityid_component_id).?;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
