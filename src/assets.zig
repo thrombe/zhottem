@@ -270,7 +270,7 @@ pub const Gltf = struct {
         errdefer arena.deinit();
         const alloc = arena.allocator();
 
-        var reader = try Reader.load(path);
+        var reader = try Reader.load(alloc, path);
         errdefer reader.deinit();
 
         const header = try reader.read(Header);
@@ -306,7 +306,7 @@ pub const Gltf = struct {
 
     pub fn deinit(self: *@This()) void {
         self.info.deinit();
-        allocator.free(self.buf);
+        self.alloc.free(self.buf);
         self.arena.deinit();
         allocator.destroy(self.arena);
     }
@@ -991,9 +991,10 @@ pub const Gltf = struct {
     const Chunk = struct {
         typ: [4]u8,
         buf: []const u8,
+        alloc: std.mem.Allocator,
 
         fn read_json(self: *@This(), typ: type) !std.json.Parsed(typ) {
-            return try std.json.parseFromSlice(typ, allocator.*, self.buf, .{
+            return try std.json.parseFromSlice(typ, self.alloc, self.buf, .{
                 .ignore_unknown_fields = true,
                 .allocate = .alloc_always,
             });
@@ -1012,25 +1013,27 @@ pub const Gltf = struct {
     const Reader = struct {
         buf: []const u8,
         head: usize = 0,
+        alloc: std.mem.Allocator,
 
-        fn load(path: []const u8) !@This() {
+        fn load(alloc: std.mem.Allocator, path: []const u8) !@This() {
             const buf = try std.fs.cwd().readFileAllocOptions(
-                allocator.*,
+                alloc,
                 path,
                 100 * 1000 * 1000,
                 null,
                 8,
                 null,
             );
-            errdefer allocator.free(buf);
+            errdefer alloc.free(buf);
 
             return .{
+                .alloc = alloc,
                 .buf = buf,
             };
         }
 
         fn deinit(self: *@This()) void {
-            allocator.free(self.buf);
+            self.alloc.free(self.buf);
         }
 
         fn read(self: *@This(), typ: type) !typ {
@@ -1050,6 +1053,7 @@ pub const Gltf = struct {
             return .{
                 .typ = typ,
                 .buf = self.buf[self.head..][0..len],
+                .alloc = self.alloc,
             };
         }
     };
