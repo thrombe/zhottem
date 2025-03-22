@@ -113,6 +113,10 @@ pub const Jphysics = struct {
             .motion_quality = settings.motion_quality,
             .friction = settings.friction,
             .object_layer = Impl.object_layers.moving,
+            .override_mass_properties = .calc_inertia,
+            .mass_properties_override = .{
+                .mass = 1.0,
+            },
         };
 
         switch (settings.shape) {
@@ -135,7 +139,7 @@ pub const Jphysics = struct {
                 const shape = try jolt.MeshShapeSettings.create(
                     @ptrCast(s.vertex_buffer.ptr),
                     @intCast(s.vertex_buffer.len / 3),
-                    @sizeOf(f32),
+                    @sizeOf([3]f32),
                     s.index_buffer,
                 );
                 defer shape.release();
@@ -158,6 +162,8 @@ pub const Jphysics = struct {
         defer settings.release();
 
         const shape = try jolt.CapsuleShapeSettings.create(v.half_height, v.radius);
+        // const shape = try jolt.BoxShapeSettings.create(Vec3.splat(v.radius).to_buf());
+        // const shape = try jolt.SphereShapeSettings.create(v.radius);
         defer shape.release();
 
         const rotated = try jolt.DecoratedShapeSettings.createRotatedTranslated(
@@ -167,8 +173,13 @@ pub const Jphysics = struct {
         );
         defer rotated.release();
         settings.base.shape = try rotated.createShape();
-        settings.inner_body_shape = try shape.createShape();
+        errdefer settings.base.shape.release();
+        // settings.inner_body_shape = try shape.createShape();
+        // errdefer settings.inner_body_shape.?.release();
         settings.inner_body_layer = Impl.object_layers.moving;
+        settings.back_face_mode = .collide_with_back_faces;
+        settings.max_strength = 10000000000;
+        settings.mass = 100000000;
 
         const character = try jolt.CharacterVirtual.create(
             settings,
@@ -228,6 +239,10 @@ pub const Jphysics = struct {
         capsule: struct {
             half_height: f32,
             radius: f32,
+        },
+        mesh: struct {
+            vertex_buffer: []f32,
+            index_buffer: []u32,
         },
     };
 
