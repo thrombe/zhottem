@@ -615,9 +615,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
 
     const bones = try allocator.alloc(math.Mat4x4, assets.bunny.bones.len);
-    errdefer allocator.free(bones);
+    // errdefer allocator.free(bones);
     const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.bunny.bones.len);
-    errdefer allocator.free(indices);
+    // errdefer allocator.free(indices);
     @memset(bones, .{});
     @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
     t = C.Transform{ .pos = .{ .x = 20, .y = 5 } };
