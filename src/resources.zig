@@ -338,11 +338,16 @@ pub const ResourceManager = struct {
                 },
             };
 
-            for (m.vertices, m.normals, m.uvs, m.bones) |v, n, uv, bone| {
+            for (m.vertices, m.normals, m.uvs, 0..) |v, n, uv, j| {
                 var vertex = std.mem.zeroes(Vertex);
                 vertex.pos = [4]f32{ v[0], v[1], v[2], 0 };
                 vertex.normal = [4]f32{ n[0], n[1], n[2], 0 };
                 vertex.uv = [4]f32{ uv[0], uv[1], 0, 0 };
+
+                const zero_bones = [1]assets_mod.VertexBone{
+                    .{ .bone = 0, .weight = 1 },
+                };
+                const bone: []const assets_mod.VertexBone = if (m.bones.len > j) m.bones[j] else zero_bones[0..];
 
                 for (bone[0..@min(4, bone.len)], 0..) |b, i| {
                     vertex.bone_ids[i] = b.bone;
