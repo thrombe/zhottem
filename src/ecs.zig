@@ -48,6 +48,7 @@ pub const Type = struct {
         for (components) |comp| {
             this.components |= mask(comp);
         }
+        std.debug.assert(components.len == @popCount(this.components));
         return this;
     }
 
