@@ -236,6 +236,28 @@ pub const Mesh = struct {
         };
     }
 
+    pub fn boneless(self: *const @This()) !@This() {
+        const bones = try allocator.dupe([]VertexBone, self.bones);
+
+        for (0..self.vertices.len) |i| {
+            const vbone = try allocator.alloc(VertexBone, 1);
+            vbone[0].bone = 0;
+            vbone[0].weight = 1;
+            bones[i] = vbone;
+        }
+
+        const new = @This(){
+            .name = try allocator.dupe(u8, self.name),
+            .bones = bones,
+            .uvs = try allocator.dupe([2]f32, self.uvs),
+            .faces = try allocator.dupe([3]u32, self.faces),
+            .normals = try allocator.dupe([3]f32, self.normals),
+            .vertices = try allocator.dupe([3]f32, self.vertices),
+        };
+
+        return new;
+    }
+
     pub fn deinit(self: *@This()) void {
         allocator.free(self.name);
         allocator.free(self.vertices);
