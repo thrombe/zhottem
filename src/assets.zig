@@ -786,10 +786,6 @@ pub const Gltf = struct {
                         scale,
                         translation,
                         weights, // only with morph targets
-
-                        pub fn jsonParse(alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
-                            return try utils.JsonHelpers.parseEnumAsString(@This(), alloc, source, options);
-                        }
                     },
                 },
             },
@@ -804,10 +800,6 @@ pub const Gltf = struct {
                     LINEAR,
                     STEP,
                     CUBICSPLINE,
-
-                    pub fn jsonParse(alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
-                        return try utils.JsonHelpers.parseEnumAsString(@This(), alloc, source, options);
-                    }
                 } = .LINEAR,
             },
         };
@@ -950,10 +942,6 @@ pub const Gltf = struct {
                         .MAT3 => 9,
                         .MAT4 => 16,
                     };
-                }
-
-                pub fn jsonParse(alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
-                    return try utils.JsonHelpers.parseEnumAsString(@This(), alloc, source, options);
                 }
             },
 

@@ -608,7 +608,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         C.StaticRender{ .mesh = cube_mesh_handle },
         try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .friction = 0.0,
+            .friction = 0.4,
             .rotation = t.rotation,
             .pos = t.pos.xyz(),
         }),
