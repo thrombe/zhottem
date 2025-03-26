@@ -1,0 +1,23 @@
+version = 1
+revision = 1
+requires-python = ">=3.11"
+
+[[package]]
+name = "fake-bpy-module"
+version = "20250326"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/47/3119a1e284c826ae9e212127b23fa5d7c39fd8981c501c21c43983f4179e/fake_bpy_module-20250326.tar.gz", hash = "sha256:158b3b0ca7b5c3d12a5436933d39aaacbf854151607c3b3bf495b89ff77ecc8f", size = 952385 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/cd/7efab5790d35631f1225acf801f4a3190f4466db7ea75dc2f11a243d8e2f/fake_bpy_module-20250326-py3-none-any.whl", hash = "sha256:2d97e8b811302df1a46ccf364071da1e853a45c6e025e2195ce1d7fc52678b5d", size = 1077674 },
+]
+
+[[package]]
+name = "zhottem-blender"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "fake-bpy-module" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "fake-bpy-module", specifier = ">=20250326" }]

@@ -2,12 +2,14 @@
 /.direnv
 /.zig-cache
 /.cache
+/blender/.venv
 /compile_commands.json
 /zig-out
 /tmp
 /images
 /imgui.ini
 /screenshots/*.png
+__pycache__
 
 /assets/*.png
 /assets/*.obj

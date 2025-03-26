@@ -104,8 +104,13 @@
       env-packages = pkgs:
         (with pkgs; [
           (python312.withPackages (ps: with ps; [
+            # for dear imgui bindings
             ply
+
+            python-lsp-server
           ]))
+          uv
+          ruff # python linter, formatter
 
           pkg-config
           # curl
