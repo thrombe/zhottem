@@ -187,110 +187,81 @@ class SOCKETSERVER_OT_stop(bpy.types.Operator):
 #     """defines components that can be added to anything"""
 
 import bpy
+import json
+import os
 from bpy.props import (
-    EnumProperty,
     StringProperty,
     BoolProperty,
     IntProperty,
     FloatProperty,
     FloatVectorProperty,
+    EnumProperty,
     CollectionProperty,
-    PointerProperty,
 )
 from bpy.types import PropertyGroup, Panel, Operator, Menu
 
-AVAILABLE_COMPONENTS = {
-    "EntityId": {"type": "INT", "default": 0},
-    "Collider": {
-        "type": "COMPLEX",
-        "defaults": {
-            "collider_type": "BOX",
-            "radius": 1.0,
-            "height": 2.0,
-            "size": (1.0, 1.0, 1.0),
-        },
-    },
-    "AnimationType": {
-        "type": "ENUM",
-        "items": [
-            ("IDLE", "Idle", "Idle animation"),
-            ("WALK", "Walk", "Walk animation"),
-            ("RUN", "Run", "Run animation"),
-        ],
-        "default": "IDLE",
-    },
-    "IsStatic": {"type": "BOOL", "default": False},
-    "Mass": {"type": "FLOAT", "default": 1.0},
-}
+
+class ComponentRegistry:
+    schema: dict
+    enums: dict
+
+    def __init__(self):
+        with open(os.path.join(os.path.dirname(__file__), "components.json")) as f:
+            self.schema = json.loads(f.read())
+
+        self.enums = {}
+        for tname, t in self.schema.items():
+            if t["type"] == "enum":
+                self.enums[tname] = t["variants"]
+            elif t["type"] == "union":
+                self.enums[tname] = list(t["variants"].keys())
+
+        print(self.enums)
 
 
-class ColliderProperties(PropertyGroup):
-    collider_type: EnumProperty(
-        name="Type",
-        items=[
-            ("BOX", "Box", "Box collider"),
-            ("SPHERE", "Sphere", "Sphere collider"),
-            ("CAPSULE", "Capsule", "Capsule collider"),
-            ("MESH", "Mesh", "Mesh collider"),
-        ],
-        default="BOX",
-        description="Type of collider shape",
-    )
-    radius: FloatProperty(
-        name="Radius",
-        default=1.0,
-        min=0.01,
-        soft_max=10.0,
-        step=0.1,
-        subtype="DISTANCE",
-        description="Radius for sphere or capsule collider",
-    )
-    height: FloatProperty(
-        name="Height",
-        default=2.0,
-        min=0.01,
-        soft_max=10.0,
-        step=0.1,
-        subtype="DISTANCE",
-        description="Height for capsule collider",
-    )
-    size: FloatVectorProperty(
-        name="Size",
-        default=(1.0, 1.0, 1.0),
-        min=0.01,
-        soft_max=10.0,
-        step=0.1,
-        subtype="XYZ_LENGTH",
-        description="Dimensions for box collider",
-    )
+class ComponentProperty(PropertyGroup):
+    """Base property type that supports nested paths"""
+
+    name: StringProperty()
+    path: StringProperty()  # Dot-separated path for nested properties
+    type: StringProperty()
+
+    # Value storage
+    value_int: IntProperty()
+    value_float: FloatProperty()
+    value_bool: BoolProperty()
+    value_string: StringProperty()
+    value_vec3: FloatVectorProperty(size=3)
+    value_vec4: FloatVectorProperty(size=4)
+
+    def enum_variants(self, context):
+        reg = bpy.context.window_manager.component_registry
+        if self.enum_type in reg.enums:
+            return [(k, k, "") for k in reg.enums[self.enum_type]]
+        else:
+            return [
+                ("undefined", "undefined", ""),
+            ]
+
+    enum_type: StringProperty()
+    value_enum: EnumProperty(items=enum_variants)
 
 
 class GameComponent(PropertyGroup):
-    component_type: StringProperty(name="Type")
-
-    # Simple value storage
-    int_value: IntProperty(name="Value", default=0)
-    enum_value: EnumProperty(
-        name="Value",
-        items=[
-            ("IDLE", "Idle", "Idle animation"),
-            ("WALK", "Walk", "Walk animation"),
-            ("RUN", "Run", "Run animation"),
-        ],
-        default="IDLE",
-    )
-    bool_value: BoolProperty(name="Enabled", default=False)
-    float_value: FloatProperty(name="Value", default=0.0)
-
-    # Complex components
-    collider: PointerProperty(type=ColliderProperties)
+    component_type: StringProperty()
+    properties: CollectionProperty(type=ComponentProperty)
 
 
 class OBJECT_OT_add_game_component(Operator):
     bl_idname = "object.add_game_component"
     bl_label = "Add Game Component"
+    bl_property = "component_type"
 
-    component_type: StringProperty()
+    def component_enum_variants(self, context):
+        reg = bpy.context.window_manager.component_registry
+        return [(k, k, "") for k in reg.schema.keys()]
+
+    component_type: EnumProperty(items=component_enum_variants)
 
     def execute(self, context):
         obj = context.object
@@ -303,25 +274,163 @@ class OBJECT_OT_add_game_component(Operator):
         new_comp = components.add()
         new_comp.component_type = self.component_type
 
-        # Set defaults
-        comp_data = AVAILABLE_COMPONENTS[self.component_type]
-        if comp_data["type"] == "INT":
-            new_comp.int_value = comp_data["default"]
-        elif comp_data["type"] == "ENUM":
-            new_comp.enum_value = comp_data["default"]
-        elif comp_data["type"] == "BOOL":
-            new_comp.bool_value = comp_data["default"]
-        elif comp_data["type"] == "FLOAT":
-            new_comp.float_value = comp_data["default"]
-        elif self.component_type == "Collider":
-            collider = new_comp.collider
-            defaults = comp_data["defaults"]
-            collider.collider_type = defaults["collider_type"]
-            collider.radius = defaults["radius"]
-            collider.height = defaults["height"]
-            collider.size = defaults["size"]
-
+        reg = bpy.context.window_manager.component_registry
+        comp_def = reg.schema[self.component_type]
+        self._add_properties(new_comp.properties, comp_def)
         return {"FINISHED"}
+
+    def _add_properties(self, props, defn, path=""):
+        if defn["type"] == "struct":
+            for name, prop_def in defn["properties"].items():
+                new_path = f"{path}.{name}" if path else name
+                if prop_def["type"] == "struct":
+                    self._add_properties(props, prop_def, new_path)
+                else:
+                    prop = props.add()
+                    prop.name = name
+                    prop.path = new_path
+                    prop.type = prop_def["type"]
+                    self._set_default(prop, prop_def)
+        elif defn["type"] == "union":
+            prop = props.add()
+            prop.name = defn["tag"]
+            prop.path = path
+            prop.type = "enum"
+            prop.enum_type = self.component_type
+            prop.value_enum = defn["default_tag"]
+
+            for variant, variant_def in defn["variants"].items():
+                new_path = f"{path}.{variant}" if path else variant
+                self._add_properties(props, variant_def, new_path)
+        elif defn["type"] == "enum":
+            prop = props.add()
+            prop.type = defn["type"]
+            prop.enum_type = self.component_type
+            prop.value_enum = defn["default"]
+        else:
+            prop = props.add()
+            prop.type = defn["type"]
+            self._set_default(prop, defn)
+
+    def _set_default(self, prop, defn):
+        if prop.type == "int":
+            prop.value_int = defn.get("default", 0)
+        elif prop.type == "float":
+            prop.value_float = defn.get("default", 0.0)
+        elif prop.type == "bool":
+            prop.value_bool = defn.get("default", False)
+        elif prop.type == "string":
+            prop.value_string = defn.get("default", "")
+        elif prop.type == "enum":
+            prop.value_enum = defn["default"]
+        elif prop.type == "vec3":
+            prop.value_vec3 = defn.get("default", (0, 0, 0))
+        elif prop.type == "vec4":
+            prop.value_vec3 = defn.get("default", (0, 0, 0, 0))
+
+
+class OBJECT_PT_game_components(Panel):
+    bl_label = "Game Components"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "object"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.object
+
+        # Add component dropdown
+        row = layout.row()
+        row.menu("COMPONENT_MT_add", text="Add Component")
+
+        # Draw components
+        for idx, comp in enumerate(obj.game_components):
+            box = layout.box()
+            header = box.row()
+            header.label(text=comp.component_type)
+            header.operator(
+                "object.remove_game_component", text="", icon="X"
+            ).index = idx
+
+            self.draw_properties(box, comp)
+
+    def draw_properties(self, layout, comp):
+        reg = bpy.context.window_manager.component_registry
+        comp_def = reg.schema.get(comp.component_type, {})
+        properties_by_path = {prop.path: prop for prop in comp.properties}
+        self._draw_property_tree(layout, comp_def, properties_by_path)
+
+    def _draw_property_tree(self, layout, defn, properties, path=""):
+        if defn["type"] == "struct":
+            for name, prop_def in defn["properties"].items():
+                current_path = f"{path}.{name}" if path else name
+                if prop_def["type"] == "struct":
+                    self._draw_struct(layout, name, prop_def, properties, current_path)
+                else:
+                    self._draw_property(layout, properties[current_path])
+        elif defn["type"] == "union":
+            tag_prop = properties[path]
+            layout.prop(tag_prop, "value_enum", text=tag_prop.name)
+
+            active_variant = tag_prop.value_enum
+            variant_path = f"{path}.{active_variant}" if path else active_variant
+            if active_variant in defn["variants"]:
+                variant_def = defn["variants"][active_variant]
+                self._draw_property_tree(layout, variant_def, properties, variant_path)
+        else:
+            self._draw_property(layout, properties[path])
+
+    def _draw_struct(self, layout, name, defn, properties, path):
+        box = layout.box()
+        box.label(text=name)
+        self._draw_property_tree(box, defn, properties, path)
+
+    def _draw_property(self, layout, prop):
+        row = layout.row()
+        if prop.type == "int":
+            row.prop(prop, "value_int", text=prop.name)
+        elif prop.type == "float":
+            row.prop(prop, "value_float", text=prop.name)
+        elif prop.type == "bool":
+            row.prop(prop, "value_bool", text=prop.name)
+        elif prop.type == "string":
+            row.prop(prop, "value_string", text=prop.name)
+        elif prop.type == "enum":
+            row.prop(prop, "value_enum", text=prop.name)
+        elif prop.type == "vec3":
+            row.prop(prop, "value_vec3", text=prop.name)
+        elif prop.type == "vec4":
+            row.prop(prop, "value_vec4", text=prop.name)
+
+
+class GLTF2ExportUserExtension:
+    def gather_node_hook(self, gltf2_object, blender_object, export_settings):
+        if blender_object and blender_object.game_components:
+            gltf2_object.extras = gltf2_object.extras or {}
+            components_data = []
+
+            for comp in blender_object.game_components:
+                comp_data = {
+                    "type": comp.component_type,
+                    "properties": self._serialize_properties(comp.properties),
+                }
+                components_data.append(comp_data)
+
+            gltf2_object.extras["components"] = components_data
+
+    def _serialize_properties(self, props):
+        output = {}
+        for prop in props:
+            parts = prop.path.split(".")
+            current = output
+            for part in parts[:-1]:
+                current = current.setdefault(part, {})
+
+            value = getattr(prop, f"value_{prop.type}")
+            if prop.type == "vec3":
+                value = list(value)
+            current[parts[-1]] = value
+        return output
 
 
 class OBJECT_OT_remove_game_component(Operator):
@@ -338,114 +447,36 @@ class OBJECT_OT_remove_game_component(Operator):
         return {"FINISHED"}
 
 
+# Add this menu class
 class COMPONENT_MT_add(Menu):
     bl_label = "Add Component"
     bl_idname = "COMPONENT_MT_add"
 
     def draw(self, context):
+        reg = bpy.context.window_manager.component_registry
         layout = self.layout
-        for comp_type in AVAILABLE_COMPONENTS:
+        for comp_type in reg.schema:
             props = layout.operator(
                 OBJECT_OT_add_game_component.bl_idname, text=comp_type
             )
             props.component_type = comp_type
 
 
-class OBJECT_PT_game_components(Panel):
-    bl_label = "Game Components"
-    bl_idname = "OBJECT_PT_game_components"
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_context = "object"
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-
-        # Add component dropdown
-        row = layout.row()
-        row.menu("COMPONENT_MT_add", text="Add Component")
-
-        # List components
-        for idx, comp in enumerate(obj.game_components):
-            box = layout.box()
-            header = box.row()
-            header.label(text=comp.component_type)
-            header.operator(
-                OBJECT_OT_remove_game_component.bl_idname, text="", icon="X"
-            ).index = idx
-
-            # Draw component properties
-            if comp.component_type == "Collider":
-                collider = comp.collider
-                box.prop(collider, "collider_type")
-
-                if collider.collider_type in {"SPHERE", "CAPSULE"}:
-                    box.prop(collider, "radius")
-                if collider.collider_type == "CAPSULE":
-                    box.prop(collider, "height")
-                if collider.collider_type == "BOX":
-                    box.prop(collider, "size")
-            else:
-                comp_data = AVAILABLE_COMPONENTS.get(comp.component_type, {})
-                if comp_data.get("type") == "ENUM":
-                    box.prop(comp, "enum_value", text="")
-                elif comp_data.get("type") == "INT":
-                    box.prop(comp, "int_value")
-                elif comp_data.get("type") == "BOOL":
-                    box.prop(comp, "bool_value")
-                elif comp_data.get("type") == "FLOAT":
-                    box.prop(comp, "float_value")
+classes = (
+    ComponentProperty,
+    GameComponent,
+    OBJECT_OT_remove_game_component,
+    OBJECT_OT_add_game_component,
+    OBJECT_PT_game_components,
+    COMPONENT_MT_add,
+)
 
 
-class GLTF2ExportUserExtension:
-    def __init__(self):
-        self.properties = bpy.context.scene.get("gltf2ExportUserExtensions", {})
-
-    def gather_node_hook(self, gltf2_object, blender_object, export_settings):
-        if blender_object and blender_object.game_components:
-            if not hasattr(gltf2_object, "extras"):
-                gltf2_object.extras = {}
-
-            components_data = []
-            for comp in blender_object.game_components:
-                comp_data = {"type": comp.component_type, "values": {}}
-
-                if comp.component_type == "Collider":
-                    collider = comp.collider
-                    comp_data["values"]["type"] = collider.collider_type
-                    if collider.collider_type in {"SPHERE", "CAPSULE"}:
-                        comp_data["values"]["radius"] = collider.radius
-                    if collider.collider_type == "CAPSULE":
-                        comp_data["values"]["height"] = collider.height
-                    if collider.collider_type == "BOX":
-                        comp_data["values"]["size"] = list(collider.size)
-                else:
-                    value_type = AVAILABLE_COMPONENTS[comp.component_type][
-                        "type"
-                    ].lower()
-                    comp_data["values"]["value"] = getattr(comp, f"{value_type}_value")
-
-                components_data.append(comp_data)
-
-            if components_data:
-                gltf2_object.extras["components"] = components_data
-
-
-def register():
+def register_1():
     bpy.utils.register_class(Reload)
     bpy.utils.register_class(SocketServerPanel)
     bpy.utils.register_class(SOCKETSERVER_OT_start)
     bpy.utils.register_class(SOCKETSERVER_OT_stop)
-
-    bpy.utils.register_class(ColliderProperties)
-    bpy.utils.register_class(GameComponent)
-    bpy.utils.register_class(OBJECT_OT_add_game_component)
-    bpy.utils.register_class(OBJECT_OT_remove_game_component)
-    bpy.utils.register_class(COMPONENT_MT_add)
-    bpy.utils.register_class(OBJECT_PT_game_components)
-
-    bpy.types.Object.game_components = CollectionProperty(type=GameComponent)
 
     # Register glTF export handler
     try:
@@ -457,7 +488,16 @@ def register():
         print("GLTF2 Export extension not available")
 
 
-def unregister():
+def register_2():
+    bpy.types.WindowManager.component_registry = ComponentRegistry()
+
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+    bpy.types.Object.game_components = CollectionProperty(type=GameComponent)
+
+
+def unregister_1():
     bpy.utils.unregister_class(Reload)
 
     global running
@@ -468,11 +508,155 @@ def unregister():
     bpy.utils.unregister_class(SOCKETSERVER_OT_start)
     bpy.utils.unregister_class(SOCKETSERVER_OT_stop)
 
-    bpy.utils.unregister_class(ColliderProperties)
-    bpy.utils.unregister_class(GameComponent)
-    bpy.utils.unregister_class(OBJECT_OT_add_game_component)
-    bpy.utils.unregister_class(OBJECT_OT_remove_game_component)
-    bpy.utils.unregister_class(COMPONENT_MT_add)
-    bpy.utils.unregister_class(OBJECT_PT_game_components)
+
+def unregister_2():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
 
     del bpy.types.Object.game_components
+    del bpy.types.WindowManager.component_registry
+
+
+class Component:
+    def __init__(self, name: str, typ: str, val: PropertyGroup):
+        self.name = name
+        self.type = typ
+        self.val = val
+
+
+class ComponentRegistry2:
+    def __init__(self):
+        self.base_types = {
+            "f32": (FloatProperty, {}),
+            "u32": (IntProperty, {}),
+            "vec3": (FloatVectorProperty, {"size": 3}),
+            "vec4": (FloatVectorProperty, {"size": 4}),
+        }
+        self.classes = []
+
+        import json
+
+        with open(os.path.join(os.path.dirname(__file__), "components.json")) as f:
+            schema = json.loads(f.read())
+
+        for name, t in schema.items():
+            if t["type"] == "struct":
+                __annotations__ = {}
+                for prop, typ in t["properties"].items():
+                    __annotations__[prop] = FloatProperty(name=prop, default=0)
+                cls = type(name, (PropertyGroup,), {"__annotations__": __annotations__})
+                self.classes.append(cls)
+
+
+r = ComponentRegistry2()
+
+
+def get_vals(_, _2):
+    return [(c.__name__, c.__name__, "") for c in r.classes]
+
+
+class OBJECT_OT_add_game_component2(Operator):
+    bl_idname = "object.add_game_component2"
+    bl_label = "Add Game Component"
+    bl_property = "component_type"
+
+    component_type: EnumProperty(items=get_vals)
+
+    def execute(self, context):
+        obj = context.object
+        # components = obj.game_components2
+        components = obj.game_components3
+
+        # new_comp = components.add()
+        # new_comp.component_type = self.component_type
+
+        components[self.component_type] = 12
+        print(components)
+
+        return {"FINISHED"}
+
+
+class OBJECT_OT_remove_game_component(Operator):
+    bl_idname = "object.remove_game_component2"
+    bl_label = "Remove Game Component"
+
+    index: IntProperty()
+
+    def execute(self, context):
+        obj = context.object
+        components = obj.game_components2
+        if 0 <= self.index < len(components):
+            components.remove(self.index)
+        return {"FINISHED"}
+
+
+# Add this menu class
+class COMPONENT_MT_add2(Menu):
+    bl_label = "Add Component"
+    bl_idname = "COMPONENT_MT_add2"
+
+    def draw(self, context):
+        layout = self.layout
+        for comp_type in r.classes:
+            props = layout.operator(
+                OBJECT_OT_add_game_component2.bl_idname, text=comp_type.__name__
+            )
+            props.component_type = comp_type.__name__
+
+
+class OBJECT_PT_game_components2(Panel):
+    bl_label = "Game Components2"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "object"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.object
+
+        # Add component dropdown
+        row = layout.row()
+        row.menu("COMPONENT_MT_add2", text="Add Component")
+
+        # Draw components
+        for idx, comp in enumerate(obj.game_components2):
+            box = layout.box()
+            header = box.row()
+            header.label(text=comp.component_type2)
+            header.operator("object.remove_game_component2", text="", icon="X")
+
+
+def register_3():
+    for clss in r.classes + [
+        OBJECT_OT_add_game_component2,
+        COMPONENT_MT_add2,
+        OBJECT_PT_game_components2,
+    ]:
+        bpy.utils.register_class(clss)
+
+    bpy.types.Object.game_components2 = CollectionProperty(type=PropertyGroup)
+    bpy.types.Object.game_components3 = {}
+
+
+def unregister_3():
+    for clss in r.classes + [
+        OBJECT_OT_add_game_component2,
+        COMPONENT_MT_add2,
+        OBJECT_PT_game_components2,
+    ]:
+        bpy.utils.unregister_class(clss)
+
+    del bpy.types.Object.game_components2
+    del bpy.types.Object.game_components3
+
+
+def register():
+    register_1()
+    register_2()
+    register_3()
+
+
+def unregister():
+    unregister_1()
+    unregister_2()
+    unregister_3()
