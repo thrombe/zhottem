@@ -11,11 +11,4 @@
 /screenshots/*.png
 __pycache__
 
-/assets/*.png
-/assets/*.obj
-/assets/*.mtl
-/assets/*.glb
-/assets/*.gltf
-/assets/*.bin
-/assets/**/*.mp3
-/assets/**/*.wav
+/assets

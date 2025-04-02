@@ -111,6 +111,7 @@
           ]))
           uv
           ruff # python linter, formatter
+          blender
 
           pkg-config
           # curl
