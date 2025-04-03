@@ -26,21 +26,21 @@ class Component:
 class ComponentRegistry:
     schema: dict
     components: Dict[str, Component]
+    classes: list
 
     def __init__(self):
         self.components: Dict[str, Component] = {}
+        self.classes = []
 
         with open(os.path.join(os.path.dirname(__file__), "../components.json")) as f:
             self.schema = json.loads(f.read())
 
         for name, typ in self.schema.items():
-            self.parse_type(name, typ)
+            comp = self.parse_type(name, typ)
+            self.components[name] = comp
 
     # TODO: namespaced subtypes Rigidbody.constraints etc
     def parse_type(self, name: str, typ: dict):
-        if name in self.components:
-            return self.components[name]
-
         class_props = {"bl_label": name, "bl_idname": "zhottem." + name}
         if typ["type"] == "struct":
             __annotations__ = {}
@@ -50,13 +50,13 @@ class ComponentRegistry:
 
             class_props["__annotations__"] = __annotations__
 
-            value_props = {}
-            self.components[name] = Component(
+            t = type(name, (PropertyGroup,), class_props)
+            self.classes.append(t)
+            return Component(
                 PointerProperty,
-                value_props | {"type": type(name, (PropertyGroup,), class_props)},
+                {"type": t},
                 typ,
             )
-            return self.components[name]
         elif typ["type"] == "union":
             __annotations__ = {}
 
@@ -71,19 +71,19 @@ class ComponentRegistry:
                 __annotations__[tname] = comp.clas(**comp.props)
 
             class_props["__annotations__"] = __annotations__
-            self.components[name] = Component(
+            t = type(name, (PropertyGroup,), class_props)
+            self.classes.append(t)
+            return Component(
                 PointerProperty,
-                {"type": type(name, (PropertyGroup,), class_props)},
+                {"type": t},
                 typ,
             )
-            return self.components[name]
         elif typ["type"] == "enum":
             value_props = {
                 "items": [(k, k, "") for k in typ["variants"]],
                 "default": typ["default"],
             }
-            self.components[name] = Component(EnumProperty, value_props, typ)
-            return self.components[name]
+            return Component(EnumProperty, value_props, typ)
         elif typ["type"] == "int":
             value_props = {"default": typ.get("default", 0)}
             return Component(IntProperty, value_props, typ)
@@ -259,9 +259,8 @@ def register():
         bpy.utils.register_class(cls)
 
     reg = bpy.context.window_manager.component_registry
-    for name, comp in reg.components.items():
-        if "type" in comp.props:
-            bpy.utils.register_class(comp.props["type"])
+    for cls in reg.classes:
+        bpy.utils.register_class(cls)
 
     for name in reg.schema.keys():
         comp = reg.components[name]
@@ -275,9 +274,8 @@ def unregister():
         bpy.utils.unregister_class(cls)
 
     reg = bpy.context.window_manager.component_registry
-    for name, comp in reg.components.items():
-        if "type" in comp.props:
-            bpy.utils.unregister_class(comp.props["type"])
+    for cls in reg.classes:
+        bpy.utils.unregister_class(cls)
 
     for name in reg.schema.keys():
         delattr(bpy.types.Object, "zhott_" + name)
