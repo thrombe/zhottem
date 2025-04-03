@@ -172,7 +172,7 @@ def register():
     bpy.utils.register_class(SOCKETSERVER_OT_stop)
 
 
-def unregister_1():
+def unregister():
     global running
     if running:
         bpy.ops.socketserver.stop()
