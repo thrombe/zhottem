@@ -9,25 +9,19 @@ bl_info = {
     "blender": (4, 2, 0),
 }
 
+# https://github.com/KhronosGroup/glTF-Blender-IO/tree/main/example-addons/example_gltf_exporter_extension
+glTF2ExportUserExtension = registry.glTF2ExportUserExtension
+
 
 def register():
-    bpy.utils.register_class(utils.Reload)
+    # bpy.utils.register_class(utils.Reload)
 
-    # Register glTF export handler
-    try:
-        from io_scene_gltf2.io.com.gltf2_io_extensions import Extension
-        from io_scene_gltf2.blender.exp import gltf2_blender_export
-
-        gltf2_blender_export.GLTF2ExportUserExtension = utils.GLTF2ExportUserExtension
-    except ImportError:
-        print("GLTF2 Export extension not available")
-
-    server.register()
+    # server.register()
     registry.register()
 
 
 def unregister():
-    bpy.utils.unregister_class(utils.Reload)
+    # bpy.utils.unregister_class(utils.Reload)
 
-    server.unregister()
+    # server.unregister()
     registry.unregister()

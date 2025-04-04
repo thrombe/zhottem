@@ -1,7 +1,7 @@
 import bpy
 import json
 import os
-from typing import Dict
+from typing import Dict, Any, Optional
 from bpy.props import (
     StringProperty,
     BoolProperty,
@@ -12,7 +12,7 @@ from bpy.props import (
     CollectionProperty,
     PointerProperty,
 )
-from bpy.types import PropertyGroup, Panel, Operator, Menu
+from bpy.types import PropertyGroup, Panel, Operator, Menu, Object
 
 
 class Component:
@@ -24,6 +24,7 @@ class Component:
 
 
 class ComponentRegistry:
+    prefix: str = "zhott_"
     schema: dict
     components: Dict[str, Component]
     classes: list
@@ -39,7 +40,7 @@ class ComponentRegistry:
             comp = self.parse_type(name, typ)
             self.components[name] = comp
 
-    # TODO: namespaced subtypes Rigidbody.constraints etc
+    # https://projects.blender.org/blender/blender/issues/86719#issuecomment-232525
     def parse_type(self, name: str, typ: dict):
         class_props = {"bl_label": name, "bl_idname": "zhottem." + name}
         if typ["type"] == "struct":
@@ -157,7 +158,7 @@ class OBJECT_PT_game_components(Panel):
             header = box.row()
             header.label(text=name)
             header.operator("object.remove_game_component", text="", icon="X").index = i
-            self.draw_type(obj, "zhott_" + name, box, name, comp.defn)
+            self.draw_type(obj, reg.prefix + name, box, name, comp.defn)
 
     def draw_type(self, obj, propname, layout, name: str, defn: dict):
         if defn["type"] == "struct":
@@ -180,36 +181,6 @@ class OBJECT_PT_game_components(Panel):
         else:
             row = layout.row()
             row.prop(obj, propname, text=name)
-
-
-class GLTF2ExportUserExtension:
-    def gather_node_hook(self, gltf2_object, blender_object, export_settings):
-        if blender_object and blender_object.game_components:
-            gltf2_object.extras = gltf2_object.extras or {}
-            components_data = []
-
-            for comp in blender_object.game_components:
-                comp_data = {
-                    "type": comp.component_type,
-                    "properties": self._serialize_properties(comp.properties),
-                }
-                components_data.append(comp_data)
-
-            gltf2_object.extras["components"] = components_data
-
-    def _serialize_properties(self, props):
-        output = {}
-        for prop in props:
-            parts = prop.path.split(".")
-            current = output
-            for part in parts[:-1]:
-                current = current.setdefault(part, {})
-
-            value = getattr(prop, f"value_{prop.type}")
-            if prop.type == "vec3":
-                value = list(value)
-            current[parts[-1]] = value
-        return output
 
 
 class OBJECT_OT_remove_game_component(Operator):
@@ -252,6 +223,106 @@ classes = (
 )
 
 
+class glTF2ExportUserExtension:
+    def __init__(self):
+        from io_scene_gltf2.io.com.gltf2_io_extensions import Extension
+
+        self.Extension = Extension
+
+    def glTF2_pre_export_callback(export_settings):
+        print("This will be called before exporting the glTF file.")
+
+    def glTF2_post_export_callback(export_settings):
+        print("This will be called after exporting the glTF file.")
+
+    def gather_node_hook(
+        self,
+        gltf2_object: Any,
+        blender_object: Object,
+        export_settings: Dict[str, Any],
+    ) -> None:
+        # Note: If you are using Collection Exporters, you may want to restrict the export for some collections
+        # You can access the collection like this: export_settings['gltf_collection']
+        # So you can check if you want to use this hook for this collection or not, using
+        # if export_settings['gltf_collection'] != "Coll":
+        #     return
+
+        if not blender_object or not blender_object.game_components:
+            return
+
+        wm = bpy.context.window_manager
+        reg: Optional[ComponentRegistry] = getattr(wm, "component_registry", None)
+        if not reg:
+            return
+
+        components_data = []
+        for comp_entry in blender_object.game_components:
+            comp_type = comp_entry.component_type
+            comp = reg.components.get(comp_type)
+            if not comp:
+                continue
+
+            prop_name = reg.prefix + comp_type
+            prop_group = getattr(blender_object, prop_name, None)
+            if not prop_group:
+                continue
+
+            comp_data = {
+                "component_name": comp_type,
+                "value": self.serialize_component(prop_group, comp.defn),
+            }
+            components_data.append(comp_data)
+
+        gltf2_object.extras = {"components": components_data}
+
+    def serialize_component(
+        self,
+        prop_group: PropertyGroup,
+        defn: Dict[str, Any],
+    ):
+        if defn["type"] == "struct":
+            return {
+                pname: self.serialize_component(getattr(prop_group, pname), pdef)
+                for pname, pdef in defn["properties"].items()
+            }
+        elif defn["type"] == "union":
+            active_variant = prop_group.enum
+            variant_def = defn["variants"][active_variant]
+            return {
+                str(getattr(prop_group, "enum")): self.serialize_component(
+                    getattr(prop_group, active_variant),
+                    variant_def,
+                )
+            }
+        elif defn["type"] == "int":
+            return int(prop_group)
+        elif defn["type"] == "float":
+            return float(prop_group)
+        elif defn["type"] == "bool":
+            return bool(prop_group)
+        elif defn["type"] == "string":
+            return str(prop_group)
+        elif defn["type"] in ("vec3", "vec4"):
+            return [float(v) for v in prop_group]
+        elif defn["type"] == "enum":
+            return str(prop_group)
+        else:
+            return None
+
+
+def draw_export(context, layout):
+    # Note: If you are using Collection Exporter, you may want to restrict UI for some collections
+    # You can access the collection like this: context.collection
+    # So you can check if you want to show the UI for this collection or not, using
+    # if context.collection.name != "Coll":
+    #     return
+
+    header, body = layout.panel("GLTF_addon_example_exporter", default_closed=False)
+    header.use_property_split = False
+
+    header.label(text="lmao")
+
+
 def register():
     bpy.types.WindowManager.component_registry = ComponentRegistry()
 
@@ -264,9 +335,13 @@ def register():
 
     for name in reg.schema.keys():
         comp = reg.components[name]
-        setattr(bpy.types.Object, "zhott_" + name, comp.clas(**comp.props))
+        setattr(bpy.types.Object, reg.prefix + name, comp.clas(**comp.props))
 
     bpy.types.Object.game_components = CollectionProperty(type=ComponentType)
+
+    from io_scene_gltf2 import exporter_extension_layout_draw
+
+    exporter_extension_layout_draw["Example glTF Extension"] = draw_export
 
 
 def unregister():
@@ -278,7 +353,11 @@ def unregister():
         bpy.utils.unregister_class(cls)
 
     for name in reg.schema.keys():
-        delattr(bpy.types.Object, "zhott_" + name)
+        delattr(bpy.types.Object, reg.prefix + name)
 
     del bpy.types.Object.game_components
     del bpy.types.WindowManager.component_registry
+
+    from io_scene_gltf2 import exporter_extension_layout_draw
+
+    del exporter_extension_layout_draw["Example glTF Extension"]
