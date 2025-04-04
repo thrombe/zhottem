@@ -7,7 +7,7 @@ from bpy.app.handlers import persistent
 
 
 SOCKET_PATH = "/tmp/zhottem/blender.sock"
-server = None
+server: socket.socket = None  # type:ignore
 clients = set()
 running = False
 thread = None
@@ -120,7 +120,7 @@ class SocketServerPanel(bpy.types.Panel):
     bl_category = "Socket"
 
     def draw(self, context):
-        layout = self.layout
+        layout: bpy.types.UILayout = self.layout  # type:ignore
         row = layout.row()
         row.label(text=f"Connected clients: {len(clients)}")
 

@@ -41,10 +41,10 @@ class ComponentRegistry:
             self.components[name] = comp
 
     # https://projects.blender.org/blender/blender/issues/86719#issuecomment-232525
-    def parse_type(self, name: str, typ: dict):
-        class_props = {"bl_label": name, "bl_idname": "zhottem." + name}
+    def parse_type(self, name: str, typ: dict) -> Component:
+        class_props: dict = {"bl_label": name, "bl_idname": "zhottem." + name}
         if typ["type"] == "struct":
-            __annotations__ = {}
+            __annotations__: dict = {}
             for tname, ttyp in typ["properties"].items():
                 comp = self.parse_type(tname, ttyp)
                 __annotations__[tname] = comp.clas(**comp.props)
@@ -104,7 +104,7 @@ class ComponentRegistry:
             value_props = {"default": typ.get("default", [0, 0, 0, 0]), "size": 4}
             return Component(FloatVectorProperty, value_props, typ)
         else:
-            pass
+            raise Exception("unknown component type")
 
 
 class OBJECT_OT_add_game_component(Operator):
@@ -113,15 +113,15 @@ class OBJECT_OT_add_game_component(Operator):
     bl_property = "component_type"
 
     def component_enum_variants(self, context):
-        reg = bpy.context.window_manager.component_registry
+        reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type: ignore
         return [(k, k, "") for k in reg.schema.keys()]
 
-    component_type: EnumProperty(items=component_enum_variants)
+    component_type: EnumProperty(items=component_enum_variants)  # type: ignore
 
     def execute(self, context):
         # reg: ComponentRegistry = bpy.context.window_manager.component_registry
         obj = context.object
-        components = obj.game_components
+        components: CollectionProperty = obj.game_components  # type: ignore
 
         if any(c.component_type == self.component_type for c in components):
             return {"CANCELLED"}
@@ -142,10 +142,10 @@ class OBJECT_PT_game_components(Panel):
     bl_context = "object"
 
     def draw(self, context):
-        layout = self.layout
+        layout: bpy.types.UILayout = self.layout  # type:ignore
         obj = context.object
-        components = obj.game_components
-        reg = bpy.context.window_manager.component_registry
+        components = obj.game_components  # type:ignore
+        reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
 
         row = layout.row()
         row.menu("COMPONENT_MT_add", text="Add Component")
@@ -157,10 +157,20 @@ class OBJECT_PT_game_components(Panel):
             box = layout.box()
             header = box.row()
             header.label(text=name)
-            header.operator("object.remove_game_component", text="", icon="X").index = i
+            rgc: OBJECT_OT_remove_game_component = header.operator(
+                "object.remove_game_component", text="", icon="X"
+            )  # type:ignore
+            rgc.index = i
             self.draw_type(obj, reg.prefix + name, box, name, comp.defn)
 
-    def draw_type(self, obj, propname, layout, name: str, defn: dict):
+    def draw_type(
+        self,
+        obj,
+        propname: str,
+        layout: bpy.types.UILayout,
+        name: str,
+        defn: dict,
+    ):
         if defn["type"] == "struct":
             for pname, ptype in defn["properties"].items():
                 box = layout
@@ -187,11 +197,11 @@ class OBJECT_OT_remove_game_component(Operator):
     bl_idname = "object.remove_game_component"
     bl_label = "Remove Game Component"
 
-    index: IntProperty()
+    index: IntProperty()  # type:ignore
 
     def execute(self, context):
         obj = context.object
-        obj.game_components.remove(self.index)
+        obj.game_components.remove(self.index)  # type:ignore
         return {"FINISHED"}
 
 
@@ -201,17 +211,17 @@ class COMPONENT_MT_add(Menu):
     bl_idname = "COMPONENT_MT_add"
 
     def draw(self, context):
-        reg = bpy.context.window_manager.component_registry
-        layout = self.layout
+        reg = bpy.context.window_manager.component_registry  # type:ignore
+        layout: bpy.types.UILayout = self.layout  # type:ignore
         for comp_type in reg.schema:
-            props = layout.operator(
+            props: OBJECT_OT_add_game_component = layout.operator(
                 OBJECT_OT_add_game_component.bl_idname, text=comp_type
-            )
+            )  # type:ignore
             props.component_type = comp_type
 
 
 class ComponentType(PropertyGroup):
-    component_type: StringProperty()
+    component_type: StringProperty()  # type:ignore
 
 
 classes = (
@@ -225,7 +235,7 @@ classes = (
 
 class glTF2ExportUserExtension:
     def __init__(self):
-        from io_scene_gltf2.io.com.gltf2_io_extensions import Extension
+        from io_scene_gltf2.io.com.gltf2_io_extensions import Extension  # type:ignore
 
         self.Extension = Extension
 
@@ -247,7 +257,7 @@ class glTF2ExportUserExtension:
         # if export_settings['gltf_collection'] != "Coll":
         #     return
 
-        if not blender_object or not blender_object.game_components:
+        if not blender_object or not blender_object.game_components:  # type:ignore
             return
 
         wm = bpy.context.window_manager
@@ -256,7 +266,7 @@ class glTF2ExportUserExtension:
             return
 
         components_data = []
-        for comp_entry in blender_object.game_components:
+        for comp_entry in blender_object.game_components:  # type:ignore
             comp_type = comp_entry.component_type
             comp = reg.components.get(comp_type)
             if not comp:
@@ -277,7 +287,7 @@ class glTF2ExportUserExtension:
 
     def serialize_component(
         self,
-        prop_group: PropertyGroup,
+        prop_group,
         defn: Dict[str, Any],
     ):
         if defn["type"] == "struct":
@@ -324,12 +334,12 @@ def draw_export(context, layout):
 
 
 def register():
-    bpy.types.WindowManager.component_registry = ComponentRegistry()
+    bpy.types.WindowManager.component_registry = ComponentRegistry()  # type:ignore
 
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    reg = bpy.context.window_manager.component_registry
+    reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
     for cls in reg.classes:
         bpy.utils.register_class(cls)
 
@@ -337,9 +347,9 @@ def register():
         comp = reg.components[name]
         setattr(bpy.types.Object, reg.prefix + name, comp.clas(**comp.props))
 
-    bpy.types.Object.game_components = CollectionProperty(type=ComponentType)
+    bpy.types.Object.game_components = CollectionProperty(type=ComponentType)  # type:ignore
 
-    from io_scene_gltf2 import exporter_extension_layout_draw
+    from io_scene_gltf2 import exporter_extension_layout_draw  # type:ignore
 
     exporter_extension_layout_draw["Example glTF Extension"] = draw_export
 
@@ -348,16 +358,16 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
-    reg = bpy.context.window_manager.component_registry
+    reg = bpy.context.window_manager.component_registry  # type:ignore
     for cls in reg.classes:
         bpy.utils.unregister_class(cls)
 
     for name in reg.schema.keys():
         delattr(bpy.types.Object, reg.prefix + name)
 
-    del bpy.types.Object.game_components
-    del bpy.types.WindowManager.component_registry
+    del bpy.types.Object.game_components  # type:ignore
+    del bpy.types.WindowManager.component_registry  # type:ignore
 
-    from io_scene_gltf2 import exporter_extension_layout_draw
+    from io_scene_gltf2 import exporter_extension_layout_draw  # type:ignore
 
     del exporter_extension_layout_draw["Example glTF Extension"]

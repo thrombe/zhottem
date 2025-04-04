@@ -90,7 +90,7 @@
         runScript = "${pkgs.zsh}/bin/zsh";
         profile = ''
           export FHS=1
-          # source ./.venv/bin/activate
+          source ./.venv/bin/activate
           # source .env
         '';
       };
@@ -107,10 +107,14 @@
             # for dear imgui bindings
             ply
 
-            python-lsp-server
+            # python-lsp-server # (lsp)
           ]))
-          uv
-          ruff # python linter, formatter
+          uv # python package manager, virtualenv (rust)
+          # pylyzer # static type analyzer (rust)
+          pyright # lsp (js)
+          # basedpyright # lsp (js) (fork of pyright)
+          ruff # python linter, formatter (rust)
+
           blender
 
           pkg-config
