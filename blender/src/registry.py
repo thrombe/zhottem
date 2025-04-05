@@ -12,7 +12,15 @@ from bpy.props import (
     CollectionProperty,
     PointerProperty,
 )
-from bpy.types import PropertyGroup, Panel, Operator, Menu, Object
+from bpy.types import (
+    DriverVariable,
+    FCurve,
+    PropertyGroup,
+    Panel,
+    Operator,
+    Menu,
+    Object,
+)
 
 
 class Component:
@@ -119,9 +127,22 @@ class OBJECT_OT_add_game_component(Operator):
     component_type: EnumProperty(items=component_enum_variants)  # type: ignore
 
     def execute(self, context):
-        # reg: ComponentRegistry = bpy.context.window_manager.component_registry
-        obj = context.object
-        components: CollectionProperty = obj.game_components  # type: ignore
+        reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
+        obj: Object = context.object  # type:ignore
+        components: CollectionProperty = obj.game_components  # type:ignore
+        object_status: ObjectStatusProp = obj.zhott_object_status  # type:ignore
+
+        if object_status.status == ObjectStatus.UNINIT:
+            object_status.status = ObjectStatus.INIT  # type:ignore
+
+            transform: PropertyGroup = getattr(obj, reg.prefix + "Transform")
+            drivers: list[FCurve] = transform.driver_add("position")  # type:ignore
+            for driver, x in zip(drivers, ["x", "y", "z"]):
+                driver.driver.expression = "vec_" + x  # type:ignore
+                var: DriverVariable = driver.driver.variables.new()  # type:ignore
+                var.name = "vec_" + x
+                var.targets[0].id = obj
+                var.targets[0].data_path = "location." + x
 
         if any(c.component_type == self.component_type for c in components):
             return {"CANCELLED"}
@@ -224,12 +245,25 @@ class ComponentType(PropertyGroup):
     component_type: StringProperty()  # type:ignore
 
 
+class ObjectStatus(str):
+    UNINIT = "uninit"
+    INIT = "init"
+
+
+class ObjectStatusProp(PropertyGroup):
+    status: EnumProperty(
+        items=[(k, k, "") for k in [ObjectStatus.UNINIT, ObjectStatus.INIT]],
+        default=ObjectStatus.UNINIT,
+    )  # type:ignore
+
+
 classes = (
     OBJECT_OT_remove_game_component,
     OBJECT_OT_add_game_component,
     OBJECT_PT_game_components,
     COMPONENT_MT_add,
     ComponentType,
+    ObjectStatusProp,
 )
 
 
@@ -348,6 +382,7 @@ def register():
         setattr(bpy.types.Object, reg.prefix + name, comp.clas(**comp.props))
 
     bpy.types.Object.game_components = CollectionProperty(type=ComponentType)  # type:ignore
+    bpy.types.Object.zhott_object_status = PointerProperty(type=ObjectStatusProp)  # type:ignore
 
     from io_scene_gltf2 import exporter_extension_layout_draw  # type:ignore
 
@@ -366,6 +401,7 @@ def unregister():
         delattr(bpy.types.Object, reg.prefix + name)
 
     del bpy.types.Object.game_components  # type:ignore
+    del bpy.types.Object.zhott_object_status  # type:ignore
     del bpy.types.WindowManager.component_registry  # type:ignore
 
     from io_scene_gltf2 import exporter_extension_layout_draw  # type:ignore
