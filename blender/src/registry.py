@@ -23,23 +23,41 @@ from bpy.types import (
 )
 
 
+class ComponentsStatus(str):
+    UNINIT = "uninit"
+    INIT = "init"
+
+
+class ComponentsStatusProp(PropertyGroup):
+    status: EnumProperty(
+        items=[(k, k, "") for k in [ComponentsStatus.UNINIT, ComponentsStatus.INIT]],
+        default=ComponentsStatus.UNINIT,
+    )  # type:ignore
+
+
 class Component:
-    def __init__(self, clas, props: dict, defn: dict):
-        self.name = clas.__name__
+    def __init__(self, clas, props: dict, defn: dict, name: Optional[str] = None):
+        self.name = name if name else clas.__name__
         self.clas = clas
         self.props = props
         self.defn = defn
 
 
 class ComponentRegistry:
-    prefix: str = "zhott_"
+    name_prefix: str = "zhott_"
+    path_prefix: str = "zhottem."
     schema: dict
     components: Dict[str, Component]
     classes: list
 
+    # the class of top level propgroup
+    top_prop: Component
+
     def __init__(self):
         self.components: Dict[str, Component] = {}
-        self.classes = []
+        self.classes = [
+            ComponentsStatusProp,
+        ]
 
         with open(os.path.join(os.path.dirname(__file__), "../components.json")) as f:
             self.schema = json.loads(f.read())
@@ -48,9 +66,65 @@ class ComponentRegistry:
             comp = self.parse_type(name, typ)
             self.components[name] = comp
 
+        self.top_prop = self.prepare_top_prop()
+
+    def prepare_top_prop(self) -> Component:
+        name = "TopProp"
+        class_props: dict = {"bl_label": name, "bl_idname": self.path_prefix + name}
+        __annotations__: dict = {}
+
+        for name in self.schema.keys():
+            comp = self.components[name]
+            __annotations__[name] = comp.clas(**comp.props)
+
+        comp = self.prepare_component_entry()
+        __annotations__["active_components"] = CollectionProperty(
+            type=comp.props["type"]
+        )
+        __annotations__["components_status"] = PointerProperty(
+            type=ComponentsStatusProp
+        )
+
+        class_props["__annotations__"] = __annotations__
+        t = type(name, (PropertyGroup,), class_props)
+        self.classes.append(t)
+        return Component(
+            PointerProperty,
+            {"type": t},
+            self.schema,
+            name,
+        )
+
+    def prepare_component_entry(self) -> Component:
+        name = "ComponentEntry"
+        class_props: dict = {"bl_label": name, "bl_idname": self.path_prefix + name}
+        __annotations__: dict = {}
+
+        __annotations__["type"] = EnumProperty(
+            items=[(k, k, "") for k in self.schema.keys()]
+        )
+
+        class_props["__annotations__"] = __annotations__
+        t = type(name, (PropertyGroup,), class_props)
+        self.classes.append(t)
+        return Component(
+            PointerProperty,
+            {"type": t},
+            {
+                "type": "struct",
+                "properties": {
+                    "type": {  # this "type" is the attr name
+                        "type": "enum",
+                        "variants": list(self.schema.keys()),
+                    }
+                },
+            },
+            name,
+        )
+
     # https://projects.blender.org/blender/blender/issues/86719#issuecomment-232525
     def parse_type(self, name: str, typ: dict) -> Component:
-        class_props: dict = {"bl_label": name, "bl_idname": "zhottem." + name}
+        class_props: dict = {"bl_label": name, "bl_idname": self.path_prefix + name}
         if typ["type"] == "struct":
             __annotations__: dict = {}
             for tname, ttyp in typ["properties"].items():
@@ -65,6 +139,7 @@ class ComponentRegistry:
                 PointerProperty,
                 {"type": t},
                 typ,
+                name,
             )
         elif typ["type"] == "union":
             __annotations__ = {}
@@ -86,6 +161,7 @@ class ComponentRegistry:
                 PointerProperty,
                 {"type": t},
                 typ,
+                name,
             )
         elif typ["type"] == "enum":
             value_props = {
@@ -129,13 +205,16 @@ class OBJECT_OT_add_game_component(Operator):
     def execute(self, context):
         reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
         obj: Object = context.object  # type:ignore
-        components: CollectionProperty = obj.game_components  # type:ignore
-        object_status: ObjectStatusProp = obj.zhott_object_status  # type:ignore
+        top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
+        status: ComponentsStatusProp = top_prop.components_status  # type:ignore
+        components = top_prop.active_components  # type:ignore
 
-        if object_status.status == ObjectStatus.UNINIT:
-            object_status.status = ObjectStatus.INIT  # type:ignore
+        # TODO: can insert objects like collision shape and add a driver to it controlled by our component
+        if status.status == ComponentsStatus.UNINIT:
+            status.status = ComponentsStatus.INIT  # type:ignore
 
-            transform: PropertyGroup = getattr(obj, reg.prefix + "Transform")
+            # - [Easily Create Driver Variables with Blender Python - YouTube](https://www.youtube.com/watch?v=m-OFyHHY4KI)
+            transform: PropertyGroup = getattr(top_prop, "Transform")
             drivers: list[FCurve] = transform.driver_add("position")  # type:ignore
             for driver, x in zip(drivers, ["x", "y", "z"]):
                 driver.driver.expression = "vec_" + x  # type:ignore
@@ -144,14 +223,11 @@ class OBJECT_OT_add_game_component(Operator):
                 var.targets[0].id = obj
                 var.targets[0].data_path = "location." + x
 
-        if any(c.component_type == self.component_type for c in components):
+        if any(c == self.component_type for c in components):
             return {"CANCELLED"}
 
-        # comp = reg.components[self.component_type]
-        # setattr(obj, "zhott_" + self.component_type, comp.clas(**comp.props))
-
         comp = components.add()
-        comp.component_type = self.component_type
+        comp.type = self.component_type
 
         return {"FINISHED"}
 
@@ -163,16 +239,17 @@ class OBJECT_PT_game_components(Panel):
     bl_context = "object"
 
     def draw(self, context):
-        layout: bpy.types.UILayout = self.layout  # type:ignore
-        obj = context.object
-        components = obj.game_components  # type:ignore
         reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
+        layout: bpy.types.UILayout = self.layout  # type:ignore
+        obj: Object = context.object  # type:ignore
+        top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
+        components = top_prop.active_components  # type:ignore
 
         row = layout.row()
         row.menu("COMPONENT_MT_add", text="Add Component")
 
         for i, name in enumerate(components):
-            name = name.component_type
+            name = name.type
             comp = reg.components[name]
 
             box = layout.box()
@@ -182,12 +259,11 @@ class OBJECT_PT_game_components(Panel):
                 "object.remove_game_component", text="", icon="X"
             )  # type:ignore
             rgc.index = i
-            self.draw_type(obj, reg.prefix + name, box, name, comp.defn)
+            self.draw_type(top_prop, box, name, comp.defn)
 
     def draw_type(
         self,
         obj,
-        propname: str,
         layout: bpy.types.UILayout,
         name: str,
         defn: dict,
@@ -198,20 +274,20 @@ class OBJECT_PT_game_components(Panel):
                 if ptype["type"] in ["struct", "union"]:
                     box = layout.box()
                     box.label(text=pname)
-                self.draw_type(getattr(obj, propname), pname, box, pname, ptype)
+                self.draw_type(getattr(obj, name), box, pname, ptype)
         elif defn["type"] == "union":
-            layout.prop(getattr(obj, propname), "enum", text="type")
+            layout.prop(getattr(obj, name), "enum", text="type")
             for vname, vtype in defn["variants"].items():
-                if vname != getattr(getattr(obj, propname), "enum"):
+                if vname != getattr(getattr(obj, name), "enum"):
                     continue
                 box = layout
                 if vtype["type"] in ["struct", "union"]:
                     box = layout.box()
                     box.label(text=vname)
-                self.draw_type(getattr(obj, propname), vname, box, vname, vtype)
+                self.draw_type(getattr(obj, name), box, vname, vtype)
         else:
             row = layout.row()
-            row.prop(obj, propname, text=name)
+            row.prop(obj, name, text=name)
 
 
 class OBJECT_OT_remove_game_component(Operator):
@@ -221,8 +297,10 @@ class OBJECT_OT_remove_game_component(Operator):
     index: IntProperty()  # type:ignore
 
     def execute(self, context):
-        obj = context.object
-        obj.game_components.remove(self.index)  # type:ignore
+        reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
+        obj: Object = context.object  # type:ignore
+        top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
+        top_prop.active_components.remove(self.index)  # type:ignore
         return {"FINISHED"}
 
 
@@ -232,7 +310,7 @@ class COMPONENT_MT_add(Menu):
     bl_idname = "COMPONENT_MT_add"
 
     def draw(self, context):
-        reg = bpy.context.window_manager.component_registry  # type:ignore
+        reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
         layout: bpy.types.UILayout = self.layout  # type:ignore
         for comp_type in reg.schema:
             props: OBJECT_OT_add_game_component = layout.operator(
@@ -241,29 +319,11 @@ class COMPONENT_MT_add(Menu):
             props.component_type = comp_type
 
 
-class ComponentType(PropertyGroup):
-    component_type: StringProperty()  # type:ignore
-
-
-class ObjectStatus(str):
-    UNINIT = "uninit"
-    INIT = "init"
-
-
-class ObjectStatusProp(PropertyGroup):
-    status: EnumProperty(
-        items=[(k, k, "") for k in [ObjectStatus.UNINIT, ObjectStatus.INIT]],
-        default=ObjectStatus.UNINIT,
-    )  # type:ignore
-
-
 classes = (
     OBJECT_OT_remove_game_component,
     OBJECT_OT_add_game_component,
     OBJECT_PT_game_components,
     COMPONENT_MT_add,
-    ComponentType,
-    ObjectStatusProp,
 )
 
 
@@ -291,33 +351,35 @@ class glTF2ExportUserExtension:
         # if export_settings['gltf_collection'] != "Coll":
         #     return
 
-        if not blender_object or not blender_object.game_components:  # type:ignore
-            return
-
         wm = bpy.context.window_manager
         reg: Optional[ComponentRegistry] = getattr(wm, "component_registry", None)
         if not reg:
             return
 
+        if not blender_object:  # type:ignore
+            return
+
+        top_prop = getattr(blender_object, reg.name_prefix + "components", None)  # type:ignore
+        if not top_prop:
+            return
+
         components_data = []
-        for comp_entry in blender_object.game_components:  # type:ignore
-            comp_type = comp_entry.component_type
-            comp = reg.components.get(comp_type)
+        for comp_entry in top_prop.active_components:  # type:ignore
+            comp = reg.components.get(comp_entry.type)
             if not comp:
                 continue
 
-            prop_name = reg.prefix + comp_type
-            prop_group = getattr(blender_object, prop_name, None)
+            prop_group = getattr(top_prop, comp.name, None)
             if not prop_group:
                 continue
 
             comp_data = {
-                "component_name": comp_type,
+                "component_name": comp.name,
                 "value": self.serialize_component(prop_group, comp.defn),
             }
             components_data.append(comp_data)
 
-        gltf2_object.extras = {"components": components_data}
+        gltf2_object.extras = {reg.name_prefix + "components": components_data}
 
     def serialize_component(
         self,
@@ -377,12 +439,8 @@ def register():
     for cls in reg.classes:
         bpy.utils.register_class(cls)
 
-    for name in reg.schema.keys():
-        comp = reg.components[name]
-        setattr(bpy.types.Object, reg.prefix + name, comp.clas(**comp.props))
-
-    bpy.types.Object.game_components = CollectionProperty(type=ComponentType)  # type:ignore
-    bpy.types.Object.zhott_object_status = PointerProperty(type=ObjectStatusProp)  # type:ignore
+    comp = reg.top_prop
+    setattr(bpy.types.Object, reg.name_prefix + "components", comp.clas(**comp.props))
 
     from io_scene_gltf2 import exporter_extension_layout_draw  # type:ignore
 
@@ -393,15 +451,12 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
-    reg = bpy.context.window_manager.component_registry  # type:ignore
+    reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
     for cls in reg.classes:
         bpy.utils.unregister_class(cls)
 
-    for name in reg.schema.keys():
-        delattr(bpy.types.Object, reg.prefix + name)
+    delattr(bpy.types.Object, reg.name_prefix + "components")
 
-    del bpy.types.Object.game_components  # type:ignore
-    del bpy.types.Object.zhott_object_status  # type:ignore
     del bpy.types.WindowManager.component_registry  # type:ignore
 
     from io_scene_gltf2 import exporter_extension_layout_draw  # type:ignore
