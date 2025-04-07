@@ -1185,3 +1185,193 @@ pub const Wav = struct {
         }
     };
 };
+
+pub const TypeSchemaGenerator = struct {
+    buf: std.ArrayList(u8),
+
+    const Writer = std.ArrayList(u8).Writer;
+    const tab = 2;
+
+    pub fn init() @This() {
+        return .{ .buf = .init(allocator.*) };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.buf.deinit();
+    }
+
+    pub fn write_to_file(self: *@This(), path: []const u8) !void {
+        std.debug.print("writing to the file babeeee\n", .{});
+        const cwd = std.fs.cwd();
+        const file = try cwd.createFile(path, .{});
+        defer file.close();
+
+        const w = file.writer();
+        try w.print("{{\n{s}\n}}", .{self.buf.items});
+    }
+
+    pub fn write_schema(self: *@This(), comptime typ: type, comptime default: ?typ) !void {
+        const w = self.buf.writer();
+        try w.print("{[comma]s}{[pad]s: >[indent]}\"{[name]s}\": ", .{
+            .comma = if (self.buf.items.len > 0) ",\n" else "",
+            .pad = "",
+            .indent = tab,
+            .name = @typeName(typ),
+        });
+        try self.write_type(typ, default, tab);
+    }
+
+    fn write_type(self: *@This(), comptime typ: type, comptime default: ?typ, comptime indent: u32) !void {
+        const w = self.buf.writer();
+        try w.print("{{\n", .{});
+        try w.print("{[pad]s: >[indent]}\"type\": \"{[name]s}\",\n", .{
+            .pad = "",
+            .indent = indent * tab,
+            .name = self.get_type_type(typ),
+        });
+
+        switch (typ) {
+            u32, []const u8, bool, f32, math.Vec3, math.Vec4 => {
+                try w.print("{[pad]s: >[indent]}\"default\": ", .{ .pad = "", .indent = indent * tab });
+                try self.write_default_value(typ, default);
+                try w.print("\n{[pad]s: >[indent]}}}", .{ .pad = "", .indent = (indent - 1) * tab });
+                return;
+            },
+            else => {},
+        }
+
+        const T = @typeInfo(typ);
+        switch (T) {
+            .@"struct" => {
+                try w.print("{[pad]s: >[indent]}\"properties\": ", .{ .pad = "", .indent = indent * tab });
+                try self.write_props(typ, default, indent + 1);
+            },
+            .@"union" => {
+                try w.print("{[pad]s: >[indent]}\"default_tag\": ", .{ .pad = "", .indent = indent * tab });
+                try self.write_default_value(typ, default);
+
+                try w.print(",\n{[pad]s: >[indent]}\"variants\": ", .{ .pad = "", .indent = indent * tab });
+                try self.write_props(typ, default, indent + 1);
+            },
+            .@"enum" => {
+                try w.print("{[pad]s: >[indent]}\"default\": ", .{ .pad = "", .indent = indent * tab });
+                try self.write_default_value(typ, default);
+
+                try w.print(",\n{[pad]s: >[indent]}\"variants\": ", .{ .pad = "", .indent = indent * tab });
+                try self.write_props(typ, default, indent + 1);
+            },
+            else => @compileError("can't handle: " ++ @typeName(typ)),
+        }
+
+        try w.print("\n{[pad]s: >[indent]}}}", .{ .pad = "", .indent = (indent - 1) * tab });
+    }
+
+    fn write_default_value(self: *@This(), comptime typ: type, comptime default: ?typ) !void {
+        const w = self.buf.writer();
+
+        switch (typ) {
+            []const u8 => {
+                try w.print("\"{s}\"", .{default orelse ""});
+                return;
+            },
+            u32, f32 => {
+                try w.print("{}", .{default orelse 0});
+                return;
+            },
+            bool => {
+                try w.print("{}", .{default orelse false});
+                return;
+            },
+            math.Vec3 => {
+                const def = default orelse math.Vec3{};
+                try w.print("[{}, {}, {}]", .{ def.x, def.y, def.z });
+                return;
+            },
+            math.Vec4 => {
+                const def = default orelse math.Vec4{};
+                try w.print("[{}, {}, {}, {}]", .{ def.x, def.y, def.z, def.w });
+                return;
+            },
+            else => {},
+        }
+
+        const T = @typeInfo(typ);
+        switch (T) {
+            .@"enum" => |t| {
+                const def = if (default) |def| @tagName(def) else t.fields[0].name;
+                try w.print("\"{s}\"", .{def});
+            },
+            .@"union" => |t| {
+                const def = if (default) |def| @tagName(std.meta.activeTag(def)) else @as([]const u8, t.fields[0].name);
+                try w.print("\"{s}\"", .{def});
+            },
+            else => @compileError("can't handle: " ++ @typeName(typ)),
+        }
+    }
+
+    fn get_type_type(_: *@This(), comptime typ: type) []const u8 {
+        switch (typ) {
+            u32 => return "int",
+            []const u8 => return "string",
+            bool => return "bool",
+            f32 => return "float",
+            math.Vec3 => return "vec3",
+            math.Vec4 => return "vec4",
+            else => {},
+        }
+        return switch (@typeInfo(typ)) {
+            .@"struct" => "struct",
+            .@"union" => "union",
+            .@"enum" => "enum",
+            else => @compileError("can't handle this type here: " ++ @typeName(typ)),
+        };
+    }
+
+    fn write_props(self: *@This(), comptime typ: type, comptime default: ?typ, comptime indent: u32) !void {
+        const w = self.buf.writer();
+        const T = @typeInfo(typ);
+        switch (T) {
+            .@"struct" => |t| {
+                try w.print("{{\n", .{});
+
+                inline for (t.fields, 0..) |field, i| {
+                    if (i > 0) {
+                        try w.print(",\n", .{});
+                    }
+                    try w.print("{[pad]s: >[indent]}\"{[str]s}\": ", .{ .pad = "", .indent = indent * tab, .str = field.name });
+                    const def = if (default) |def| @field(def, field.name) else field.defaultValue();
+                    try self.write_type(field.type, def, indent + 1);
+                }
+
+                try w.print("\n{[pad]s: >[indent]}}}", .{ .pad = "", .indent = (indent - 1) * tab });
+            },
+            .@"union" => |t| {
+                try w.print("{{\n", .{});
+
+                inline for (t.fields, 0..) |field, i| {
+                    if (i > 0) {
+                        try w.print(",\n", .{});
+                    }
+                    try w.print("{[pad]s: >[indent]}\"{[str]s}\": ", .{ .pad = "", .indent = indent * tab, .str = field.name });
+
+                    const field_tag = comptime std.meta.stringToEnum(t.tag_type.?, field.name).?;
+                    const def = if (default) |def| if (comptime std.meta.activeTag(def) == field_tag) @field(def, field.name) else null;
+                    try self.write_type(field.type, def, indent + 1);
+                }
+
+                try w.print("\n{[pad]s: >[indent]}}}", .{ .pad = "", .indent = (indent - 1) * tab });
+            },
+            .@"enum" => |t| {
+                try w.print("[ ", .{});
+                inline for (t.fields, 0..) |field, i| {
+                    if (i > 0) {
+                        try w.print(", ", .{});
+                    }
+                    try w.print("\"{s}\"", .{field.name});
+                }
+                try w.print("]", .{});
+            },
+            else => @compileError("can't handle: " ++ @typeName(typ)),
+        }
+    }
+};
