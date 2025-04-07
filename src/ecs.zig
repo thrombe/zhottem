@@ -259,10 +259,6 @@ pub const EntityComponentStore = struct {
         }
 
         fn maybe_deinit(self: *const @This(), ptr: *anyopaque, ctx: *anyopaque) void {
-            if (std.mem.eql(u8, self.name, "[]const u8")) {
-                std.debug.print("deleting entity: {s}\n", .{@as(*[]const u8, @ptrCast(@alignCast(ptr))).*});
-            }
-
             if (self.deinit_with_context) |deinitfn| {
                 deinitfn(ptr, ctx);
             } else if (self.deinit) |deinitfn| {
@@ -286,13 +282,13 @@ pub const EntityComponentStore = struct {
 
     pub fn init(ctx: *anyopaque) !@This() {
         var self = @This(){
-            .entities = std.AutoArrayHashMap(Entity, ArchetypeEntity).init(allocator.*),
-            .archetypes = std.ArrayList(Archetype).init(allocator.*),
-            .components = std.AutoArrayHashMap(TypeId, ComponentId).init(allocator.*),
-            .component_sizes = std.ArrayList(u16).init(allocator.*),
-            .archetype_map = ArchetypeMap.init(allocator.*),
-            .component_map = std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)).init(allocator.*),
-            .vtables = Vtables.init(allocator.*),
+            .entities = .init(allocator.*),
+            .archetypes = .init(allocator.*),
+            .components = .init(allocator.*),
+            .component_sizes = .init(allocator.*),
+            .archetype_map = .init(allocator.*),
+            .component_map = .init(allocator.*),
+            .vtables = .init(allocator.*),
             .entityid_component_id = undefined,
         };
         errdefer self.deinit(ctx);

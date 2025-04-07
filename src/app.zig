@@ -454,7 +454,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .pos = .{ .y = 5 },
     };
     const player_id = try cmdbuf.insert(.{
-        @as([]const u8, "player"),
+        try C.Name.from("player"),
         math.Camera.init(
             math.Camera.constants.basis.vulkan,
             math.Camera.constants.basis.opengl,
@@ -479,7 +479,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "floor"),
+        try C.Name.from("floor"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
@@ -496,7 +496,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "wall"),
+        try C.Name.from("wall"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
@@ -514,7 +514,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "wall"),
+        try C.Name.from("wall"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
@@ -532,7 +532,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "wall"),
+        try C.Name.from("wall"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
@@ -550,7 +550,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "wall"),
+        try C.Name.from("wall"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
@@ -579,7 +579,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
     //     if (i > 2) break;
     //     _ = try world.ecs.insert(.{
-    //         @as([]const u8, "persistent balls"),
+    //         try C.Name.from("persistent balls"),
     //         C.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
     //         C.Rigidbody{},
     //         C.AnimatedRender{ .model = sphere_model_handle },
@@ -588,7 +588,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "block"),
+        try C.Name.from("block"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = cube_mesh_handle },
@@ -602,7 +602,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "block"),
+        try C.Name.from("block"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = cube_mesh_handle },
@@ -622,7 +622,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
     t = C.Transform{ .pos = .{ .x = 20, .y = 5 } };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "dance"),
+        try C.Name.from("dance"),
         t,
         C.LastTransform{ .t = t },
         C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
@@ -640,7 +640,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     t = C.Transform{ .pos = .{ .z = 4, .y = 50 } };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "ball"),
+        try C.Name.from("ball"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = sphere_mesh_handle },
@@ -657,7 +657,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     t = C.Transform{ .pos = .{ .z = 16, .y = 3 } };
     _ = try cmdbuf.insert(.{
-        @as([]const u8, "well"),
+        try C.Name.from("castle"),
         t,
         C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = well_mesh_handle },
@@ -1273,7 +1273,7 @@ pub const AppState = struct {
                             .z = id.pos.z,
                         } };
                         _ = try self.cmdbuf.insert(.{
-                            @as([]const u8, "player"),
+                            try C.Name.from("player"),
                             t,
                             C.LastTransform{ .t = t },
                             C.Controller{},
@@ -1397,7 +1397,7 @@ pub const AppState = struct {
                                 const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
                                 const t = C.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
                                 _ = try self.cmdbuf.insert(.{
-                                    @as([]const u8, "bullet"),
+                                    try C.Name.from("bullet"),
                                     t,
                                     C.LastTransform{ .t = t },
                                     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },

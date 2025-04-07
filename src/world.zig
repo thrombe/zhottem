@@ -586,7 +586,7 @@ pub const World = struct {
         self.ecs = try EntityComponentStore.init(@ptrCast(&self));
         errdefer self.deinit();
 
-        _ = try self.ecs.register([]const u8);
+        _ = try self.ecs.register(Components.Name);
         _ = try self.ecs.register(math.Camera);
         _ = try self.ecs.register(Components.Controller);
         _ = try self.ecs.register(Components.Shooter);
@@ -633,6 +633,22 @@ pub const World = struct {
 };
 
 pub const Components = struct {
+    pub const Name = struct {
+        name: []const u8,
+
+        pub fn from(name: []const u8) !@This() {
+            return .{
+                .name = try allocator.dupe(u8, name),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            std.debug.print("deleting entity: {s}\n", .{self.name});
+
+            allocator.free(self.name);
+        }
+    };
+
     pub const Transform = struct {
         pos: Vec4 = .{},
         scale: Vec4 = Vec4.splat3(1.0),
