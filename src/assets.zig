@@ -1188,12 +1188,44 @@ pub const Wav = struct {
 
 pub const TypeSchemaGenerator = struct {
     buf: std.ArrayList(u8),
+    had_first_component: bool = false,
 
     const Writer = std.ArrayList(u8).Writer;
     const tab = 2;
 
-    pub fn init() @This() {
-        return .{ .buf = .init(allocator.*) };
+    pub fn init(comptime special: struct {
+        transform: ?type = null,
+    }) !@This() {
+        var self = @This(){ .buf = .init(allocator.*) };
+        const w = self.buf.writer();
+
+        try w.print("{{\n{[pad]s: >[indent]}\"special\": {{", .{
+            .pad = "",
+            .indent = tab,
+        });
+
+        var first = true;
+        inline for (@typeInfo(@TypeOf(special)).@"struct".fields) |field| {
+            const typ = @field(special, field.name) orelse continue;
+
+            if (first) {
+                try w.print(",\n", .{});
+                first = false;
+            }
+            try w.print("{[pad]s: >[indent]}\"{[name]s}\": \"{[type]s}\"", .{
+                .pad = "",
+                .indent = tab * 2,
+                .name = field.name,
+                .type = @typeName(typ),
+            });
+        }
+
+        try w.print("\n{[pad]s: >[indent]}}},\n{[pad]s: >[indent]}\"components\": {{", .{
+            .pad = "",
+            .indent = tab,
+        });
+
+        return self;
     }
 
     pub fn deinit(self: *@This()) void {
@@ -1201,24 +1233,28 @@ pub const TypeSchemaGenerator = struct {
     }
 
     pub fn write_to_file(self: *@This(), path: []const u8) !void {
-        std.debug.print("writing to the file babeeee\n", .{});
         const cwd = std.fs.cwd();
         const file = try cwd.createFile(path, .{});
         defer file.close();
 
         const w = file.writer();
-        try w.print("{{\n{s}\n}}", .{self.buf.items});
+        try w.print("{[json]s}\n{[pad]s: >[indent]}}}\n}}", .{
+            .pad = "",
+            .indent = tab,
+            .json = self.buf.items,
+        });
     }
 
     pub fn write_schema(self: *@This(), comptime typ: type, comptime default: ?typ) !void {
         const w = self.buf.writer();
-        try w.print("{[comma]s}{[pad]s: >[indent]}\"{[name]s}\": ", .{
-            .comma = if (self.buf.items.len > 0) ",\n" else "",
+        try w.print("{[comma]s}\n{[pad]s: >[indent]}\"{[name]s}\": ", .{
+            .comma = if (self.had_first_component) "," else "",
             .pad = "",
-            .indent = tab,
+            .indent = tab * 2,
             .name = @typeName(typ),
         });
-        try self.write_type(typ, default, tab);
+        self.had_first_component = true;
+        try self.write_type(typ, default, tab + 1);
     }
 
     fn write_type(self: *@This(), comptime typ: type, comptime default: ?typ, comptime indent: u32) !void {
