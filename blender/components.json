@@ -1,0 +1,56 @@
+{
+    "Transform": {
+        "type": "struct",
+        "properties": {
+            "position": {"type": "vec3", "default": [0, 0, 0]},
+            "rotation": {"type": "vec4", "default": [0, 0, 0, 1]}
+        }
+    },
+  "RigidBody": {
+    "type": "struct",
+    "properties": {
+      "mass": {"type": "float", "default": 1.0},
+      "velocity": {"type": "vec3", "default": [0, 0, 0]},
+      "drag": {"type": "float", "default": 0.1},
+      "constraints": {
+        "type": "struct",
+        "properties": {
+          "freeze_position": {"type": "vec3", "default": [0, 0, 0]},
+          "freeze_rotation": {"type": "vec3", "default": [0, 0, 0]}
+        }
+      }
+    }
+  },
+  "ColliderType": {
+      "type": "enum",
+      "variants": ["dynamic", "static"],
+      "default": "dynamic"
+  },
+  
+  "Collider": {
+    "type": "union",
+    "default_tag": "box",
+    "variants": {
+      "box": {
+        "type": "struct",
+        "properties": {
+          "size": {"type": "vec3", "default": [1, 1, 1]},
+          "center": {"type": "vec3", "default": [0, 0, 0]}
+        }
+      },
+      "sphere": {
+        "type": "struct",
+        "properties": {
+          "radius": {"type": "float", "default": 0.5}
+        }
+      },
+      "capsule": {
+        "type": "struct",
+        "properties": {
+          "radius": {"type": "float", "default": 0.3},
+          "height": {"type": "float", "default": 1.0}
+        }
+      }
+    }
+  }
+}
