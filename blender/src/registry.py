@@ -47,6 +47,7 @@ class ComponentRegistry:
     name_prefix: str = "zhott_"
     path_prefix: str = "zhottem."
     schema: dict
+    special_components: Dict[str, str]
     components: Dict[str, Component]
     classes: list
 
@@ -60,7 +61,15 @@ class ComponentRegistry:
         ]
 
         with open(os.path.join(os.path.dirname(__file__), "../components.json")) as f:
-            self.schema = json.loads(f.read())
+            schema = json.loads(f.read())
+
+        self.schema = {}
+        for k, v in schema["components"].items():
+            self.schema[k.replace(".", "::")] = v
+
+        self.special_components = {}
+        for k, v in schema["special"].items():
+            self.special_components[k] = v.replace(".", "::")
 
         for name, typ in self.schema.items():
             comp = self.parse_type(name, typ)
@@ -213,15 +222,18 @@ class OBJECT_OT_add_game_component(Operator):
         if status.status == ComponentsStatus.UNINIT:
             status.status = ComponentsStatus.INIT  # type:ignore
 
-            # - [Easily Create Driver Variables with Blender Python - YouTube](https://www.youtube.com/watch?v=m-OFyHHY4KI)
-            transform: PropertyGroup = getattr(top_prop, "Transform")
-            drivers: list[FCurve] = transform.driver_add("position")  # type:ignore
-            for driver, x in zip(drivers, ["x", "y", "z"]):
-                driver.driver.expression = "vec_" + x  # type:ignore
-                var: DriverVariable = driver.driver.variables.new()  # type:ignore
-                var.name = "vec_" + x
-                var.targets[0].id = obj
-                var.targets[0].data_path = "location." + x
+            transform_component = reg.special_components["transform"]
+            if transform_component:
+                transform: PropertyGroup = getattr(top_prop, transform_component)
+
+                # - [Easily Create Driver Variables with Blender Python - YouTube](https://www.youtube.com/watch?v=m-OFyHHY4KI)
+                drivers: list[FCurve] = transform.driver_add("pos")  # type:ignore
+                for driver, x in zip(drivers, ["x", "y", "z"]):
+                    driver.driver.expression = "vec_" + x  # type:ignore
+                    var: DriverVariable = driver.driver.variables.new()  # type:ignore
+                    var.name = "vec_" + x
+                    var.targets[0].id = obj
+                    var.targets[0].data_path = "location." + x
 
         if any(c == self.component_type for c in components):
             return {"CANCELLED"}
@@ -285,6 +297,9 @@ class OBJECT_PT_game_components(Panel):
                     box = layout.box()
                     box.label(text=vname)
                 self.draw_type(getattr(obj, name), box, vname, vtype)
+        elif defn["type"] == "enum":
+            row = layout.row()
+            row.prop(obj, name, text="variant")
         else:
             row = layout.row()
             row.prop(obj, name, text=name)
