@@ -1195,6 +1195,7 @@ pub const TypeSchemaGenerator = struct {
 
     pub fn init(comptime special: struct {
         transform: ?type = null,
+        entity: ?type = null,
     }) !@This() {
         var self = @This(){ .buf = .init(allocator.*) };
         const w = self.buf.writer();
@@ -1204,20 +1205,21 @@ pub const TypeSchemaGenerator = struct {
             .indent = tab,
         });
 
-        var first = true;
-        inline for (@typeInfo(@TypeOf(special)).@"struct".fields) |field| {
-            const typ = @field(special, field.name) orelse continue;
-
-            if (first) {
-                try w.print(",\n", .{});
-                first = false;
+        inline for (@typeInfo(@TypeOf(special)).@"struct".fields, 0..) |field, i| {
+            if (i > 0) {
+                try w.print(",", .{});
             }
-            try w.print("{[pad]s: >[indent]}\"{[name]s}\": \"{[type]s}\"", .{
+            try w.print("\n{[pad]s: >[indent]}\"{[name]s}\": ", .{
                 .pad = "",
                 .indent = tab * 2,
                 .name = field.name,
-                .type = @typeName(typ),
             });
+
+            if (@field(special, field.name)) |typ| {
+                try w.print("\"{s}\"", .{@typeName(typ)});
+            } else {
+                try w.print("null", .{});
+            }
         }
 
         try w.print("\n{[pad]s: >[indent]}}},\n{[pad]s: >[indent]}\"components\": {{", .{
