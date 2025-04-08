@@ -1,7 +1,8 @@
 import bpy
 import json
 import os
-from typing import Dict, Any, Optional
+import math
+from typing import Dict, Any, Optional, List
 from bpy.props import (
     StringProperty,
     BoolProperty,
@@ -46,8 +47,11 @@ class Component:
 class ComponentRegistry:
     name_prefix: str = "zhott_"
     path_prefix: str = "zhottem."
+
     schema: dict
     special_components: Dict[str, str]
+    component_special_type: Dict[str, str]
+
     components: Dict[str, Component]
     classes: list
 
@@ -70,6 +74,10 @@ class ComponentRegistry:
         self.special_components = {}
         for k, v in schema["special"].items():
             self.special_components[k] = v.replace(".", "::")
+
+        self.component_special_type = {}
+        for k, v in self.special_components.items():
+            self.component_special_type[v] = k
 
         for name, typ in self.schema.items():
             comp = self.parse_type(name, typ)
@@ -215,31 +223,15 @@ class OBJECT_OT_add_game_component(Operator):
         reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
         obj: Object = context.object  # type:ignore
         top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
-        status: ComponentsStatusProp = top_prop.components_status  # type:ignore
         components = top_prop.active_components  # type:ignore
-
-        # TODO: can insert objects like collision shape and add a driver to it controlled by our component
-        if status.status == ComponentsStatus.UNINIT:
-            status.status = ComponentsStatus.INIT  # type:ignore
-
-            transform_component = reg.special_components["transform"]
-            if transform_component:
-                transform: PropertyGroup = getattr(top_prop, transform_component)
-
-                # - [Easily Create Driver Variables with Blender Python - YouTube](https://www.youtube.com/watch?v=m-OFyHHY4KI)
-                drivers: list[FCurve] = transform.driver_add("pos")  # type:ignore
-                for driver, x in zip(drivers, ["x", "y", "z"]):
-                    driver.driver.expression = "vec_" + x  # type:ignore
-                    var: DriverVariable = driver.driver.variables.new()  # type:ignore
-                    var.name = "vec_" + x
-                    var.targets[0].id = obj
-                    var.targets[0].data_path = "location." + x
 
         if any(c == self.component_type for c in components):
             return {"CANCELLED"}
 
         comp = components.add()
         comp.type = self.component_type
+
+        on_component_add(reg, obj, self.component_type)
 
         return {"FINISHED"}
 
@@ -315,7 +307,11 @@ class OBJECT_OT_remove_game_component(Operator):
         reg: ComponentRegistry = bpy.context.window_manager.component_registry  # type:ignore
         obj: Object = context.object  # type:ignore
         top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
+        comp = top_prop.active_components[self.index]
         top_prop.active_components.remove(self.index)  # type:ignore
+
+        on_component_remove(reg, obj, comp.type)
+
         return {"FINISHED"}
 
 
@@ -388,10 +384,9 @@ class glTF2ExportUserExtension:
             if not prop_group:
                 continue
 
-            comp_data = {
-                "component_name": comp.name,
-                "value": self.serialize_component(prop_group, comp.defn),
-            }
+            component_value: dict = self.serialize_component(prop_group, comp.defn)  # type:ignore
+            component_value = on_component_export(reg, component_value, comp.name)
+            comp_data = {"component_name": comp.name, "value": component_value}
             components_data.append(comp_data)
 
         gltf2_object.extras = {reg.name_prefix + "components": components_data}
@@ -429,6 +424,85 @@ class glTF2ExportUserExtension:
             return str(prop_group)
         else:
             return None
+
+
+def on_component_add(reg: ComponentRegistry, obj: Object, type: str):
+    top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
+
+    # TODO: can insert objects like collision shape and add a driver to it controlled by our component
+
+    match reg.component_special_type.get(type):
+        case "transform":
+            setattr(obj, "rotation_mode", "QUATERNION")
+
+            transform: PropertyGroup = getattr(top_prop, type)
+
+            # - [Easily Create Driver Variables with Blender Python - YouTube](https://www.youtube.com/watch?v=m-OFyHHY4KI)
+            drivers: list[FCurve] = transform.driver_add("pos")  # type:ignore
+            for driver, x in zip(drivers, ["x", "y", "z"]):
+                driver.driver.expression = "vec_" + x  # type:ignore
+                var: DriverVariable = driver.driver.variables.new()  # type:ignore
+                var.name = "vec_" + x
+                var.targets[0].id = obj
+                var.targets[0].data_path = "location." + x
+
+            drivers: list[FCurve] = transform.driver_add("scale")  # type:ignore
+            for driver, x in zip(drivers, ["x", "y", "z"]):
+                driver.driver.expression = "vec_" + x  # type:ignore
+                var: DriverVariable = driver.driver.variables.new()  # type:ignore
+                var.name = "vec_" + x
+                var.targets[0].id = obj
+                var.targets[0].data_path = "scale." + x
+
+            drivers: list[FCurve] = transform.driver_add("rotation")  # type:ignore
+            for driver, x in zip(drivers, ["x", "y", "z", "w"]):
+                driver.driver.expression = "vec_" + x  # type:ignore
+                var: DriverVariable = driver.driver.variables.new()  # type:ignore
+                var.name = "vec_" + x
+                var.targets[0].id = obj
+                var.targets[0].data_path = "rotation_quaternion." + x
+        case _:
+            return
+
+
+def on_component_remove(reg: ComponentRegistry, obj: Object, type: str):
+    top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
+
+    match reg.component_special_type.get(type):
+        case "transform":
+            transform: PropertyGroup = getattr(top_prop, type)
+            transform.driver_remove("pos")
+            transform.driver_remove("rotation")
+            transform.driver_remove("scale")
+        case _:
+            return
+
+
+def vec_inplace_blender_to_gltf(vec: List[float]):
+    z = vec[2]
+    y = vec[1]
+    vec[1] = z
+    vec[2] = -y
+
+
+def on_component_export(reg: ComponentRegistry, value: dict, type: str) -> dict:
+    match reg.component_special_type.get(type):
+        case "transform":
+            print(value)
+            rot = value["rotation"]
+            size = math.sqrt(rot[0] ** 2 + rot[1] ** 2 + rot[2] ** 2 + rot[3] ** 2)
+            rot[0] /= size
+            rot[1] /= size
+            rot[2] /= size
+            rot[3] /= size
+            vec_inplace_blender_to_gltf(rot)
+            vec_inplace_blender_to_gltf(value["pos"])
+            vec_inplace_blender_to_gltf(value["scale"])
+            print(value)
+        case _:
+            pass
+
+    return value
 
 
 def draw_export(context, layout):
