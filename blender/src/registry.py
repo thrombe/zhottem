@@ -29,13 +29,6 @@ class ComponentsStatus(str):
     INIT = "init"
 
 
-class ComponentsStatusProp(PropertyGroup):
-    status: EnumProperty(
-        items=[(k, k, "") for k in [ComponentsStatus.UNINIT, ComponentsStatus.INIT]],
-        default=ComponentsStatus.UNINIT,
-    )  # type:ignore
-
-
 class Component:
     def __init__(self, clas, props: dict, defn: dict, name: Optional[str] = None):
         self.name = name if name else clas.__name__
@@ -60,9 +53,7 @@ class ComponentRegistry:
 
     def __init__(self):
         self.components: Dict[str, Component] = {}
-        self.classes = [
-            ComponentsStatusProp,
-        ]
+        self.classes = []
 
         with open(os.path.join(os.path.dirname(__file__), "../components.json")) as f:
             schema = json.loads(f.read())
@@ -97,9 +88,6 @@ class ComponentRegistry:
         comp = self.prepare_component_entry()
         __annotations__["active_components"] = CollectionProperty(
             type=comp.props["type"]
-        )
-        __annotations__["components_status"] = PointerProperty(
-            type=ComponentsStatusProp
         )
 
         class_props["__annotations__"] = __annotations__
