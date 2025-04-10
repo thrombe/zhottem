@@ -245,6 +245,10 @@ fn step(b: *std.Build, v: struct {
                     "-fno-exceptions",
                     "-fno-sanitize=undefined",
                     "-fno-access-control",
+                    "-Werror",
+                    "-Wall",
+                    "-Wno-unused-variable",
+                    "-Wno-unused-function",
                 } ++ compile_commands_flags,
                 .files = &[_][]const u8{
                     "jolt/c.cpp",
