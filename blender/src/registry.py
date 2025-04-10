@@ -87,7 +87,8 @@ class ComponentRegistry:
 
         comp = self.prepare_component_entry()
         __annotations__["active_components"] = CollectionProperty(
-            type=comp.props["type"]
+            type=comp.props["type"],
+            override={"LIBRARY_OVERRIDABLE", "USE_INSERTION"},
         )
 
         class_props["__annotations__"] = __annotations__
@@ -95,7 +96,10 @@ class ComponentRegistry:
         self.classes.append(t)
         return Component(
             PointerProperty,
-            {"type": t},
+            {
+                "type": t,
+                "override": {"LIBRARY_OVERRIDABLE"},
+            },
             self.schema,
             name,
         )
@@ -106,7 +110,8 @@ class ComponentRegistry:
         __annotations__: dict = {}
 
         __annotations__["type"] = EnumProperty(
-            items=[(k, k, "") for k in self.schema.keys()]
+            items=[(k, k, "") for k in self.schema.keys()],
+            override={"LIBRARY_OVERRIDABLE"},
         )
 
         class_props["__annotations__"] = __annotations__
@@ -114,7 +119,10 @@ class ComponentRegistry:
         self.classes.append(t)
         return Component(
             PointerProperty,
-            {"type": t},
+            {
+                "type": t,
+                "override": {"LIBRARY_OVERRIDABLE"},
+            },
             {
                 "type": "struct",
                 "properties": {
@@ -142,7 +150,10 @@ class ComponentRegistry:
             self.classes.append(t)
             return Component(
                 PointerProperty,
-                {"type": t},
+                {
+                    "type": t,
+                    "override": {"LIBRARY_OVERRIDABLE"},
+                },
                 typ,
                 name,
             )
@@ -151,7 +162,9 @@ class ComponentRegistry:
 
             variant_tags = list(typ["variants"].keys())
             enum = EnumProperty(
-                items=[(k, k, "") for k in variant_tags], default=typ["default_tag"]
+                items=[(k, k, "") for k in variant_tags],
+                default=typ["default_tag"],
+                override={"LIBRARY_OVERRIDABLE"},
             )
             __annotations__["enum"] = enum
 
@@ -164,7 +177,10 @@ class ComponentRegistry:
             self.classes.append(t)
             return Component(
                 PointerProperty,
-                {"type": t},
+                {
+                    "type": t,
+                    "override": {"LIBRARY_OVERRIDABLE"},
+                },
                 typ,
                 name,
             )
@@ -172,25 +188,46 @@ class ComponentRegistry:
             value_props = {
                 "items": [(k, k, "") for k in typ["variants"]],
                 "default": typ["default"],
+                "override": {"LIBRARY_OVERRIDABLE"},
             }
             return Component(EnumProperty, value_props, typ)
         elif typ["type"] == "int":
-            value_props = {"default": typ.get("default", 0)}
+            value_props = {
+                "default": typ.get("default", 0),
+                "override": {"LIBRARY_OVERRIDABLE"},
+            }
             return Component(IntProperty, value_props, typ)
         elif typ["type"] == "float":
-            value_props = {"default": typ.get("default", 0)}
+            value_props = {
+                "default": typ.get("default", 0),
+                "override": {"LIBRARY_OVERRIDABLE"},
+            }
             return Component(FloatProperty, value_props, typ)
         elif typ["type"] == "bool":
-            value_props = {"default": typ.get("default", False)}
+            value_props = {
+                "default": typ.get("default", False),
+                "override": {"LIBRARY_OVERRIDABLE"},
+            }
             return Component(BoolProperty, value_props, typ)
         elif typ["type"] == "string":
-            value_props = {"default": typ.get("default", "")}
+            value_props = {
+                "default": typ.get("default", ""),
+                "override": {"LIBRARY_OVERRIDABLE"},
+            }
             return Component(StringProperty, value_props, typ)
         elif typ["type"] == "vec3":
-            value_props = {"default": typ.get("default", [0, 0, 0]), "size": 3}
+            value_props = {
+                "default": typ.get("default", [0, 0, 0]),
+                "override": {"LIBRARY_OVERRIDABLE"},
+                "size": 3,
+            }
             return Component(FloatVectorProperty, value_props, typ)
         elif typ["type"] == "vec4":
-            value_props = {"default": typ.get("default", [0, 0, 0, 0]), "size": 4}
+            value_props = {
+                "default": typ.get("default", [0, 0, 0, 0]),
+                "override": {"LIBRARY_OVERRIDABLE"},
+                "size": 4,
+            }
             return Component(FloatVectorProperty, value_props, typ)
         else:
             raise Exception("unknown component type")
