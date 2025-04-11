@@ -287,8 +287,8 @@ pub const Gltf = struct {
 
     pub fn parse_glb(path: []const u8) !@This() {
         var arena = try allocator.create(std.heap.ArenaAllocator);
-        arena.* = std.heap.ArenaAllocator.init(allocator.*);
         errdefer allocator.destroy(arena);
+        arena.* = std.heap.ArenaAllocator.init(allocator.*);
         errdefer arena.deinit();
         const alloc = arena.allocator();
 
@@ -521,15 +521,11 @@ pub const Gltf = struct {
             const node = &self.info.value.nodes[j];
             bones.items[i].local_transform = node.transform();
 
-            if (node.children) |ch| {
-                var children = std.ArrayList(BoneId).init(self.alloc);
-                for (ch) |chi| {
-                    try children.append(joint_to_bone.get(@intCast(chi)) orelse continue);
-                }
-                bones.items[i].children = try children.toOwnedSlice();
-            } else {
-                bones.items[i].children = try self.alloc.alloc(BoneId, 0);
+            var children = std.ArrayList(BoneId).init(self.alloc);
+            for (node.children) |chi| {
+                try children.append(joint_to_bone.get(@intCast(chi)) orelse continue);
             }
+            bones.items[i].children = try children.toOwnedSlice();
         }
 
         // find parents
@@ -552,7 +548,7 @@ pub const Gltf = struct {
         var animations = std.ArrayList(Animation).init(self.alloc);
 
         const info = &self.info.value;
-        const animations_info = info.animations orelse return try self.alloc.alloc(Animation, 0);
+        const animations_info = info.animations;
         for (animations_info) |anim| {
             const name = anim.name orelse continue;
             const bone_keyframes = try self.alloc.alloc(BoneAnimation, joint_to_bone.count());
@@ -638,7 +634,7 @@ pub const Gltf = struct {
 
     fn find_skin(self: *@This(), name: []const u8) ?*Info.SkinInfo {
         const info = &self.info.value;
-        const skins = info.skins orelse return null;
+        const skins = info.skins;
 
         for (0..skins.len) |skini| {
             const s = &skins[skini];
@@ -699,9 +695,13 @@ pub const Gltf = struct {
         scene: SceneIndex,
         scenes: []SceneInfo,
         nodes: []Node,
-        meshes: []MeshInfo,
-        skins: ?[]SkinInfo = null,
-        animations: ?[]AnimationInfo = null,
+        meshes: []MeshInfo = &.{},
+        materials: []MaterialInfo = &.{},
+        skins: []SkinInfo = &.{},
+        images: []ImageInfo = &.{},
+        textures: []TextureInfo = &.{},
+        samplers: []SamplerInfo = &.{},
+        animations: []AnimationInfo = &.{},
         accessors: []Accessor,
         bufferViews: []BufferView,
         buffers: []struct {
@@ -713,17 +713,24 @@ pub const Gltf = struct {
         const SceneIndex = usize;
         const NodeIndex = usize;
         const SamplerIndex = usize;
+        const SkinIndex = usize;
+        const MeshIndex = usize;
+        const ImageIndex = usize;
+        const BufferIndex = usize;
+        const BufferViewIndex = usize;
+        const MaterialIndex = usize;
+        // const CameraIndex = usize;
 
         const SceneInfo = struct {
             name: []const u8,
-            nodes: []NodeIndex,
+            nodes: []NodeIndex = &.{},
         };
         const Node = struct {
             name: ?[]const u8 = null,
 
-            mesh: ?usize = null,
-            camera: ?usize = null,
-            skin: ?usize = null,
+            mesh: ?MeshIndex = null,
+            // camera: ?CameraIndex = null,
+            skin: ?SkinIndex = null,
 
             rotation: ?[4]f32 = null,
             scale: ?[3]f32 = null,
@@ -733,7 +740,9 @@ pub const Gltf = struct {
 
             weights: ?[]f32 = null, // only with morph targets
 
-            children: ?[]usize = null,
+            children: []NodeIndex = &.{},
+
+            extras: ?std.json.Value = null,
 
             pub fn transform(self: *const @This()) Transform {
                 if (self.matrix) |m| {
@@ -777,7 +786,7 @@ pub const Gltf = struct {
             primitives: []struct {
                 attributes: Attributes,
                 indices: ?AccessorIndex = null,
-                material: ?usize = null,
+                material: ?MaterialIndex = null,
                 mode: enum(u32) {
                     points = 0,
                     lines = 1,
@@ -787,13 +796,52 @@ pub const Gltf = struct {
                     triangle_strip = 5,
                     triangle_fan = 6,
                 } = .triangles,
+                // targets: []struct {}, // not supported
             },
+        };
+        const MaterialInfo = struct {
+            name: ?[]const u8 = null,
         };
         const SkinInfo = struct {
             name: ?[]const u8 = null,
             inverseBindMatrices: ?AccessorIndex = null,
             skeleton: ?NodeIndex = null,
             joints: []NodeIndex,
+        };
+        const ImageInfo = struct {
+            name: ?[]const u8 = null,
+
+            // uri: ?[]const u8 = null, // not supported
+            mimeType: []const u8,
+            bufferView: BufferViewIndex,
+        };
+        const TextureInfo = struct {
+            name: ?[]const u8 = null,
+            sampler: ?SamplerIndex = null,
+            source: ImageIndex,
+        };
+        const SamplerInfo = struct {
+            name: ?[]const u8 = null,
+            wrapT: Wrap = .repeat,
+            wrapS: Wrap = .repeat,
+            magFilter: ?enum(u32) {
+                nearest = 9728,
+                linear = 9729,
+            } = null,
+            minFilter: ?enum(u32) {
+                nearest = 9728,
+                linear = 9729,
+                nearest_mipmap_nearest = 9984,
+                linear_mipmap_nearest = 9985,
+                nearest_mipmap_linear = 9986,
+                linear_mipmap_linear = 9987,
+            } = null,
+
+            const Wrap = enum(u32) {
+                clamp_to_edge = 33071,
+                mirror_repeat = 33648,
+                repeat = 10497,
+            };
         };
         const AnimationInfo = struct {
             name: ?[]const u8 = null,
@@ -909,7 +957,7 @@ pub const Gltf = struct {
             }
         };
         const Accessor = struct {
-            bufferView: usize,
+            bufferView: BufferViewIndex,
             byteOffset: u32 = 0,
             componentType: enum(u32) {
                 // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#accessor-data-types
@@ -988,7 +1036,7 @@ pub const Gltf = struct {
         };
         const BufferView = struct {
             name: ?[]const u8 = null,
-            buffer: usize,
+            buffer: BufferIndex,
             byteOffset: usize = 0,
             byteLength: usize,
             target: ?enum(u32) {
