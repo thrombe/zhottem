@@ -86,7 +86,7 @@ pub const Audio = struct {
         return stream;
     }
 
-    pub fn Stream(Ctxt: type, comptime typ: enum { output, input }) type {
+    pub fn Stream(comptime typ: enum { output, input }, Ctxt: type) type {
         return struct {
             pub const Ctx = Ctxt;
             pub const Args = struct {

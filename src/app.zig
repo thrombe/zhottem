@@ -177,7 +177,7 @@ const Handles = struct {
     };
 };
 
-const AudioPlayer = Engine.Audio.Stream(struct {
+const AudioPlayer = Engine.Audio.Stream(.output, struct {
     // owned by ResourceManager.CpuResources
     samples: []assets_mod.Wav,
     frame_count: u64 = 0,
@@ -188,8 +188,6 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         // other thread can fill only when not fused.
         // callback can only swap when fused
 
-        // TODO: actually figure out a way to do this.
-        // TODO: dynamic updates: double buffering + atomic flag updates + updates per frame
         swap_fuse: Fuse = .{},
 
         // NOTE: only audio thread may lock
@@ -226,7 +224,12 @@ const AudioPlayer = Engine.Audio.Stream(struct {
         self.playing.samples_buf2.deinit();
     }
 
-    pub fn callback(self: *AudioPlayer.CallbackContext, output: [][2]f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
+    pub fn callback(
+        self: *AudioPlayer.CallbackContext,
+        output: [][2]f32,
+        timeinfo: *c.PaStreamCallbackTimeInfo,
+        flags: c.PaStreamCallbackFlags,
+    ) !void {
         _ = flags;
         _ = timeinfo;
 
@@ -302,9 +305,9 @@ const AudioPlayer = Engine.Audio.Stream(struct {
             return false;
         }
     };
-}, .output);
+});
 
-const AudioRecorder = Engine.Audio.Stream(struct {
+const AudioRecorder = Engine.Audio.Stream(.input, struct {
     recorded: utils.Channel([256]f32),
 
     pub fn callback(self: *AudioRecorder.CallbackContext, input: []const f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
@@ -320,7 +323,7 @@ const AudioRecorder = Engine.Audio.Stream(struct {
     pub fn deinit(self: *@This()) void {
         self.recorded.deinit();
     }
-}, .input);
+});
 
 var matrices = std.mem.zeroes([2]math.Mat4x4);
 const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
