@@ -550,7 +550,7 @@ pub const Gltf = struct {
         const info = &self.info.value;
         const animations_info = info.animations;
         for (animations_info) |anim| {
-            const name = anim.name orelse continue;
+            const name = anim.name;
             const bone_keyframes = try self.alloc.alloc(BoneAnimation, joint_to_bone.count());
             @memset(bone_keyframes, BoneAnimation{
                 .translation_keyframes = std.ArrayList(Keyframe).init(self.alloc),
@@ -638,7 +638,7 @@ pub const Gltf = struct {
 
         for (0..skins.len) |skini| {
             const s = &skins[skini];
-            const sname = s.name orelse continue;
+            const sname = s.name;
             std.debug.print("skin: {s}\n", .{sname});
             if (std.mem.eql(u8, sname, name)) {
                 return s;
@@ -722,11 +722,11 @@ pub const Gltf = struct {
         // const CameraIndex = usize;
 
         const SceneInfo = struct {
-            name: []const u8,
+            name: []const u8 = &.{},
             nodes: []NodeIndex = &.{},
         };
         const Node = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
 
             mesh: ?MeshIndex = null,
             // camera: ?CameraIndex = null,
@@ -782,7 +782,7 @@ pub const Gltf = struct {
             }
         };
         const MeshInfo = struct {
-            name: []const u8,
+            name: []const u8 = &.{},
             primitives: []struct {
                 attributes: Attributes,
                 indices: ?AccessorIndex = null,
@@ -800,28 +800,28 @@ pub const Gltf = struct {
             },
         };
         const MaterialInfo = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
         };
         const SkinInfo = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
             inverseBindMatrices: ?AccessorIndex = null,
             skeleton: ?NodeIndex = null,
             joints: []NodeIndex,
         };
         const ImageInfo = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
 
             // uri: ?[]const u8 = null, // not supported
             mimeType: []const u8,
             bufferView: BufferViewIndex,
         };
         const TextureInfo = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
             sampler: ?SamplerIndex = null,
             source: ImageIndex,
         };
         const SamplerInfo = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
             wrapT: Wrap = .repeat,
             wrapS: Wrap = .repeat,
             magFilter: ?enum(u32) {
@@ -844,7 +844,7 @@ pub const Gltf = struct {
             };
         };
         const AnimationInfo = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
             channels: []struct {
                 sampler: SamplerIndex,
 
@@ -1035,7 +1035,7 @@ pub const Gltf = struct {
             }
         };
         const BufferView = struct {
-            name: ?[]const u8 = null,
+            name: []const u8 = &.{},
             buffer: BufferIndex,
             byteOffset: usize = 0,
             byteLength: usize,
