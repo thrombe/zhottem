@@ -44,9 +44,10 @@ fn imgui_step(b: *std.Build, v: struct {
     dear: *std.Build.Dependency,
     imgui: *std.Build.Dependency,
     vulkan_headers: *std.Build.Dependency,
-    target: ?std.Build.ResolvedTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 }) struct { generated: *std.Build.Step.WriteFile, lib: *std.Build.Step.Compile } {
+    const is_windows = v.target.result.os.tag == .windows;
     const dear = v.dear.path("dear_bindings.py");
 
     const cimgui = b.addSharedLibrary(.{
@@ -83,6 +84,16 @@ fn imgui_step(b: *std.Build, v: struct {
     dcimgui_vulkan.setCwd(dcimgui_generated.getDirectory());
     cimgui.step.dependOn(&dcimgui_vulkan.step);
 
+    const flags = &[_][]const u8{
+        if (is_windows) "-DCIMGUI_API=__declspec(dllexport)" else "",
+        if (is_windows) "-DCIMGUI_IMPL_API=__declspec(dllexport)" else "",
+    };
+
+    if (is_windows) {
+        cimgui.addIncludePath(b.path("./zig-out/vendor/include"));
+        cimgui.addLibraryPath(b.path("./zig-out/vendor/lib"));
+    }
+
     cimgui.addCSourceFiles(.{ .root = v.imgui.path("./"), .files = &[_][]const u8{
         "imgui.cpp",
         "imgui_draw.cpp",
@@ -91,12 +102,12 @@ fn imgui_step(b: *std.Build, v: struct {
         "imgui_demo.cpp",
         "backends/imgui_impl_glfw.cpp",
         "backends/imgui_impl_vulkan.cpp",
-    }, .flags = &[_][]const u8{} });
+    }, .flags = flags });
     cimgui.addCSourceFiles(.{ .root = dcimgui_generated.getDirectory(), .files = &[_][]const u8{
         "dcimgui.cpp",
         "dcimgui_impl_glfw.cpp",
         "dcimgui_impl_vulkan.cpp",
-    }, .flags = &[_][]const u8{} });
+    }, .flags = flags });
     cimgui.addIncludePath(v.imgui.path("./"));
     cimgui.addIncludePath(v.imgui.path("./backends"));
     cimgui.addIncludePath(v.vulkan_headers.path("./include"));
@@ -114,10 +125,11 @@ fn imgui_step(b: *std.Build, v: struct {
 
 fn jolt_step(b: *std.Build, v: struct {
     jolt: *std.Build.Dependency,
-    target: ?std.Build.ResolvedTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     alloc: std.mem.Allocator,
 }) !struct { lib: *std.Build.Step.Compile, options: *std.Build.Step.Options } {
+    const is_windows = v.target.result.os.tag == .windows;
     const options = b.addOptions();
     const jolt_options = .{
         .use_double_precision = false,
@@ -156,7 +168,11 @@ fn jolt_step(b: *std.Build, v: struct {
             "-fno-exceptions",
             "-fno-sanitize=undefined",
             "-fno-access-control",
+            "-fno-rtti",
 
+            "-DJPH_SHARED_LIBRARY",
+            "-DJPH_BUILD_SHARED_LIBRARY",
+            if (is_windows) "-DJPH_EXPORT=__declspec(dllexport)" else "",
             if (jolt_options.enable_cross_platform_determinism) "-DJPH_CROSS_PLATFORM_DETERMINISTIC" else "",
             if (jolt_options.enable_debug_renderer) "-DJPH_DEBUG_RENDERER" else "",
             if (jolt_options.use_double_precision) "-DJPH_DOUBLE_PRECISION" else "",
@@ -189,6 +205,8 @@ fn step(b: *std.Build, v: struct {
     jolt_options: *std.Build.Step.Options,
     jolt_dep: *std.Build.Dependency,
 }) *std.Build.Step.Compile {
+    const is_windows = v.target.result.os.tag == .windows;
+
     // see b.addSharedLibrary()
     // see b.addStaticLibrary()
     // see b.addExecutable()
@@ -221,6 +239,13 @@ fn step(b: *std.Build, v: struct {
     compile_step.root_module.addImport("build-options", options.createModule());
     compile_step.root_module.addImport("jolt-options", v.jolt_options.createModule());
 
+    if (is_windows) {
+        compile_step.addIncludePath(b.path("./zig-out/vendor/include"));
+        compile_step.addLibraryPath(b.path("./zig-out/vendor/lib"));
+        compile_step.addLibraryPath(b.path("./zig-out/lib"));
+        compile_step.addRPath(b.path("./zig-out/vendor/lib"));
+    }
+
     switch (v.mode) {
         .exe, .hotlib => {
             compile_step.root_module.addImport("vulkan", v.vulkan_zig);
@@ -234,9 +259,17 @@ fn step(b: *std.Build, v: struct {
             // compile_step.linkLibrary(v.cimgui);
             // compile_step.linkLibrary(v.jolt);
 
-            compile_step.addLibraryPath(b.path("./zig-out/lib"));
-            compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
-            compile_step.addObjectFile(b.path("./zig-out/lib/libjolt.so"));
+            if (is_windows) {
+                compile_step.want_lto = false;
+            }
+
+            if (is_windows) {
+                compile_step.addObjectFile(b.path("./zig-out/lib/cimgui.lib"));
+                compile_step.addObjectFile(b.path("./zig-out/lib/jolt.lib"));
+            } else {
+                compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
+                compile_step.addObjectFile(b.path("./zig-out/lib/libjolt.so"));
+            }
 
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
@@ -245,10 +278,14 @@ fn step(b: *std.Build, v: struct {
                     "-fno-exceptions",
                     "-fno-sanitize=undefined",
                     "-fno-access-control",
-                    "-Werror",
-                    "-Wall",
-                    "-Wno-unused-variable",
-                    "-Wno-unused-function",
+                    "-fno-rtti",
+                    if (is_windows) "" else "-Werror",
+                    if (is_windows) "" else "-Wall",
+                    if (is_windows) "" else "-Wno-unused-variable",
+                    if (is_windows) "" else "-Wno-unused-function",
+
+                    "-DJPH_SHARED_LIBRARY",
+                    if (is_windows) "-DJPH_EXPORT=__declspec(dllexport)" else "",
                 } ++ compile_commands_flags,
                 .files = &[_][]const u8{
                     "jolt/c.cpp",
@@ -259,7 +296,7 @@ fn step(b: *std.Build, v: struct {
             compile_step.linkSystemLibrary("glfw");
             compile_step.linkSystemLibrary("portaudio");
             compile_step.linkSystemLibrary("fswatch");
-            compile_step.linkSystemLibrary2("ImageMagick", .{});
+            // compile_step.linkSystemLibrary2("ImageMagick", .{});
             compile_step.linkSystemLibrary2("MagickWand", .{});
             compile_step.linkSystemLibrary2("MagickCore", .{});
             compile_step.linkLibC();

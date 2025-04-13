@@ -27,8 +27,8 @@
             .hash = "122036b555e00c1dbb1addc3eb8e1bf80baf1c72266577f245340bac9648523bfaab",
         },
         .jolt = .{
-            .url = "https://github.com/jrouwe/JoltPhysics/archive/refs/tags/v5.3.0.tar.gz",
-            .hash = "N-V-__8AAANiCgJnZX3tzlbOQLGepRa5A5RA-4tfN1biKPB0",
+            .url = "https://github.com/thrombe/JoltPhysics/archive/refs/heads/v5.3.0.tar.gz",
+            .hash = "N-V-__8AAL9iCgLDerAnVZqXJociYcTwjyivS1xg4M6X7GAB",
         },
     },
 
