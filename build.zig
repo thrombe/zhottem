@@ -263,6 +263,7 @@ fn step(b: *std.Build, v: struct {
                 compile_step.want_lto = false;
             }
 
+            compile_step.addRPath(b.path("./zig-out/lib"));
             if (is_windows) {
                 compile_step.addObjectFile(b.path("./zig-out/lib/cimgui.lib"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/jolt.lib"));
