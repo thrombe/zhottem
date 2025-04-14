@@ -124,6 +124,50 @@ pub inline fn dump_error(err: anyerror) void {
     }
 }
 
+pub const fspath = struct {
+    inline fn len(comptime parts: anytype) usize {
+        comptime {
+            var total_len: usize = 0;
+            for (parts, 0..) |part, i| {
+                if (i > 0) {
+                    total_len += 1;
+                }
+                total_len += part.len;
+            }
+            return total_len;
+        }
+    }
+
+    pub inline fn join(comptime parts: anytype) [len(parts)]u8 {
+        comptime {
+            const total_len = len(parts);
+            var buffer: [total_len]u8 = undefined;
+            var index: usize = 0;
+            for (parts, 0..) |part, i| {
+                if (i > 0) {
+                    buffer[index] = std.fs.path.sep;
+                    index += 1;
+                }
+
+                @memcpy(buffer[index..][0..part.len], part);
+                index += part.len;
+            }
+
+            return buffer;
+        }
+    }
+
+    pub fn replace_sep(path: []const u8) ![]const u8 {
+        return try std.mem.replaceOwned(
+            u8,
+            allocator.*,
+            path,
+            std.fs.path.sep_str_posix,
+            std.fs.path.sep_str,
+        );
+    }
+};
+
 pub const Ticker = struct {
     timer: std.time.Timer,
     step: u64,
@@ -396,9 +440,7 @@ pub const FsFuse = struct {
     thread: std.Thread,
 
     pub fn init(path: [:0]const u8) !@This() {
-        const rpath = try std.fs.cwd().realpathAlloc(allocator.*, path);
-        defer allocator.free(rpath);
-        const pathZ = try allocator.dupeZ(u8, rpath);
+        const pathZ = try allocator.dupeZ(u8, path);
 
         const watch = try start(pathZ);
         return watch;
@@ -1228,15 +1270,15 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
             thread: std.Thread,
 
             pub fn init(comp: Glslc.Compiler, shader_info: []const ShaderInfo) !@This() {
-                const shader_fuse = try FsFuse.init("./src");
+                const shader_fuse = try FsFuse.init("src");
                 errdefer shader_fuse.deinit();
 
                 const shaders = try allocator.dupe(ShaderInfo, shader_info);
                 // OOF: not getting free-d if anything errors but meh
                 for (shaders) |*s| {
                     var buf: [std.fs.max_path_bytes:0]u8 = undefined;
-                    const real = try std.fs.cwd().realpath(s.path, &buf);
-                    s.path = try allocator.dupe(u8, real);
+                    const cwd = try std.posix.getcwd(&buf);
+                    s.path = try std.fs.path.join(allocator.*, &.{ cwd, s.path });
 
                     const define = try allocator.alloc([]const u8, s.define.len);
                     for (s.define, 0..) |def, i| {
@@ -1246,8 +1288,7 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
 
                     const include = try allocator.alloc([]const u8, s.include.len);
                     for (s.include, 0..) |inc, i| {
-                        const real_inc = try std.fs.cwd().realpath(inc, &buf);
-                        include[i] = try allocator.dupe(u8, real_inc);
+                        include[i] = try std.fs.path.join(allocator.*, &.{ cwd, inc });
                     }
                     s.include = include;
                 }
@@ -1439,9 +1480,9 @@ pub const Glslc = struct {
                     }
                     for (paths.include) |inc| {
                         try args.append(try alloc.dupe(u8, "-I"));
-                        try args.append(try alloc.dupe(u8, inc));
+                        try args.append(try fspath.replace_sep(inc));
                     }
-                    try args.append(try alloc.dupe(u8, paths.main));
+                    try args.append(try fspath.replace_sep(paths.main));
                 },
             }
 

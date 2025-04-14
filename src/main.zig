@@ -60,7 +60,10 @@ const HotReloader = struct {
         const cwd = std.fs.cwd();
         try cwd.copyFile(libpath, cwd, hot_cache, .{});
 
-        const hot_lib = try cwd.realpathAlloc(allocator.*, hot_cache);
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        const pwd = try std.posix.getcwd(&buf);
+
+        const hot_lib = try std.fs.path.join(allocator.*, &.{ pwd, hot_cache });
         errdefer allocator.free(hot_lib);
 
         var dyn = try std.DynLib.open(hot_lib);
@@ -163,7 +166,10 @@ pub fn main() !void {
             while (try app.tick()) {}
         },
         .hotexe => {
-            var app = try HotReloader.init("./zig-out/lib/", "./zig-out/hot-cache/");
+            var app = try HotReloader.init(
+                if (@import("builtin").target.os.tag == .windows) "./zig-out/bin/" else "./zig-out/lib/",
+                "./zig-out/hot-cache/",
+            );
             defer app.deinit();
             while (try app.tick()) {}
         },

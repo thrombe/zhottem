@@ -1031,30 +1031,30 @@ const ShaderStageManager = struct {
             .{
                 .typ = .bg_vert,
                 .stage = .vertex,
-                .path = "./src/shader.glsl",
+                .path = "src/shader.glsl",
                 .define = &[_][]const u8{"BG_VERT_PASS"},
-                .include = &[_][]const u8{"./src"},
+                .include = &[_][]const u8{"src"},
             },
             .{
                 .typ = .bg_frag,
                 .stage = .fragment,
-                .path = "./src/shader.glsl",
+                .path = "src/shader.glsl",
                 .define = &[_][]const u8{"BG_FRAG_PASS"},
-                .include = &[_][]const u8{"./src"},
+                .include = &[_][]const u8{"src"},
             },
             .{
                 .typ = .vert,
                 .stage = .vertex,
-                .path = "./src/shader.glsl",
+                .path = "src/shader.glsl",
                 .define = &[_][]const u8{"VERT_PASS"},
-                .include = &[_][]const u8{"./src"},
+                .include = &[_][]const u8{"src"},
             },
             .{
                 .typ = .frag,
                 .stage = .fragment,
-                .path = "./src/shader.glsl",
+                .path = "src/shader.glsl",
                 .define = &[_][]const u8{"FRAG_PASS"},
-                .include = &[_][]const u8{"./src"},
+                .include = &[_][]const u8{"src"},
             },
         });
         errdefer comp.deinit();
