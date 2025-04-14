@@ -30,6 +30,10 @@
             .url = "https://github.com/thrombe/JoltPhysics/archive/refs/heads/v5.3.0.tar.gz",
             .hash = "N-V-__8AAL9iCgLDerAnVZqXJociYcTwjyivS1xg4M6X7GAB",
         },
+        .stb = .{
+            .url = "https://github.com/nothings/stb/archive/f0569113c93ad095470c54bf34a17b36646bbbb5.tar.gz",
+            .hash = "N-V-__8AAJopTgBuYbPPno6GEtqFAeIhKHyhTJcJ-Vp2FpHj",
+        },
     },
 
     .paths = .{""},

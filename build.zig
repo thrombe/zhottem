@@ -205,6 +205,7 @@ fn step(b: *std.Build, v: struct {
     jolt: *std.Build.Step.Compile,
     jolt_options: *std.Build.Step.Options,
     jolt_dep: *std.Build.Dependency,
+    stb_dep: *std.Build.Dependency,
 }) *std.Build.Step.Compile {
     const is_windows = v.target.result.os.tag == .windows;
 
@@ -255,7 +256,42 @@ fn step(b: *std.Build, v: struct {
             compile_step.addIncludePath(v.imgui_dep.path("./"));
             compile_step.addIncludePath(v.imgui_dep.path("./backends"));
             compile_step.addIncludePath(v.jolt_dep.path("./"));
+            compile_step.addIncludePath(v.stb_dep.path("./"));
             compile_step.addIncludePath(b.path("./src"));
+
+            const files = b.addWriteFiles();
+            compile_step.step.dependOn(&files.step);
+
+            // TODO: consider not depending on zphysics alloc
+            _ = files.add("stb_image.c",
+                \\extern void* zphysicsAlloc(unsigned long long sz);
+                \\extern void* zphysicsRealloc(void* ptr, unsigned long long old_size, unsigned long long new_size);
+                \\extern void zphysicsFree(void* ptr);
+                \\
+                \\#define STB_IMAGE_IMPLEMENTATION
+                \\#define STBI_NO_STDIO
+                \\#define STBI_MALLOC(sz) zphysicsAlloc(sz)
+                \\#define STBI_REALLOC_SIZED(p,oldsz,newsz) zphysicsRealloc(p,oldsz,newsz)
+                \\#define STBI_FREE(p) zphysicsFree(p)
+                \\
+                \\#include <stb_image.h>
+                \\
+                \\
+                \\#define STBI_WRITE_NO_STDIO
+                \\#define STB_IMAGE_WRITE_IMPLEMENTATION
+                \\#define STBIW_MALLOC(sz) zphysicsAlloc(sz)
+                \\#define STBIW_REALLOC_SIZED(p,oldsz,newsz) zphysicsRealloc(p,oldsz,newsz)
+                \\#define STBIW_FREE(p) zphysicsFree(p)
+                \\
+                \\#include <stb_image_write.h>
+            );
+            compile_step.addCSourceFiles(.{
+                .root = files.getDirectory(),
+                .files = &[_][]const u8{
+                    "stb_image.c",
+                },
+                .flags = &[_][]const u8{},
+            });
 
             // compile_step.linkLibrary(v.cimgui);
             // compile_step.linkLibrary(v.jolt);
@@ -299,8 +335,8 @@ fn step(b: *std.Build, v: struct {
             compile_step.linkSystemLibrary("portaudio");
             compile_step.linkSystemLibrary("fswatch");
             // compile_step.linkSystemLibrary2("ImageMagick", .{});
-            compile_step.linkSystemLibrary2("MagickWand", .{});
-            compile_step.linkSystemLibrary2("MagickCore", .{});
+            // compile_step.linkSystemLibrary2("MagickWand", .{});
+            // compile_step.linkSystemLibrary2("MagickCore", .{});
             compile_step.linkLibC();
             compile_step.linkLibCpp();
         },
@@ -324,6 +360,7 @@ pub fn build(b: *std.Build) !void {
     const vulkan_headers = b.dependency("vulkan_headers", .{});
     const imgui = b.dependency("imgui", .{});
     const jolt = b.dependency("jolt", .{});
+    const stb = b.dependency("stb", .{});
 
     const vulkan = vulkan_step(b, .{
         .vulkan_headers = vulkan_headers,
@@ -360,6 +397,7 @@ pub fn build(b: *std.Build) !void {
         .jolt = libjolt.lib,
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
+        .stb_dep = stb,
     });
     const hotlib = step(b, .{
         .target = target,
@@ -372,6 +410,7 @@ pub fn build(b: *std.Build) !void {
         .jolt = libjolt.lib,
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
+        .stb_dep = stb,
     });
     const hotexe = step(b, .{
         .target = target,
@@ -384,6 +423,7 @@ pub fn build(b: *std.Build) !void {
         .jolt = libjolt.lib,
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
+        .stb_dep = stb,
     });
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");

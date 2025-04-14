@@ -4082,7 +4082,7 @@ pub const Constraint = opaque {
 // Memory allocation
 //
 //--------------------------------------------------------------------------------------------------
-fn zphysicsAlloc(size: usize) callconv(.C) ?*anyopaque {
+export fn zphysicsAlloc(size: usize) callconv(.C) ?*anyopaque {
     state.?.mem_mutex.lock();
     defer state.?.mem_mutex.unlock();
 
@@ -4101,7 +4101,7 @@ fn zphysicsAlloc(size: usize) callconv(.C) ?*anyopaque {
     return ptr;
 }
 
-fn zphysicsRealloc(maybe_ptr: ?*anyopaque, reported_old_size: usize, new_size: usize) callconv(.C) ?*anyopaque {
+export fn zphysicsRealloc(maybe_ptr: ?*anyopaque, reported_old_size: usize, new_size: usize) callconv(.C) ?*anyopaque {
     state.?.mem_mutex.lock();
     defer state.?.mem_mutex.unlock();
 
@@ -4146,7 +4146,7 @@ fn zphysicsAlignedAlloc(size: usize, alignment: usize) callconv(.C) ?*anyopaque 
     return ptr;
 }
 
-fn zphysicsFree(maybe_ptr: ?*anyopaque) callconv(.C) void {
+export fn zphysicsFree(maybe_ptr: ?*anyopaque) callconv(.C) void {
     if (maybe_ptr) |ptr| {
         state.?.mem_mutex.lock();
         defer state.?.mem_mutex.unlock();
