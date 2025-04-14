@@ -77,7 +77,7 @@ audio: AudioPlayer,
 socket: Socket,
 server_addr: std.net.Address,
 
-texture_img: utils.ImageMagick.UnormImage,
+texture_img: utils.StbImage.UnormImage,
 texture: Image,
 
 handles: Handles,
@@ -385,7 +385,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
     errdefer depth.deinit(device);
 
-    var image = try utils.ImageMagick.from_file("./assets/img.png", .unorm);
+    var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
+    errdefer world.deinit();
+
+    var image = try utils.StbImage.from_file("./assets/images/mandlebulb.png", .unorm);
     errdefer image.deinit();
     const slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(image.buffer));
 
@@ -448,8 +451,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .instances = bunny_instance_handle,
     });
 
-    var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
-    errdefer world.deinit();
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
 

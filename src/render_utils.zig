@@ -2188,26 +2188,26 @@ pub fn dump_image_to_file(
     };
     defer allocator.free(buf);
 
-    const pixels = try allocator.alloc(f32, copy_extent.width * copy_extent.height * 4);
+    const pixels = try allocator.alloc(u8, copy_extent.width * copy_extent.height * 4);
     defer allocator.free(pixels);
 
     switch (image.format) {
         .r16g16b16a16_sfloat => {
             const src = std.mem.bytesAsSlice(f16, buf);
             for (src[0..pixels.len], 0..) |f, i| {
-                pixels[i] = @floatCast(f);
+                pixels[i] = @intFromFloat(f * 255.0);
             }
         },
         .r8g8b8a8_srgb => {
             const src = std.mem.bytesAsSlice(u8, buf);
             for (src[0..pixels.len], 0..) |f, i| {
-                pixels[i] = @as(f32, @floatFromInt(f)) / 255.0;
+                pixels[i] = f;
             }
         },
         else => return error.UnknownImageFormat,
     }
 
-    const blob = try utils.ImageMagick.encode_rgba_image(pixels, copy_extent.width, copy_extent.height);
+    const blob = try utils.StbImage.encode_rgba_image(pixels, copy_extent.width, copy_extent.height);
     defer allocator.free(blob);
 
     const ts = std.time.timestamp();

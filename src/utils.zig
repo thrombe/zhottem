@@ -512,6 +512,149 @@ pub const FsFuse = struct {
     }
 };
 
+pub const StbImage = struct {
+    const c = @cImport({
+        @cInclude("stb_image.h");
+        @cInclude("stb_image_write.h");
+    });
+
+    pub const PixelType = enum {
+        unorm,
+        half,
+        float,
+
+        fn typ(comptime self: @This()) type {
+            return switch (self) {
+                .unorm => u8,
+                .half => f16,
+                .float => f32,
+            };
+        }
+
+        fn img_typ(comptime self: @This()) type {
+            return Image(Pixel(self.typ()));
+        }
+    };
+    pub fn Pixel(typ: type) type {
+        return extern struct {
+            r: typ,
+            g: typ,
+            b: typ,
+            a: typ,
+        };
+    }
+    pub fn Image(pix: type) type {
+        return struct {
+            buffer: []pix,
+            height: usize,
+            width: usize,
+
+            pub fn deinit(self: *@This()) void {
+                allocator.free(self.buffer);
+            }
+        };
+    }
+
+    pub const FloatImage = PixelType.float.img_typ();
+    pub const HalfImage = PixelType.half.img_typ();
+    pub const UnormImage = PixelType.unorm.img_typ();
+
+    pub fn from_file(path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+        var file = try std.fs.cwd().openFile(path, .{});
+        defer file.close();
+
+        const buf = try file.readToEndAlloc(allocator.*, 50 * 1000 * 1000);
+        defer allocator.free(buf);
+
+        return decode_img(buf, typ);
+    }
+
+    pub fn decode_img(bytes: []u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+        var img_width: i32 = 0;
+        var img_height: i32 = 0;
+        var channels: i32 = 0;
+        const img_data = c.stbi_load_from_memory(
+            bytes.ptr,
+            @intCast(bytes.len),
+            &img_width,
+            &img_height,
+            &channels,
+            4,
+        );
+        defer c.stbi_image_free(img_data);
+
+        const img = std.mem.bytesAsSlice(Pixel(u8), img_data[0..@intCast(img_width * img_height * 4)]);
+
+        switch (typ) {
+            .half, .float => {
+                const buf = try allocator.alloc(Pixel(typ.typ()), @intCast(img_width * img_height));
+                for (img, 0..) |v, i| {
+                    buf[i] = .{
+                        .r = @as(typ.typ(), @floatFromInt(v.r)) / 255.0,
+                        .g = @as(typ.typ(), @floatFromInt(v.g)) / 255.0,
+                        .b = @as(typ.typ(), @floatFromInt(v.b)) / 255.0,
+                        .a = @as(typ.typ(), @floatFromInt(v.a)) / 255.0,
+                    };
+                }
+                return .{
+                    .buffer = buf,
+                    .height = @intCast(img_height),
+                    .width = @intCast(img_width),
+                };
+            },
+            .unorm => {
+                return .{
+                    .buffer = try allocator.dupe(Pixel(u8), img),
+                    .height = @intCast(img_height),
+                    .width = @intCast(img_width),
+                };
+            },
+        }
+    }
+
+    pub fn encode_rgba_image(pixels: []u8, width: usize, height: usize) ![]u8 {
+        const Ctx = struct {
+            buf: std.ArrayList(u8),
+            err: ?anyerror = null,
+
+            fn write(ctx_ptr: ?*anyopaque, opaque_data: ?*anyopaque, size: i32) callconv(.c) void {
+                const data: [*c]u8 = @ptrCast(opaque_data.?);
+                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr.?));
+
+                if (ctx.err) |_| {
+                    return;
+                }
+
+                ctx.buf.appendSlice(data[0..@as(usize, @intCast(size))]) catch |e| {
+                    ctx.err = e;
+                };
+            }
+        };
+
+        var context = Ctx{
+            .buf = .init(allocator.*),
+        };
+        errdefer context.buf.deinit();
+        if (c.stbi_write_png_to_func(
+            &Ctx.write,
+            @ptrCast(&context),
+            @intCast(width),
+            @intCast(height),
+            4,
+            pixels.ptr,
+            @intCast(width * 4),
+        ) == 0) {
+            return error.FailedWritingPng;
+        }
+
+        if (context.err) |e| {
+            return e;
+        }
+
+        return try context.buf.toOwnedSlice();
+    }
+};
+
 pub const ImageMagick = struct {
     // - [ImageMagick – Sitemap](https://imagemagick.org/script/sitemap.php#program-interfaces)
     // - [ImageMagick – MagickWand, C API](https://imagemagick.org/script/magick-wand.php)
