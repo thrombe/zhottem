@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const compile_commands_flags = &[_][]const u8{ "-gen-cdb-fragment-path", ".cache/cdb" };
+const win_export = "__declspec(dllexport)";
 
 fn compile_commands_step(b: *std.Build, v: struct {
     cdb_dir: []const u8,
@@ -85,8 +86,8 @@ fn imgui_step(b: *std.Build, v: struct {
     cimgui.step.dependOn(&dcimgui_vulkan.step);
 
     const flags = &[_][]const u8{
-        if (is_windows) "-DCIMGUI_API=__declspec(dllexport)" else "",
-        if (is_windows) "-DCIMGUI_IMPL_API=__declspec(dllexport)" else "",
+        if (is_windows) "-DCIMGUI_API=" ++ win_export else "",
+        if (is_windows) "-DCIMGUI_IMPL_API=" ++ win_export else "",
     };
 
     if (is_windows) {
@@ -172,7 +173,7 @@ fn jolt_step(b: *std.Build, v: struct {
 
             "-DJPH_SHARED_LIBRARY",
             "-DJPH_BUILD_SHARED_LIBRARY",
-            if (is_windows) "-DJPH_EXPORT=__declspec(dllexport)" else "",
+            if (is_windows) "-DJPH_EXPORT=" ++ win_export else "",
             if (jolt_options.enable_cross_platform_determinism) "-DJPH_CROSS_PLATFORM_DETERMINISTIC" else "",
             if (jolt_options.enable_debug_renderer) "-DJPH_DEBUG_RENDERER" else "",
             if (jolt_options.use_double_precision) "-DJPH_DOUBLE_PRECISION" else "",
@@ -234,7 +235,7 @@ fn step(b: *std.Build, v: struct {
     const options = b.addOptions();
     options.addOption(bool, "hot_reload", v.mode != .exe);
     options.addOption(bool, "is_lib", v.mode == .hotlib);
-    options.addOption([]const u8, "hotlib_name", "libhot.so");
+    options.addOption([]const u8, "hotlib_name", if (is_windows) "hot.dll" else "libhot.so");
     options.addOption(CompileMode, "mode", v.mode);
     compile_step.root_module.addImport("build-options", options.createModule());
     compile_step.root_module.addImport("jolt-options", v.jolt_options.createModule());
@@ -259,9 +260,9 @@ fn step(b: *std.Build, v: struct {
             // compile_step.linkLibrary(v.cimgui);
             // compile_step.linkLibrary(v.jolt);
 
-            if (is_windows) {
-                compile_step.want_lto = false;
-            }
+            // if (is_windows) {
+            //     compile_step.want_lto = false;
+            // }
 
             compile_step.addRPath(b.path("./zig-out/lib"));
             if (is_windows) {
@@ -286,7 +287,7 @@ fn step(b: *std.Build, v: struct {
                     if (is_windows) "" else "-Wno-unused-function",
 
                     "-DJPH_SHARED_LIBRARY",
-                    if (is_windows) "-DJPH_EXPORT=__declspec(dllexport)" else "",
+                    if (is_windows) "-DJPH_EXPORT=" ++ win_export else "",
                 } ++ compile_commands_flags,
                 .files = &[_][]const u8{
                     "jolt/c.cpp",
