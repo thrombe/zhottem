@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const math = @import("math.zig");
 
@@ -1442,7 +1443,11 @@ pub const Glslc = struct {
                 }
                 args.deinit();
             }
-            try args.append(try alloc.dupe(u8, "glslc"));
+            if (builtin.os.tag == .windows) {
+                try args.append(try alloc.dupe(u8, "zig-out/bin/glslc.exe"));
+            } else {
+                try args.append(try alloc.dupe(u8, "glslc"));
+            }
             try args.append(try alloc.dupe(u8, switch (stage) {
                 .fragment => "-fshader-stage=fragment",
                 .vertex => "-fshader-stage=vertex",

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const c = @cImport({
     @cDefine("GLFW_INCLUDE_VULKAN", "1");
@@ -685,7 +686,7 @@ pub const VulkanContext = struct {
 
         var glfw_exts_count: u32 = 0;
         const glfw_exts = c.glfwGetRequiredInstanceExtensions(&glfw_exts_count);
-        const layers = [_][*c]const u8{
+        const layers = [_][*c]const u8{} ++ if (builtin.os.tag == .windows) .{} else .{
             "VK_LAYER_KHRONOS_validation",
         };
         const instance = vkb.createInstance(&.{

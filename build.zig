@@ -290,7 +290,10 @@ fn step(b: *std.Build, v: struct {
                 .files = &[_][]const u8{
                     "stb_image.c",
                 },
-                .flags = &[_][]const u8{},
+                .flags = &[_][]const u8{
+                    // we don't want a separate dll rn
+                    // if (is_windows) "-DSTBIDEF=" ++ win_export else "",
+                },
             });
 
             // compile_step.linkLibrary(v.cimgui);
