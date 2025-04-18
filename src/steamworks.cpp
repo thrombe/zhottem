@@ -2,12 +2,11 @@
 #include <unistd.h>
 
 #include <steam_api.h>
-#include <steam_api_common.h>
-#include <steam_api_flat.h>
 #include <steam_gameserver.h>
 
 #include "isteamgameserver.h"
 #include "isteammatchmaking.h"
+#include "isteamnetworkingsockets.h"
 #include "steamclientpublic.h"
 #include "steamnetworkingtypes.h"
 #include "steamtypes.h"
@@ -30,8 +29,6 @@ CALLCONV_C(void) steam_api_dbg_hook(int nSeverity, const char *pchDebugText) {
   }
 }
 
-class ServerBrowser;
-
 typedef struct {
   const char *version;
   const char *moddir;
@@ -53,8 +50,6 @@ typedef struct {
   SteamAPICall_t lobby_request;
   SteamAPICall_t lobby_created;
   CSteamID lobby_id;
-  ServerBrowser *server_browser;
-  CSteamID server_steam_id;
   HSteamNetConnection server_conn;
 } ZhottClient;
 
@@ -62,129 +57,6 @@ typedef struct {
   ZhottServer server;
   ZhottClient client;
 } ZhottSteamContext;
-
-inline void strncpy_safe(char *pDest, char const *pSrc, size_t maxLen) {
-  size_t nCount = maxLen;
-  char *pstrDest = pDest;
-  const char *pstrSource = pSrc;
-
-  while (0 < nCount && 0 != (*pstrDest++ = *pstrSource++))
-    nCount--;
-
-  if (maxLen > 0)
-    pstrDest[-1] = 0;
-}
-
-class ServerBrowser : public ISteamMatchmakingServerListResponse {
-public:
-  ZhottSteamContext *ctx;
-  bool request_pending;
-  HServerListRequest request;
-
-  ServerBrowser(ZhottSteamContext *ctx) {
-    this->ctx = ctx;
-    this->request_pending = false;
-    this->request = NULL;
-  }
-
-  ~ServerBrowser() {
-    if (!this->request) {
-      return;
-    }
-    SteamMatchmakingServers()->ReleaseRequest(this->request);
-    this->request = NULL;
-  }
-
-  void RefreshInternetServers() {
-    if (this->request_pending)
-      return;
-    if (this->request) {
-      SteamMatchmakingServers()->ReleaseRequest(this->request);
-      this->request = NULL;
-    }
-
-    printf("Refreshing internet servers\n");
-    this->request_pending = true;
-
-    MatchMakingKeyValuePair_t pFilters[2];
-    MatchMakingKeyValuePair_t *pFilter = pFilters;
-
-    // this is used to specify mods inside or a single product/appid
-    strncpy_safe(pFilters[0].m_szKey, "gamedir", sizeof(pFilters[0].m_szKey));
-    strncpy_safe(pFilters[0].m_szValue, this->ctx->client.gamedir,
-                 sizeof(pFilters[0].m_szValue));
-
-    // this is used to specify whether anti-cheat is enabled for a server
-    strncpy_safe(pFilters[1].m_szKey, "secure", sizeof(pFilters[1].m_szKey));
-    strncpy_safe(pFilters[1].m_szValue, "1", sizeof(pFilters[1].m_szValue));
-
-    // server "gametype" -- this is used to specify game type and is set to
-    // whatever your game server code sets
-    // strncpy_safe( pFilters[ 2 ].m_szKey, "gametype", sizeof(pFilters[ 1
-    // ].m_szValue) ); strncpy_safe( pFilters[ 2 ].m_szValue, "dm",
-    // sizeof(pFilters[ 1 ].m_szValue) );
-
-    // bugbug jmccaskey - passing just the appid without filters results in
-    // getting all servers rather than servers filtered by appid alone.  So,
-    // we'll use the filters to filter the results better.
-    // this->request =
-    // SteamAPI_ISteamMatchmakingServers_RequestInternetServerList(SteamAPI_SteamMatchmakingServers(),
-    // SteamAPI_ISteamUtils_GetAppID(SteamAPI_SteamGameServerUtils()), &pFilter,
-    // sizeof(pFilters)/sizeof(pFilters[0]), this);
-    this->request = SteamMatchmakingServers()->RequestInternetServerList(
-        SteamUtils()->GetAppID(), &pFilter,
-        sizeof(pFilters) / sizeof(pFilters[0]), this);
-    printf("request %lu\n", (uint64_t)this->request);
-    printf("server browser ptr %lu\n", (uint64_t)this);
-    printf("filter ptr %lu\n", (uint64_t)&pFilter);
-  }
-
-  void RefreshLANServers() {
-    if (this->request_pending)
-      return;
-
-    if (this->request) {
-      SteamMatchmakingServers()->ReleaseRequest(this->request);
-      this->request = NULL;
-    }
-
-    printf("Refreshing LAN servers\n");
-    this->request_pending = true;
-
-    this->request = SteamMatchmakingServers()->RequestLANServerList(
-        SteamUtils()->GetAppID(), this);
-  }
-
-  void ServerResponded(HServerListRequest hReq, int iServer) {
-    // Assert(hReq == this->request);
-
-    printf("callback called for server response\n");
-
-    gameserveritem_t *pServer =
-        SteamMatchmakingServers()->GetServerDetails(hReq, iServer);
-    if (!pServer) {
-      return;
-    }
-    // Filter out servers that don't match our appid here (might get these in
-    // LAN calls since we can't put more filters on it)
-    if (pServer->m_nAppID == SteamUtils()->GetAppID()) {
-      printf("found server %llu\n", pServer->m_steamID.ConvertToUint64());
-      this->ctx->client.server_steam_id = pServer->m_steamID;
-    }
-  }
-
-  void ServerFailedToRespond(HServerListRequest hReq, int iServer) {
-    // Assert(hReq == request);
-    this->ctx->client.server_steam_id = CSteamID();
-  }
-
-  void RefreshComplete(HServerListRequest hReq,
-                       EMatchMakingServerResponse response) {
-    printf("refresh complete\n");
-    // Assert(hReq == request);
-    this->request_pending = false;
-  }
-};
 
 CALLCONV_C(void *) steam_init() {
   if (SteamAPI_RestartAppIfNecessary(k_uAppIdInvalid)) {
@@ -258,7 +130,7 @@ CALLCONV_C(void) server_init(void *_ctx) {
 
   SteamNetworkingUtils()->InitRelayNetworkAccess();
 
-  SteamGameServer()->SetAdvertiseServerActive(true);
+  // SteamGameServer()->SetAdvertiseServerActive(true);
 
   server->listen_socket =
       SteamGameServerNetworkingSockets()->CreateListenSocketP2P(0, 0, nullptr);
@@ -295,27 +167,15 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
   SteamAPI_ManualDispatch_RunFrame(hSteamPipe);
   CallbackMsg_t callback;
   while (SteamAPI_ManualDispatch_GetNextCallback(hSteamPipe, &callback)) {
-    printf("got a server callback manual dispath\n");
-
-    // Check for dispatching API call results
-    if (callback.m_iCallback == SteamAPICallCompleted_t::k_iCallback) {
-      SteamAPICallCompleted_t *pCallCompleted =
-          (SteamAPICallCompleted_t *)callback.m_pubParam;
-      void *pTmpCallResult = zalloc(callback.m_cubParam);
-      bool bFailed;
-      if (SteamAPI_ManualDispatch_GetAPICallResult(
-              hSteamPipe, pCallCompleted->m_hAsyncCall, pTmpCallResult,
-              callback.m_cubParam, callback.m_iCallback, &bFailed)) {
-        // Dispatch the call result to the registered handler(s) for the
-        // call identified by pCallCompleted->m_hAsyncCall
-        printf("manual dispatch %d %llu\n", pCallCompleted->m_iCallback,
-               pCallCompleted->m_hAsyncCall);
-      }
-      zfree(pTmpCallResult);
-    } else {
-      // Look at callback.m_iCallback to see what kind of callback it is,
-      // and dispatch to appropriate handler(s)
+    switch (callback.m_iCallback) {
+    case SteamNetConnectionStatusChangedCallback_t::k_iCallback: {
+      auto event =
+          (SteamNetConnectionStatusChangedCallback_t *)callback.m_pubParam;
+    } break;
+    default: {
+    } break;
     }
+
     SteamAPI_ManualDispatch_FreeLastCallback(hSteamPipe);
   }
 }
@@ -353,11 +213,8 @@ CALLCONV_C(void) client_init(void *_ctx) {
       .lobby_request = k_uAPICallInvalid,
       .lobby_created = k_uAPICallInvalid,
       .lobby_id = CSteamID(),
-      .server_steam_id = CSteamID(),
       .server_conn = k_HSteamNetConnection_Invalid,
   };
-  ctx->client.server_browser = (ServerBrowser *)zalloc(sizeof(ServerBrowser)),
-  *ctx->client.server_browser = ServerBrowser(ctx);
   SteamMatchmaking()->AddRequestLobbyListStringFilter(
       "zhott_password", ctx->client.lobby_password, k_ELobbyComparisonEqual);
   ctx->client.lobby_request = SteamMatchmaking()->RequestLobbyList();
@@ -370,25 +227,6 @@ CALLCONV_C(void) client_init(void *_ctx) {
 CALLCONV_C(void) client_deinit(void *_ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->client.initialized = false;
-
-  ctx->client.server_browser->~ServerBrowser();
-  zfree(ctx->client.server_browser);
-}
-
-CALLCONV_C(bool) client_connect_to_server(void *_ctx) {
-  auto ctx = (ZhottSteamContext *)_ctx;
-
-  if (!ctx->client.server_steam_id.IsValid()) {
-    return false;
-  }
-
-  CSteamID steam_id = ctx->client.server_steam_id;
-  SteamNetworkingIdentity identity;
-  identity.SetSteamID(steam_id);
-
-  ctx->client.server_conn =
-      SteamNetworkingSockets()->ConnectP2P(identity, 0, 0, nullptr);
-  return true;
 }
 
 static void client_callback_tick(ZhottSteamContext *ctx) {
@@ -400,13 +238,27 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
   SteamAPI_ManualDispatch_RunFrame(hSteamPipe);
   CallbackMsg_t callback;
   while (SteamAPI_ManualDispatch_GetNextCallback(hSteamPipe, &callback)) {
-    printf("got a client callback manual dispath %d\n", callback.m_iCallback);
-
     switch (callback.m_iCallback) {
+    case LobbyMatchList_t::k_iCallback: {
+      auto event = (LobbyMatchList_t *)callback.m_pubParam;
+
+      bool found = false;
+      for (int i = 0; i < event->m_nLobbiesMatching; i++) {
+        auto lobby = SteamMatchmaking()->GetLobbyByIndex(i);
+        SteamMatchmaking()->JoinLobby(lobby);
+        found = true;
+        break;
+      }
+
+      if (!found) {
+        ctx->client.lobby_created =
+            SteamMatchmaking()->CreateLobby(k_ELobbyTypePublic, 4);
+      }
+    } break;
     case LobbyCreated_t::k_iCallback: {
       auto event = (LobbyCreated_t *)callback.m_pubParam;
       ctx->client.lobby_id = event->m_ulSteamIDLobby;
-        printf("lobby created: %llu\n", event->m_ulSteamIDLobby);
+      printf("lobby created: %llu\n", event->m_ulSteamIDLobby);
 
       SteamMatchmaking()->SetLobbyGameServer(ctx->client.lobby_id, 0, 0,
                                              SteamGameServer()->GetSteamID());
@@ -415,25 +267,30 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
       SteamMatchmaking()->SetLobbyData(ctx->client.lobby_id, "zhott_password",
                                        ctx->client.lobby_password);
     } break;
-    case LobbyMatchList_t::k_iCallback: {
-      auto event = (LobbyMatchList_t *)callback.m_pubParam;
+    case LobbyEnter_t::k_iCallback: {
+      auto event = (LobbyEnter_t *)callback.m_pubParam;
+      if (event->m_EChatRoomEnterResponse == k_EChatRoomEnterResponseSuccess) {
+        printf("lobby joined successfully\n");
 
-      bool found = false;
-      for (int i = 0; i < event->m_nLobbiesMatching; i++) {
-        auto lobby = SteamMatchmaking()->GetLobbyByIndex(i);
         CSteamID server_id = CSteamID();
-
-        if (SteamMatchmaking()->GetLobbyGameServer(lobby, NULL, NULL,
-                                                   &server_id)) {
-          SteamMatchmaking()->JoinLobby(lobby);
-          found = true;
-          break;
+        if (SteamMatchmaking()->GetLobbyGameServer(event->m_ulSteamIDLobby,
+                                                   NULL, NULL, &server_id)) {
+          SteamNetworkingIdentity identity;
+          identity.SetSteamID(server_id);
+          ctx->client.server_conn =
+              SteamNetworkingSockets()->ConnectP2P(identity, 0, 0, nullptr);
         }
-      }
 
-      if (!found) {
-        ctx->client.lobby_created =
-            SteamMatchmaking()->CreateLobby(k_ELobbyTypePublic, 4);
+        auto num =
+            SteamMatchmaking()->GetNumLobbyMembers(event->m_ulSteamIDLobby);
+        for (int i = 0; i < num; i++) {
+          printf("lobby member %d %llu\n", i,
+                 SteamMatchmaking()
+                     ->GetLobbyMemberByIndex(event->m_ulSteamIDLobby, i)
+                     .ConvertToUint64());
+        }
+      } else {
+        printf("can't join lobby %d\n", event->m_EChatRoomEnterResponse);
       }
     } break;
     case LobbyDataUpdate_t::k_iCallback: {
@@ -449,33 +306,19 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
         }
       }
     } break;
-    case LobbyEnter_t::k_iCallback: {
-      auto event = (LobbyEnter_t *)callback.m_pubParam;
-        if (event->m_EChatRoomEnterResponse == k_EChatRoomEnterResponseSuccess) {
-          printf("lobby joined successfully\n");
-
-          auto num = SteamMatchmaking()->GetNumLobbyMembers(event->m_ulSteamIDLobby);
-          for (int i = 0; i < num; i++) {
-            printf("lobby member %d %llu\n", i, SteamMatchmaking()->GetLobbyMemberByIndex(event->m_ulSteamIDLobby, i).ConvertToUint64());
-          }
-        } else {
-          printf("can't join lobby %d\n", event->m_EChatRoomEnterResponse);
-        }
-      } break;
     case SteamAPICallCompleted_t::k_iCallback: {
-      SteamAPICallCompleted_t *pCallCompleted =
-          (SteamAPICallCompleted_t *)callback.m_pubParam;
-      void *pTmpCallResult = zalloc(callback.m_cubParam);
-      bool bFailed;
-      if (SteamAPI_ManualDispatch_GetAPICallResult(
-              hSteamPipe, pCallCompleted->m_hAsyncCall, pTmpCallResult,
-              callback.m_cubParam, callback.m_iCallback, &bFailed)) {
-        // Dispatch the call result to the registered handler(s) for the
-        // call identified by pCallCompleted->m_hAsyncCall
-        printf("manual dispatch %d %llu\n", pCallCompleted->m_iCallback,
-               pCallCompleted->m_hAsyncCall);
-      }
-      zfree(pTmpCallResult);
+      // auto pCallCompleted = (SteamAPICallCompleted_t *)callback.m_pubParam;
+      // void *pTmpCallResult = zalloc(callback.m_cubParam);
+      // bool bFailed;
+      // if (SteamAPI_ManualDispatch_GetAPICallResult(
+      //         hSteamPipe, pCallCompleted->m_hAsyncCall, pTmpCallResult,
+      //         callback.m_cubParam, callback.m_iCallback, &bFailed)) {
+      //   // Dispatch the call result to the registered handler(s) for the
+      //   // call identified by pCallCompleted->m_hAsyncCall
+      //   printf("manual dispatch %d %llu\n", pCallCompleted->m_iCallback,
+      //          pCallCompleted->m_hAsyncCall);
+      // }
+      // zfree(pTmpCallResult);
     } break;
     default: {
     } break;
