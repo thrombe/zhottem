@@ -316,7 +316,10 @@ const HotApp = struct {
             allocator.* = self.gpa.allocator();
             break :blk self;
         };
-        errdefer allocator.destroy(self);
+        errdefer {
+            var gpa = self.gpa;
+            gpa.allocator().destroy(self);
+        }
 
         self.engine = try Engine.init();
         errdefer self.engine.deinit();
