@@ -206,6 +206,7 @@ fn step(b: *std.Build, v: struct {
     jolt_options: *std.Build.Step.Options,
     jolt_dep: *std.Build.Dependency,
     stb_dep: *std.Build.Dependency,
+    steamworks_dep: *std.Build.Dependency,
 }) *std.Build.Step.Compile {
     const is_windows = v.target.result.os.tag == .windows;
 
@@ -259,10 +260,37 @@ fn step(b: *std.Build, v: struct {
             compile_step.addIncludePath(v.stb_dep.path("./"));
             compile_step.addIncludePath(b.path("./src"));
 
+            compile_step.addIncludePath(v.steamworks_dep.path("./public"));
+            compile_step.addIncludePath(v.steamworks_dep.path("./public/steam"));
+            if (is_windows) {
+                compile_step.addLibraryPath(v.steamworks_dep.path("./redistributable_bin/win64"));
+                compile_step.linkSystemLibrary("steam_api64");
+            } else {
+                compile_step.addLibraryPath(v.steamworks_dep.path("./redistributable_bin/linux64"));
+                compile_step.addRPath(v.steamworks_dep.path("./redistributable_bin/linux64"));
+                compile_step.linkSystemLibrary("steam_api");
+            }
+
+            compile_step.addIncludePath(b.path("./src"));
+            compile_step.addCSourceFiles(.{
+                .root = b.path("./src"),
+                .files = &[_][]const u8{
+                    "steamworks.cpp",
+                },
+                .flags = &[_][]const u8{
+                    "-Wno-invalid-offsetof",
+                    // "-fno-exceptions",
+                    // "-fno-rtti",
+                } ++ compile_commands_flags,
+            });
+
             const files = b.addWriteFiles();
             compile_step.step.dependOn(&files.step);
 
             // TODO: consider not depending on zphysics alloc
+            // NOTE: if the zig code for this allocator is not compiled (cuz it's lazy compilation)
+            //    it will give linker errors complaining about missing functions. might be useful to keep this under
+            //    a config flag
             _ = files.add("stb_image.c",
                 \\extern void* zphysicsAlloc(unsigned long long sz);
                 \\extern void* zphysicsRealloc(void* ptr, unsigned long long old_size, unsigned long long new_size);
@@ -293,7 +321,7 @@ fn step(b: *std.Build, v: struct {
                 .flags = &[_][]const u8{
                     // we don't want a separate dll rn
                     // if (is_windows) "-DSTBIDEF=" ++ win_export else "",
-                },
+                } ++ compile_commands_flags,
             });
 
             // compile_step.linkLibrary(v.cimgui);
@@ -364,6 +392,7 @@ pub fn build(b: *std.Build) !void {
     const imgui = b.dependency("imgui", .{});
     const jolt = b.dependency("jolt", .{});
     const stb = b.dependency("stb", .{});
+    const steamworks = b.dependency("steamworks", .{});
 
     const vulkan = vulkan_step(b, .{
         .vulkan_headers = vulkan_headers,
@@ -401,6 +430,7 @@ pub fn build(b: *std.Build) !void {
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
         .stb_dep = stb,
+        .steamworks_dep = steamworks,
     });
     const hotlib = step(b, .{
         .target = target,
@@ -414,6 +444,7 @@ pub fn build(b: *std.Build) !void {
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
         .stb_dep = stb,
+        .steamworks_dep = steamworks,
     });
     const hotexe = step(b, .{
         .target = target,
@@ -427,6 +458,7 @@ pub fn build(b: *std.Build) !void {
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
         .stb_dep = stb,
+        .steamworks_dep = steamworks,
     });
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");

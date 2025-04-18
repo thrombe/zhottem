@@ -9,6 +9,7 @@
 /images
 /imgui.ini
 /screenshots/*.png
+/steam_appid.txt
 __pycache__
 
 /assets

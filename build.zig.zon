@@ -34,6 +34,10 @@
             .url = "https://github.com/nothings/stb/archive/f0569113c93ad095470c54bf34a17b36646bbbb5.tar.gz",
             .hash = "N-V-__8AAJopTgBuYbPPno6GEtqFAeIhKHyhTJcJ-Vp2FpHj",
         },
+        .steamworks = .{
+            .url = "https://github.com/thrombe/steamworks-sdk/archive/a99c063258fec0454c9b0e8a23c1ad48d0f13423.tar.gz",
+            .hash = "N-V-__8AAL1eogB5pqXCAPZa7Drz5001tj6Otkwrwt7o1948",
+        },
     },
 
     .paths = .{""},
