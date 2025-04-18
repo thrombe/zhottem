@@ -260,7 +260,6 @@ fn step(b: *std.Build, v: struct {
             compile_step.addIncludePath(v.stb_dep.path("./"));
             compile_step.addIncludePath(b.path("./src"));
 
-            compile_step.addIncludePath(v.steamworks_dep.path("./public"));
             compile_step.addIncludePath(v.steamworks_dep.path("./public/steam"));
             if (is_windows) {
                 compile_step.addLibraryPath(v.steamworks_dep.path("./redistributable_bin/win64"));
@@ -271,11 +270,12 @@ fn step(b: *std.Build, v: struct {
                 compile_step.linkSystemLibrary("steam_api");
             }
 
-            compile_step.addIncludePath(b.path("./src"));
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
                 .files = &[_][]const u8{
-                    "steamworks.cpp",
+                    "steamworks/steam.cpp",
+                    "steamworks/server.cpp",
+                    "steamworks/client.cpp",
                 },
                 .flags = &[_][]const u8{
                     "-Wno-invalid-offsetof",
@@ -473,6 +473,7 @@ pub fn build(b: *std.Build) !void {
     const hot_build_step = b.step("build-hot", "Build the hot app");
     hot_build_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     hot_build_step.dependOn(b.getInstallStep());
+    // hot_build_step.dependOn(compile_commands.step);
 
     const hot_run_cmd = b.addRunArtifact(hotexe);
     hot_run_cmd.step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);

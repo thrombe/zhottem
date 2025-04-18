@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const c = @cImport({
-    @cInclude("steamworks.h");
+    @cInclude("steamworks/api.h");
 });
 
 pub fn testfn() !void {
@@ -20,10 +20,6 @@ pub fn testfn() !void {
 
     c.client_init(steam);
     defer c.client_deinit(steam);
-
-    // while (!c.client_connect_to_server(steam)) {
-    //     std.Thread.sleep(std.time.ns_per_ms * 100);
-    // }
 
     while (true) {
         c.client_tick(steam);

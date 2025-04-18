@@ -1,6 +1,6 @@
+#pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
 
 #ifndef CALLCONV_C
 #define CALLCONV_C(typ) typ
