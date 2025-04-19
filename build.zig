@@ -271,11 +271,11 @@ fn step(b: *std.Build, v: struct {
             }
 
             compile_step.addCSourceFiles(.{
-                .root = b.path("./src"),
+                .root = b.path("./src/steamworks"),
                 .files = &[_][]const u8{
-                    "steamworks/steam.cpp",
-                    "steamworks/server.cpp",
-                    "steamworks/client.cpp",
+                    "steam.cpp",
+                    "server.cpp",
+                    "client.cpp",
                 },
                 .flags = &[_][]const u8{
                     "-Wno-invalid-offsetof",

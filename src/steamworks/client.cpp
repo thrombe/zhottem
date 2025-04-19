@@ -13,7 +13,6 @@ CALLCONV_C(void) client_init(void *_ctx) {
   };
   SteamMatchmaking()->AddRequestLobbyListStringFilter(
       "zhott_password", ctx->client.lobby_password, k_ELobbyComparisonEqual);
-  ctx->client.lobby_request = SteamMatchmaking()->RequestLobbyList();
 
   ctx->client.initialized = true;
 
@@ -73,6 +72,7 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
                                                    NULL, NULL, &server_id)) {
           SteamNetworkingIdentity identity;
           identity.SetSteamID(server_id);
+          printf("trying to connect to server\n");
           ctx->client.server_conn =
               SteamNetworkingSockets()->ConnectP2P(identity, 0, 0, nullptr);
         }
@@ -116,6 +116,63 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
       // }
       // zfree(pTmpCallResult);
     } break;
+    case SteamNetAuthenticationStatus_t::k_iCallback: {
+      auto event = (SteamNetAuthenticationStatus_t *)callback.m_pubParam;
+      printf("client steam auth debug stat: %s %d\n", event->m_debugMsg,
+             event->m_eAvail);
+    } break;
+    case SteamRelayNetworkStatus_t::k_iCallback: {
+      auto event = (SteamRelayNetworkStatus_t *)callback.m_pubParam;
+      printf("client steam relay debug stat: %s %d\n", event->m_debugMsg,
+             event->m_eAvail);
+      if (event->m_eAvail == k_ESteamNetworkingAvailability_Current) {
+        printf("lobby request made from client\n");
+        ctx->client.lobby_request = SteamMatchmaking()->RequestLobbyList();
+      }
+    } break;
+    case SteamNetConnectionStatusChangedCallback_t::k_iCallback: {
+      auto event =
+          (SteamNetConnectionStatusChangedCallback_t *)callback.m_pubParam;
+      printf("client connection callback old: %d new: %d\n", event->m_eOldState,
+             event->m_info.m_eState);
+      if (event->m_eOldState == k_ESteamNetworkingConnectionState_Connecting &&
+          event->m_info.m_eState ==
+              k_ESteamNetworkingConnectionState_Connected) {
+        // connected successfully to remote
+        printf("successfully connected to remote\n");
+      } else if (event->m_eOldState ==
+                     k_ESteamNetworkingConnectionState_Connected &&
+                 event->m_info.m_eState ==
+                     k_ESteamNetworkingConnectionState_ClosedByPeer) {
+        // rejected/closed by remote
+        printf("rejected/closed connection by remote\n");
+        auto _ = SteamNetworkingSockets()->CloseConnection(
+            event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic, NULL,
+            false);
+      } else if ((event->m_eOldState ==
+                      k_ESteamNetworkingConnectionState_Connecting ||
+                  event->m_eOldState ==
+                      k_ESteamNetworkingConnectionState_Connected) &&
+                 event->m_info.m_eState ==
+                     k_ESteamNetworkingConnectionState_ProblemDetectedLocally) {
+        // closed by localhost
+        printf("rejected/closed connection by localhost\n");
+        auto _ = SteamNetworkingSockets()->CloseConnection(
+            event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic, NULL,
+            false);
+
+        auto server_id = CSteamID();
+        SteamMatchmaking()->GetLobbyGameServer(ctx->client.lobby_id, NULL, NULL,
+                                               &server_id);
+        printf("server ids %llu %llu\n", server_id.ConvertToUint64(),
+               SteamGameServer()->GetSteamID().ConvertToUint64());
+        SteamNetworkingIdentity identity;
+        identity.SetSteamID(server_id);
+        printf("trying to connect to server\n");
+        ctx->client.server_conn =
+            SteamNetworkingSockets()->ConnectP2P(identity, 0, 0, nullptr);
+      }
+    } break;
     default: {
     } break;
     }
@@ -135,6 +192,13 @@ static void client_socket_tick(ZhottSteamContext *ctx) {
       ctx->client.server_conn, msgs, 32);
   for (int i = 0; i < res; i++) {
     SteamNetworkingMessage_t *message = msgs[i];
+
+    printf("client recved: %.*s\n", message->GetSize(),
+           (char *)message->GetData());
+    auto pong = "pong";
+    SteamNetworkingSockets()->SendMessageToConnection(
+        ctx->client.server_conn, pong, strlen(pong),
+        k_nSteamNetworkingSend_Reliable, NULL);
 
     message->Release();
     message = nullptr;
