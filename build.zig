@@ -1,7 +1,9 @@
 const std = @import("std");
 
-const compile_commands_flags = &[_][]const u8{ "-gen-cdb-fragment-path", ".cache/cdb" };
 const win_export = "__declspec(dllexport)";
+const compile_commands_flags = &[_][]const u8{ "-gen-cdb-fragment-path", ".cache/cdb" };
+
+const Flags = std.ArrayList([]const u8);
 
 fn compile_commands_step(b: *std.Build, v: struct {
     cdb_dir: []const u8,
@@ -47,7 +49,8 @@ fn imgui_step(b: *std.Build, v: struct {
     vulkan_headers: *std.Build.Dependency,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-}) struct { generated: *std.Build.Step.WriteFile, lib: *std.Build.Step.Compile } {
+    alloc: std.mem.Allocator,
+}) !struct { generated: *std.Build.Step.WriteFile, lib: *std.Build.Step.Compile } {
     const is_windows = v.target.result.os.tag == .windows;
     const dear = v.dear.path("dear_bindings.py");
 
@@ -85,10 +88,12 @@ fn imgui_step(b: *std.Build, v: struct {
     dcimgui_vulkan.setCwd(dcimgui_generated.getDirectory());
     cimgui.step.dependOn(&dcimgui_vulkan.step);
 
-    const flags = &[_][]const u8{
-        if (is_windows) "-DCIMGUI_API=" ++ win_export else "",
-        if (is_windows) "-DCIMGUI_IMPL_API=" ++ win_export else "",
-    };
+    var flags = Flags.init(v.alloc);
+    if (is_windows) try flags.appendSlice(&.{
+        "-DCIMGUI_API=" ++ win_export,
+        "-DCIMGUI_IMPL_API=" ++ win_export,
+    });
+    const owned_flags = try flags.toOwnedSlice();
 
     if (is_windows) {
         cimgui.addIncludePath(b.path("./zig-out/vendor/include"));
@@ -103,12 +108,12 @@ fn imgui_step(b: *std.Build, v: struct {
         "imgui_demo.cpp",
         "backends/imgui_impl_glfw.cpp",
         "backends/imgui_impl_vulkan.cpp",
-    }, .flags = flags });
+    }, .flags = owned_flags });
     cimgui.addCSourceFiles(.{ .root = dcimgui_generated.getDirectory(), .files = &[_][]const u8{
         "dcimgui.cpp",
         "dcimgui_impl_glfw.cpp",
         "dcimgui_impl_vulkan.cpp",
-    }, .flags = flags });
+    }, .flags = owned_flags });
     cimgui.addIncludePath(v.imgui.path("./"));
     cimgui.addIncludePath(v.imgui.path("./backends"));
     cimgui.addIncludePath(v.vulkan_headers.path("./include"));
@@ -161,24 +166,29 @@ fn jolt_step(b: *std.Build, v: struct {
         try files.append(try v.alloc.dupe(u8, f.path));
     }
 
+    var flags = Flags.init(v.alloc);
+    try flags.appendSlice(compile_commands_flags);
+    try flags.appendSlice(&[_][]const u8{
+        "-std=c++17",
+        "-fno-exceptions",
+        "-fno-sanitize=undefined",
+        "-fno-access-control",
+        "-fno-rtti",
+    });
+    try flags.appendSlice(&[_][]const u8{
+        "-DJPH_SHARED_LIBRARY",
+        "-DJPH_BUILD_SHARED_LIBRARY",
+    });
+    if (is_windows) try flags.append("-DJPH_EXPORT=" ++ win_export);
+    if (jolt_options.enable_cross_platform_determinism) try flags.append("-DJPH_CROSS_PLATFORM_DETERMINISTIC");
+    if (jolt_options.enable_debug_renderer) try flags.append("-DJPH_DEBUG_RENDERER");
+    if (jolt_options.use_double_precision) try flags.append("-DJPH_DOUBLE_PRECISION");
+    if (jolt_options.enable_asserts) try flags.append("-DJPH_ENABLE_ASSERTS");
+
     jolt.addIncludePath(v.jolt.path("./"));
     jolt.addCSourceFiles(.{
         .root = v.jolt.path("./Jolt"),
-        .flags = &[_][]const u8{
-            "-std=c++17",
-            "-fno-exceptions",
-            "-fno-sanitize=undefined",
-            "-fno-access-control",
-            "-fno-rtti",
-
-            "-DJPH_SHARED_LIBRARY",
-            "-DJPH_BUILD_SHARED_LIBRARY",
-            if (is_windows) "-DJPH_EXPORT=" ++ win_export else "",
-            if (jolt_options.enable_cross_platform_determinism) "-DJPH_CROSS_PLATFORM_DETERMINISTIC" else "",
-            if (jolt_options.enable_debug_renderer) "-DJPH_DEBUG_RENDERER" else "",
-            if (jolt_options.use_double_precision) "-DJPH_DOUBLE_PRECISION" else "",
-            if (jolt_options.enable_asserts) "-DJPH_ENABLE_ASSERTS" else "",
-        } ++ compile_commands_flags,
+        .flags = try flags.toOwnedSlice(),
         .files = files.items,
     });
 
@@ -197,6 +207,7 @@ const CompileMode = enum {
 fn step(b: *std.Build, v: struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    alloc: std.mem.Allocator,
     mode: CompileMode,
     vulkan_zig: *std.Build.Module,
     cimgui: *std.Build.Step.Compile,
@@ -207,7 +218,7 @@ fn step(b: *std.Build, v: struct {
     jolt_dep: *std.Build.Dependency,
     stb_dep: *std.Build.Dependency,
     steamworks_dep: *std.Build.Dependency,
-}) *std.Build.Step.Compile {
+}) !*std.Build.Step.Compile {
     const is_windows = v.target.result.os.tag == .windows;
 
     // see b.addSharedLibrary()
@@ -270,6 +281,9 @@ fn step(b: *std.Build, v: struct {
                 compile_step.linkSystemLibrary("steam_api");
             }
 
+            var steam_flags = Flags.init(v.alloc);
+            try steam_flags.appendSlice(compile_commands_flags);
+            try steam_flags.append("-Wno-invalid-offsetof");
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src/steamworks"),
                 .files = &[_][]const u8{
@@ -277,11 +291,7 @@ fn step(b: *std.Build, v: struct {
                     "server.cpp",
                     "client.cpp",
                 },
-                .flags = &[_][]const u8{
-                    "-Wno-invalid-offsetof",
-                    // "-fno-exceptions",
-                    // "-fno-rtti",
-                } ++ compile_commands_flags,
+                .flags = try steam_flags.toOwnedSlice(),
             });
 
             const files = b.addWriteFiles();
@@ -340,22 +350,20 @@ fn step(b: *std.Build, v: struct {
                 compile_step.addObjectFile(b.path("./zig-out/lib/libjolt.so"));
             }
 
+            var jolt_flags = Flags.init(v.alloc);
+            try jolt_flags.appendSlice(compile_commands_flags);
+            try jolt_flags.appendSlice(&[_][]const u8{
+                "-std=c++17",
+                "-fno-exceptions",
+                "-fno-sanitize=undefined",
+                "-fno-access-control",
+                "-fno-rtti",
+            });
+            try jolt_flags.append("-DJPH_SHARED_LIBRARY");
+            if (is_windows) try jolt_flags.append("-DJPH_EXPORT=" ++ win_export);
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
-                .flags = &[_][]const u8{
-                    "-std=c++17",
-                    "-fno-exceptions",
-                    "-fno-sanitize=undefined",
-                    "-fno-access-control",
-                    "-fno-rtti",
-                    if (is_windows) "" else "-Werror",
-                    if (is_windows) "" else "-Wall",
-                    if (is_windows) "" else "-Wno-unused-variable",
-                    if (is_windows) "" else "-Wno-unused-function",
-
-                    "-DJPH_SHARED_LIBRARY",
-                    if (is_windows) "-DJPH_EXPORT=" ++ win_export else "",
-                } ++ compile_commands_flags,
+                .flags = try jolt_flags.toOwnedSlice(),
                 .files = &[_][]const u8{
                     "jolt/c.cpp",
                     "jolt/extensions.cpp",
@@ -397,12 +405,13 @@ pub fn build(b: *std.Build) !void {
     const vulkan = vulkan_step(b, .{
         .vulkan_headers = vulkan_headers,
     });
-    const libimgui = imgui_step(b, .{
+    const libimgui = try imgui_step(b, .{
         .dear = b.dependency("dear_bindings", .{}),
         .imgui = imgui,
         .vulkan_headers = vulkan_headers,
         .target = target,
         .optimize = optimize,
+        .alloc = alloc,
     });
     const libjolt = try jolt_step(b, .{
         .jolt = jolt,
@@ -418,9 +427,10 @@ pub fn build(b: *std.Build) !void {
     // run this after building everything
     compile_commands.step.dependOn(b.getInstallStep());
 
-    const exe = step(b, .{
+    const exe = try step(b, .{
         .target = target,
         .optimize = optimize,
+        .alloc = alloc,
         .mode = .exe,
         .vulkan_zig = vulkan.mod,
         .imgui_dep = imgui,
@@ -432,9 +442,10 @@ pub fn build(b: *std.Build) !void {
         .stb_dep = stb,
         .steamworks_dep = steamworks,
     });
-    const hotlib = step(b, .{
+    const hotlib = try step(b, .{
         .target = target,
         .optimize = optimize,
+        .alloc = alloc,
         .mode = .hotlib,
         .vulkan_zig = vulkan.mod,
         .imgui_dep = imgui,
@@ -446,9 +457,10 @@ pub fn build(b: *std.Build) !void {
         .stb_dep = stb,
         .steamworks_dep = steamworks,
     });
-    const hotexe = step(b, .{
+    const hotexe = try step(b, .{
         .target = target,
         .optimize = optimize,
+        .alloc = alloc,
         .mode = .hotexe,
         .vulkan_zig = vulkan.mod,
         .imgui_dep = imgui,
