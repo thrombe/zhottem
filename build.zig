@@ -2,6 +2,7 @@ const std = @import("std");
 
 const win_export = "__declspec(dllexport)";
 const compile_commands_flags = &[_][]const u8{ "-gen-cdb-fragment-path", ".cache/cdb" };
+const strict_cxx_flags = &[_][]const u8{ "-Werror", "-Wall", "-Wno-unused-variable", "-Wno-unused-function" };
 
 const Flags = std.ArrayList([]const u8);
 
@@ -284,6 +285,7 @@ fn step(b: *std.Build, v: struct {
             var steam_flags = Flags.init(v.alloc);
             try steam_flags.appendSlice(compile_commands_flags);
             try steam_flags.append("-Wno-invalid-offsetof");
+            if (!is_windows) try steam_flags.appendSlice(strict_cxx_flags);
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src/steamworks"),
                 .files = &[_][]const u8{
@@ -361,6 +363,7 @@ fn step(b: *std.Build, v: struct {
             });
             try jolt_flags.append("-DJPH_SHARED_LIBRARY");
             if (is_windows) try jolt_flags.append("-DJPH_EXPORT=" ++ win_export);
+            if (!is_windows) try jolt_flags.appendSlice(strict_cxx_flags);
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
                 .flags = try jolt_flags.toOwnedSlice(),

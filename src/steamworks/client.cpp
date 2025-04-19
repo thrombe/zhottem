@@ -25,10 +25,6 @@ CALLCONV_C(void) client_deinit(void *_ctx) {
 }
 
 static void client_callback_tick(ZhottSteamContext *ctx) {
-  // TODO: client gotta listen to SteamNetConnectionStatusChangedCallback_t
-  // to know if server accepted or rejected the connection
-  // SteamNetConnectionStatusChangedCallback_t t;
-
   HSteamPipe hSteamPipe = SteamAPI_GetHSteamPipe();
   SteamAPI_ManualDispatch_RunFrame(hSteamPipe);
   CallbackMsg_t callback;

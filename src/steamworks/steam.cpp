@@ -44,7 +44,7 @@ CALLCONV_C(void *) steam_init() {
   // settings for the app
 
   auto ctx = (ZhottSteamContext *)zalloc(sizeof(ZhottSteamContext));
-  *ctx = {0};
+  *ctx = {};
   return ctx;
 }
 
