@@ -93,20 +93,34 @@ const Assets = struct {
     well_gltf: assets_mod.Gltf,
     well: assets_mod.Model,
 
+    scenes_gltf: assets_mod.Gltf,
+    castle: assets_mod.Model,
+
     cube: assets_mod.Mesh,
     plane: assets_mod.Mesh,
+    bunny_mesh: assets_mod.Mesh,
     // toilet: assets_mod.Mesh,
 
     fn init() !@This() {
-        var bunny_glb = try assets_mod.Gltf.parse_glb("./assets/dance.glb");
+        // std.debug.print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", .{});
+        // var scenes = try assets_mod.Gltf.parse_glb("./assets/exports/scenes.glb");
+        // errdefer scenes.deinit();
+
+        // if (true) return error.oof_m8;
+
+        var bunny_glb = try assets_mod.Gltf.parse_glb("./assets/tmp/dance.glb");
         errdefer bunny_glb.deinit();
         const bunny = try bunny_glb.to_model("Cube.015", "metarig");
 
-        var well_glb = try assets_mod.Gltf.parse_glb("./assets/well.glb");
+        var well_glb = try assets_mod.Gltf.parse_glb("./assets/tmp/well.glb");
         errdefer well_glb.deinit();
         const well = try well_glb.to_model("well", null);
 
-        // var toilet = try assets_mod.ObjParser.mesh_from_file("./assets/object.obj");
+        var scenes_glb = try assets_mod.Gltf.parse_glb("./assets/exports/scenes.glb");
+        errdefer scenes_glb.deinit();
+        const castle = try scenes_glb.to_model("castle", null);
+
+        // var toilet = try assets_mod.ObjParser.mesh_from_file("./assets/tmp/toilet.obj");
         // errdefer toilet.deinit();
 
         var cube = try assets_mod.Mesh.cube();
@@ -115,7 +129,7 @@ const Assets = struct {
         var plane = try assets_mod.Mesh.plane();
         errdefer plane.deinit();
 
-        var sphere_gltf = try assets_mod.Gltf.parse_glb("./assets/sphere.glb");
+        var sphere_gltf = try assets_mod.Gltf.parse_glb("./assets/tmp/sphere.glb");
         errdefer sphere_gltf.deinit();
         const sphere = try sphere_gltf.to_model("Icosphere", null);
 
@@ -129,8 +143,12 @@ const Assets = struct {
             .well_gltf = well_glb,
             .well = well,
 
+            .scenes_gltf = scenes_glb,
+            .castle = castle,
+
             .cube = cube,
             .plane = plane,
+            .bunny_mesh = try bunny.mesh.boneless(),
             // .toilet = toilet,
         };
     }
@@ -451,6 +469,20 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .instances = bunny_instance_handle,
     });
 
+    const static_bunny_mesh_handle = try cpu.add_mesh(&assets.bunny_mesh);
+    const static_bunny_instance_handle = try cpu.batch_reserve(10);
+    try instance_manager.instances.append(.{
+        .mesh = static_bunny_mesh_handle,
+        .instances = static_bunny_instance_handle,
+    });
+
+    const castle_mesh_handle = try cpu.add_mesh(&assets.castle.mesh);
+    const castle_instance_handle = try cpu.batch_reserve(10);
+    try instance_manager.instances.append(.{
+        .mesh = castle_mesh_handle,
+        .instances = castle_instance_handle,
+    });
+
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
 
@@ -478,94 +510,94 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    t = .{
-        .pos = .{ .y = -3 },
-        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("floor"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = plane_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.rotation,
-        }),
-    });
-    t = .{
-        .pos = .{ .y = 50, .x = 50 },
-        .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
-        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("wall"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = plane_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
-    t = .{
-        .pos = .{ .y = 50, .x = -50 },
-        .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
-        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("wall"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = plane_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
-    t = .{
-        .pos = .{ .y = 50, .z = 50 },
-        .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
-        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("wall"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = plane_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
-    t = .{
-        .pos = .{ .y = 50, .z = -50 },
-        .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
-        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("wall"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = plane_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
+    // t = .{
+    //     .pos = .{ .y = -3 },
+    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    // };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("floor"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = plane_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //     }),
+    // });
+    // t = .{
+    //     .pos = .{ .y = 50, .x = 50 },
+    //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
+    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    // };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("wall"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = plane_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
+    // t = .{
+    //     .pos = .{ .y = 50, .x = -50 },
+    //     .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
+    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    // };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("wall"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = plane_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
+    // t = .{
+    //     .pos = .{ .y = 50, .z = 50 },
+    //     .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
+    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    // };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("wall"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = plane_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
+    // t = .{
+    //     .pos = .{ .y = 50, .z = -50 },
+    //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
+    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    // };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("wall"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = plane_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
 
     // const object_mesh_handle = try cpu.add_mesh(&object);
     // const object_instance_handle = try cpu.batch_reserve(1);
@@ -590,86 +622,86 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     });
     // }
 
-    t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("block"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = cube_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
+    // t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("block"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = cube_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
 
-    t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("block"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = cube_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
+    // t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("block"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = cube_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
 
-    const bones = try allocator.alloc(math.Mat4x4, assets.bunny.bones.len);
-    // errdefer allocator.free(bones);
-    const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.bunny.bones.len);
-    // errdefer allocator.free(indices);
-    @memset(bones, .{});
-    @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
-    t = C.Transform{ .pos = .{ .x = 20, .y = 5 } };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("dance"),
-        t,
-        C.LastTransform{ .t = t },
-        C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
-        try world.phy.add_body(.{
-            .shape = .{ .mesh = .{
-                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.bunny.mesh.faces)),
-                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.bunny.mesh.vertices)),
-            } },
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-            .motion_type = .static,
-        }),
-    });
+    // const bones = try allocator.alloc(math.Mat4x4, assets.bunny.bones.len);
+    // // errdefer allocator.free(bones);
+    // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.bunny.bones.len);
+    // // errdefer allocator.free(indices);
+    // @memset(bones, .{});
+    // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
+    // t = C.Transform{ .pos = .{ .x = 20, .y = 5 } };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("dance"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     // C.StaticRender{ .mesh = static_bunny_mesh_handle },
+    //     C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .mesh = .{
+    //             .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.bunny.mesh.faces)),
+    //             .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.bunny.mesh.vertices)),
+    //         } },
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //         .motion_type = .static,
+    //     }),
+    // });
 
-    t = C.Transform{ .pos = .{ .z = 4, .y = 50 } };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("ball"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = sphere_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .mesh = .{
-                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.sphere.mesh.faces)),
-                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.sphere.mesh.vertices)),
-            } },
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-        }),
-    });
+    // t = C.Transform{ .pos = .{ .z = 4, .y = 50 } };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("ball"),
+    //     t,
+    //     C.LastTransform{ .t = t },
+    //     C.StaticRender{ .mesh = sphere_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .mesh = .{
+    //             .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.sphere.mesh.faces)),
+    //             .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.sphere.mesh.vertices)),
+    //         } },
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //         .pos = t.pos.xyz(),
+    //     }),
+    // });
 
-    t = C.Transform{ .pos = .{ .z = 16, .y = 3 } };
+    t = C.Transform{ .pos = .{ .z = 0, .y = 0 } };
     _ = try cmdbuf.insert(.{
         try C.Name.from("castle"),
         t,
         C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = well_mesh_handle },
-        // C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
+        C.StaticRender{ .mesh = castle_mesh_handle },
         try world.phy.add_body(.{
             .shape = .{ .mesh = .{
-                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.well.mesh.faces)),
-                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.well.mesh.vertices)),
+                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.castle.mesh.faces)),
+                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.castle.mesh.vertices)),
             } },
             .friction = 0.4,
             .rotation = t.rotation,
