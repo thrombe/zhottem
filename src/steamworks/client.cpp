@@ -22,6 +22,12 @@ CALLCONV_C(void) client_init(void *_ctx) {
 CALLCONV_C(void) client_deinit(void *_ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->client.initialized = false;
+
+  if (ctx->client.server_conn) {
+    SteamNetworkingSockets()->CloseConnection(
+        ctx->client.server_conn, k_ESteamNetConnectionEnd_AppException_Generic,
+        NULL, false);
+  }
 }
 
 static void client_callback_tick(ZhottSteamContext *ctx) {
