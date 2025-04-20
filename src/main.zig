@@ -164,13 +164,6 @@ pub fn main() !void {
                 utils_mod.dump_error(e);
             };
 
-            @import("steamworks.zig").testfn() catch |e| {
-                switch (e) {
-                    // error.ErrorInitializingSteam => {},
-                    else => return e,
-                }
-            };
-
             while (try app.tick()) {}
         },
         .hotexe => {

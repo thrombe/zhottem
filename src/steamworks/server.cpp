@@ -1,7 +1,7 @@
 
 #include "steamworks/impl.h"
 
-CALLCONV_C(void) server_init(void *_ctx) {
+CALLCONV_C(bool) server_init(void *_ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->server = {
       .version = "1.0.0.0",
@@ -19,7 +19,7 @@ CALLCONV_C(void) server_init(void *_ctx) {
                              server->version,
                              &errMsg) != k_ESteamAPIInitResult_OK) {
     printf("SteamGameServer_Init call failed: %s\n", errMsg);
-    return;
+    return false;
   }
   server->initialized = true;
 
@@ -39,6 +39,7 @@ CALLCONV_C(void) server_init(void *_ctx) {
   server->listen_socket =
       SteamGameServerNetworkingSockets()->CreateListenSocketP2P(0, 0, nullptr);
   server->poll_group = SteamGameServerNetworkingSockets()->CreatePollGroup();
+  return true;
 }
 
 CALLCONV_C(void) server_deinit(void *_ctx) {

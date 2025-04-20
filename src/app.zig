@@ -47,6 +47,9 @@ const ResourceManager = resources_mod.ResourceManager;
 const InstanceManager = resources_mod.InstanceManager;
 const InstanceAllocator = resources_mod.InstanceAllocator;
 
+const steamworks_mod = @import("steamworks.zig");
+const NetworkingContext = steamworks_mod.NetworkingContext;
+
 const C = struct {
     usingnamespace Components;
     const BodyId = world_mod.Jphysics.BodyId;
@@ -74,8 +77,13 @@ command_pool: vk.CommandPool,
 stages: ShaderStageManager,
 recorder: AudioRecorder,
 audio: AudioPlayer,
+
 socket: Socket,
 server_addr: std.net.Address,
+
+net_ctx: NetworkingContext,
+net_server: ?*NetworkingContext.Server = null,
+net_client: *NetworkingContext.Client,
 
 texture_img: utils.StbImage.UnormImage,
 texture: Image,
@@ -405,6 +413,17 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
     errdefer world.deinit();
+
+    // start net context early
+    var net_ctx = try NetworkingContext.init(.{});
+    errdefer net_ctx.deinit();
+    const net_server: ?*NetworkingContext.Server = net_ctx.server() catch |e| blk: {
+        utils.dump_error(e);
+        break :blk null;
+    };
+    errdefer if (net_server) |s| s.deinit();
+    const net_client = try net_ctx.client();
+    errdefer net_client.deinit();
 
     var image = try utils.StbImage.from_file("./assets/images/mandlebulb.png", .unorm);
     errdefer image.deinit();
@@ -778,8 +797,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .stages = stages,
         .recorder = recorder,
         .audio = audio,
+
         .socket = socket,
         .server_addr = addr,
+        .net_ctx = net_ctx,
+        .net_server = net_server,
+        .net_client = net_client,
 
         .texture_img = image,
         .texture = gpu_img,
@@ -815,9 +838,13 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.stages.deinit();
     defer self.recorder.deinit() catch |e| utils.dump_error(e);
     defer self.audio.deinit() catch |e| utils.dump_error(e);
-    defer self.socket.deinit();
     defer self.texture_img.deinit();
     defer self.texture.deinit(device);
+
+    defer self.socket.deinit();
+    defer self.net_ctx.deinit();
+    defer if (self.net_server) |s| s.deinit();
+    defer self.net_client.deinit();
 }
 
 pub fn pre_reload(self: *@This()) !void {

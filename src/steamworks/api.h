@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifndef CALLCONV_C
 #define CALLCONV_C(typ) typ
@@ -15,7 +16,7 @@ CALLCONV_C(void) zphysicsFree(void *ptr);
 typedef void *ZhottSteamCtx;
 CALLCONV_C(ZhottSteamCtx) steam_init();
 CALLCONV_C(void) steam_deinit(ZhottSteamCtx);
-CALLCONV_C(void) server_init(ZhottSteamCtx);
+CALLCONV_C(bool) server_init(ZhottSteamCtx);
 CALLCONV_C(void) server_deinit(ZhottSteamCtx);
 CALLCONV_C(void) server_tick(ZhottSteamCtx);
 CALLCONV_C(void) client_init(ZhottSteamCtx);
