@@ -176,7 +176,7 @@ CALLCONV_C(void) server_tick(ZhottSteamCtx _ctx) {
 }
 
 CALLCONV_C(void)
-server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, OutgoingMessage msg) {
+server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, uint32_t from_conn, OutgoingMessage msg) {
   auto ctx = (ZhottSteamContext *)_ctx;
 
   uint32_t flags = 0;
@@ -191,9 +191,9 @@ server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, OutgoingMessage msg) {
   if (msg.flags.no_delay) {
     flags |= k_nSteamNetworkingSend_NoDelay;
   }
-  auto buf = (uint8_t*)zalloc(sizeof(ClientMessageHeader) + msg.len);
-  *((ClientMessageHeader*)buf) = ClientMessageHeader{
-      .conn = conn,
+  auto buf = (uint8_t *)zalloc(sizeof(ClientMessageHeader) + msg.len);
+  *((ClientMessageHeader *)buf) = ClientMessageHeader{
+      .conn = from_conn,
       .user_steam_id = 0,
       .message_number = 0,
   };

@@ -138,7 +138,9 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
           (SteamNetConnectionStatusChangedCallback_t *)callback.m_pubParam;
       printf("client connection callback old: %d new: %d\n", event->m_eOldState,
              event->m_info.m_eState);
-      if (event->m_eOldState == k_ESteamNetworkingConnectionState_Connecting &&
+      if ((event->m_eOldState == k_ESteamNetworkingConnectionState_Connecting ||
+           event->m_eOldState ==
+               k_ESteamNetworkingConnectionState_FindingRoute) &&
           event->m_info.m_eState ==
               k_ESteamNetworkingConnectionState_Connected) {
         // connected successfully to remote
@@ -198,8 +200,8 @@ static void client_socket_tick(ZhottSteamContext *ctx) {
   for (int i = 0; i < res; i++) {
     SteamNetworkingMessage_t *message = msgs[i];
 
-    uint8_t* buf = (uint8_t *)message->GetData();
-    auto header = (ClientMessageHeader*)buf;
+    uint8_t *buf = (uint8_t *)message->GetData();
+    auto header = (ClientMessageHeader *)buf;
 
     auto callbacks = ctx->client.callbacks;
     callbacks.msg_recv(
@@ -230,15 +232,15 @@ CALLCONV_C(void) client_msg_send(ZhottSteamCtx _ctx, OutgoingMessage msg) {
 
   uint32_t flags = 0;
   if (msg.flags.reliable) {
-      flags |= k_nSteamNetworkingSend_Reliable;
+    flags = k_nSteamNetworkingSend_Reliable;
   } else {
-      flags |= k_nSteamNetworkingSend_Unreliable;
+    flags = k_nSteamNetworkingSend_Unreliable;
   }
   if (msg.flags.force_flush) {
-      flags |= k_nSteamNetworkingSend_NoNagle;
+    flags |= k_nSteamNetworkingSend_NoNagle;
   }
   if (msg.flags.no_delay) {
-      flags |= k_nSteamNetworkingSend_NoDelay;
+    flags |= k_nSteamNetworkingSend_NoDelay;
   }
   auto _ = SteamNetworkingSockets()->SendMessageToConnection(
       ctx->client.server_conn, msg.data, msg.len, flags, NULL);
@@ -246,5 +248,5 @@ CALLCONV_C(void) client_msg_send(ZhottSteamCtx _ctx, OutgoingMessage msg) {
 
 CALLCONV_C(bool) client_is_connected(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
-    return ctx->client.connected;
+  return ctx->client.connected;
 }

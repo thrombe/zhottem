@@ -779,14 +779,14 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             if (s.messages.try_recv()) |msg| {
                 switch (msg.event) {
                     .join => {
-                        s.send_message(msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } });
+                        s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } });
                     },
                     else => @panic("unexpected message"),
                 }
             }
         }
         std.Thread.sleep(std.time.ns_per_ms * 50);
-        net_ctx.tick();
+        try net_ctx.tick();
     }
     std.debug.print("waiting for server message...\n", .{});
 
@@ -796,11 +796,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             player.pid.id = e.id;
             player.pid.conn = msg.conn;
 
-            // net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
-            //     .x = player.transform.pos.x,
-            //     .y = player.transform.pos.y,
-            //     .z = player.transform.pos.z,
-            // } } } });
+            net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
+                .x = player.transform.pos.x,
+                .y = player.transform.pos.y,
+                .z = player.transform.pos.z,
+            } } } });
         },
         else => @panic("unexpected message"),
     }
@@ -1218,6 +1218,7 @@ pub const AppState = struct {
         var pexp = try app.world.ecs.explorer(app.handles.player);
         const camera = pexp.get_component(math.Camera).?;
         const pid = pexp.get_component(C.PlayerId).?;
+        const player_id = pid.id;
 
         {
             var mouse = &input.mouse;
@@ -1282,47 +1283,47 @@ pub const AppState = struct {
 
         {
             app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
-            app.net_ctx.tick();
 
+            try app.net_ctx.tick();
             if (app.net_server) |s| while (s.messages.try_recv()) |e| {
                 switch (e.event) {
                     .join => {
                         self.client_count += 1;
-                        s.send_message(e.conn, .{ .event = .{ .setid = .{ .id = self.client_count } } });
+                        s.send_message(e.conn, 0, .{ .event = .{ .setid = .{ .id = self.client_count } } });
                     },
                     .spawn_player => {
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.Transform });
                         while (it.next()) |p| {
                             // notify new player about all other players.
-                            s.send_message(p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
+                            s.send_message(e.conn, p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
                                 .x = p.t.pos.x,
                                 .y = p.t.pos.y,
                                 .z = p.t.pos.z,
                             } } } });
 
                             // notify other players about this player
-                            s.send_message(e.conn, .{ .event = e.event });
+                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .despawn_player => {
                         // tell everyone this player left
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
-                            s.send_message(p.p.conn, .{ .event = e.event });
+                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .input => {
                         // send this player's inputs to everyone
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
-                            s.send_message(p.p.conn, .{ .event = e.event });
+                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .quit => {
                         // tell everyone to quit themselves
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
-                            s.send_message(p.p.conn, .{ .event = e.event });
+                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .setid => {
@@ -1332,9 +1333,13 @@ pub const AppState = struct {
                 }
             };
 
+            try app.net_ctx.tick();
             while (app.net_client.messages.try_recv()) |e| {
                 switch (e.event) {
                     .spawn_player => |id| {
+                        if (player_id == id.id) {
+                            continue;
+                        }
                         const t = C.Transform{ .pos = .{
                             .x = id.pos.x,
                             .y = id.pos.y,

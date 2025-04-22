@@ -14,7 +14,7 @@ const c = @cImport({
 
 pub const NetworkingContext = struct {
     ctx: *Ctx,
-    thread: std.Thread,
+    thread: ?std.Thread,
 
     const Ctx = struct {
         steam: c.ZhottSteamCtx,
@@ -32,9 +32,9 @@ pub const NetworkingContext = struct {
                     return;
                 }
 
-                // self.tick() catch |e| {
-                //     utils_mod.dump_error(e);
-                // };
+                self.tick() catch |e| {
+                    utils_mod.dump_error(e);
+                };
 
                 std.Thread.sleep(self.options.tick_fps_inv);
             }
@@ -50,6 +50,7 @@ pub const NetworkingContext = struct {
     };
 
     const Options = struct {
+        tick_thread: bool = false,
         tick_fps_inv: u64 = 150,
     };
 
@@ -85,16 +86,24 @@ pub const NetworkingContext = struct {
             .steam = steam,
             .options = options,
         };
-        const thread = try std.Thread.spawn(.{}, Ctx.start, .{ctx});
-        errdefer {
-            _ = ctx.quit.fuse();
-            thread.join();
-        }
 
-        return .{
-            .ctx = ctx,
-            .thread = thread,
-        };
+        if (options.tick_thread) {
+            const thread = try std.Thread.spawn(.{}, Ctx.start, .{ctx});
+            errdefer {
+                _ = ctx.quit.fuse();
+                thread.join();
+            }
+
+            return .{
+                .ctx = ctx,
+                .thread = thread,
+            };
+        } else {
+            return .{
+                .ctx = ctx,
+                .thread = null,
+            };
+        }
     }
 
     pub fn server(self: *@This()) !*Server {
@@ -114,7 +123,7 @@ pub const NetworkingContext = struct {
         defer allocator.destroy(ctx);
 
         _ = ctx.quit.fuse();
-        self.thread.join();
+        if (self.thread) |t| t.join();
 
         ctx.ctx_mutex.lock();
         defer ctx.ctx_mutex.unlock();
@@ -125,10 +134,8 @@ pub const NetworkingContext = struct {
         c.steam_deinit(ctx.steam);
     }
 
-    pub fn tick(self: *@This()) void {
-        self.ctx.tick() catch |e| {
-            utils_mod.dump_error(e);
-        };
+    pub fn tick(self: *@This()) !void {
+        try self.ctx.tick();
     }
 
     pub const Server = struct {
@@ -175,9 +182,9 @@ pub const NetworkingContext = struct {
             }) catch @panic("OOM");
         }
 
-        pub fn send_message(self: *@This(), conn: u32, msg: OutgoingMessage) void {
+        pub fn send_message(self: *@This(), conn: u32, from_conn: u32, msg: OutgoingMessage) void {
             const event = msg.event;
-            c.server_msg_send(self.ctx.steam, conn, .{
+            c.server_msg_send(self.ctx.steam, conn, from_conn, .{
                 .data = @ptrCast(&event),
                 .len = @sizeOf(@TypeOf(msg.event)),
                 .flags = msg.flags,

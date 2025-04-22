@@ -56,7 +56,7 @@ CALLCONV_C(void) steam_deinit(ZhottSteamCtx);
 CALLCONV_C(bool) server_init(ZhottSteamCtx, ServerCallbacks);
 CALLCONV_C(void) server_deinit(ZhottSteamCtx);
 CALLCONV_C(void) server_tick(ZhottSteamCtx);
-CALLCONV_C(void) server_msg_send(ZhottSteamCtx, uint32_t, OutgoingMessage);
+CALLCONV_C(void) server_msg_send(ZhottSteamCtx, uint32_t, uint32_t, OutgoingMessage);
 CALLCONV_C(void) client_init(ZhottSteamCtx, ClientCallbacks);
 CALLCONV_C(void) client_deinit(ZhottSteamCtx);
 CALLCONV_C(void) client_tick(ZhottSteamCtx);
