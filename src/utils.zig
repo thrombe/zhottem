@@ -158,6 +158,12 @@ pub const fspath = struct {
         }
     }
 
+    pub fn cwd_join(alloc: std.mem.Allocator, path: []const u8) ![]const u8 {
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        const pwd = try std.posix.getcwd(&buf);
+        return try std.fs.path.join(alloc, &[_][]const u8{ pwd, path });
+    }
+
     pub fn replace_sep(path: []const u8) ![]const u8 {
         return try std.mem.replaceOwned(
             u8,
@@ -602,8 +608,10 @@ pub const StbImage = struct {
     pub const HalfImage = PixelType.half.img_typ();
     pub const UnormImage = PixelType.unorm.img_typ();
 
-    pub fn from_file(path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
-        var file = try std.fs.cwd().openFile(path, .{});
+    pub fn from_file(_path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+        const path = try fspath.cwd_join(allocator.*, _path);
+        defer allocator.free(path);
+        var file = try std.fs.openFileAbsolute(path, .{});
         defer file.close();
 
         const buf = try file.readToEndAlloc(allocator.*, 50 * 1000 * 1000);
@@ -749,8 +757,10 @@ pub const ImageMagick = struct {
     pub const HalfImage = PixelType.half.img_typ();
     pub const UnormImage = PixelType.unorm.img_typ();
 
-    pub fn from_file(path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
-        var file = try std.fs.cwd().openFile(path, .{});
+    pub fn from_file(_path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+        const path = try fspath.cwd_join(allocator.*, _path);
+        defer allocator.free(path);
+        var file = try std.fs.openFileAbsolute(path, .{});
         defer file.close();
 
         const buf = try file.readToEndAlloc(allocator.*, 50 * 1000 * 1000);
@@ -1063,8 +1073,10 @@ pub const ShaderUtils = struct {
             , .{});
         }
 
-        pub fn dump_shader(self: *@This(), path: []const u8) !void {
-            const file = try std.fs.cwd().createFile(path, .{});
+        pub fn dump_shader(self: *@This(), _path: []const u8) !void {
+            const path = try fspath.cwd_join(allocator.*, _path);
+            defer allocator.free(path);
+            var file = try std.fs.createFileAbsolute(path, .{});
             defer file.close();
 
             try file.writeAll(self.shader.items);
@@ -1444,7 +1456,7 @@ pub const Glslc = struct {
                 args.deinit();
             }
             if (builtin.os.tag == .windows) {
-                try args.append(try alloc.dupe(u8, "zig-out/bin/glslc.exe"));
+                try args.append(try fspath.cwd_join(alloc, "zig-out/bin/glslc.exe"));
             } else {
                 try args.append(try alloc.dupe(u8, "glslc"));
             }

@@ -70,7 +70,9 @@ pub const NetworkingContext = struct {
     };
 
     pub fn init(options: Options) !@This() {
-        std.fs.cwd().access("./steam_appid.txt", .{}) catch |e| {
+        const path = try utils_mod.fspath.cwd_join(allocator.*, "steam_appid.txt");
+        defer allocator.free(path);
+        std.fs.accessAbsolute(path, .{}) catch |e| {
             switch (e) {
                 error.FileNotFound => return error.SteamAppIdTxtNotFound,
                 else => return e,

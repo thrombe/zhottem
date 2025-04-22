@@ -105,24 +105,24 @@ const Assets = struct {
 
     fn init() !@This() {
         // std.debug.print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", .{});
-        // var scenes = try assets_mod.Gltf.parse_glb("./assets/exports/scenes.glb");
+        // var scenes = try assets_mod.Gltf.parse_glb("assets/exports/scenes.glb");
         // errdefer scenes.deinit();
 
         // if (true) return error.oof_m8;
 
-        var bunny_glb = try assets_mod.Gltf.parse_glb("./assets/tmp/dance.glb");
+        var bunny_glb = try assets_mod.Gltf.parse_glb("assets/tmp/dance.glb");
         errdefer bunny_glb.deinit();
         const bunny = try bunny_glb.to_model("Cube.015", "metarig");
 
-        var well_glb = try assets_mod.Gltf.parse_glb("./assets/tmp/well.glb");
+        var well_glb = try assets_mod.Gltf.parse_glb("assets/tmp/well.glb");
         errdefer well_glb.deinit();
         const well = try well_glb.to_model("well", null);
 
-        var scenes_glb = try assets_mod.Gltf.parse_glb("./assets/exports/scenes.glb");
+        var scenes_glb = try assets_mod.Gltf.parse_glb("assets/exports/scenes.glb");
         errdefer scenes_glb.deinit();
         const castle = try scenes_glb.to_model("castle", null);
 
-        // var toilet = try assets_mod.ObjParser.mesh_from_file("./assets/tmp/toilet.obj");
+        // var toilet = try assets_mod.ObjParser.mesh_from_file("assets/tmp/toilet.obj");
         // errdefer toilet.deinit();
 
         var cube = try assets_mod.Mesh.cube();
@@ -131,7 +131,7 @@ const Assets = struct {
         var plane = try assets_mod.Mesh.plane();
         errdefer plane.deinit();
 
-        var sphere_gltf = try assets_mod.Gltf.parse_glb("./assets/tmp/sphere.glb");
+        var sphere_gltf = try assets_mod.Gltf.parse_glb("assets/tmp/sphere.glb");
         errdefer sphere_gltf.deinit();
         const sphere = try sphere_gltf.to_model("Icosphere", null);
 
@@ -185,13 +185,13 @@ const Handles = struct {
 
         fn init(cpu: *ResourceManager.CpuResources) !@This() {
             return .{
-                .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/boom.wav")),
-                .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/bruh.wav")),
-                .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/long-reload.wav")),
-                .short_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/short-reload.wav")),
-                .scream1 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream1.wav")),
-                .scream2 = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/scream2.wav")),
-                .shot = try cpu.add_audio(try assets_mod.Wav.parse_wav("./assets/audio/shot.wav")),
+                .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/boom.wav")),
+                .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/bruh.wav")),
+                .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/long-reload.wav")),
+                .short_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/short-reload.wav")),
+                .scream1 = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/scream1.wav")),
+                .scream2 = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/scream2.wav")),
+                .shot = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/shot.wav")),
             };
         }
     };
@@ -419,7 +419,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const net_client = try net_ctx.client();
     errdefer net_client.deinit();
 
-    var image = try utils.StbImage.from_file("./assets/images/mandlebulb.png", .unorm);
+    var image = try utils.StbImage.from_file("assets/images/mandlebulb.png", .unorm);
     errdefer image.deinit();
     const slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(image.buffer));
 
@@ -1242,7 +1242,7 @@ pub const AppState = struct {
                     &engine.graphics,
                     app.command_pool,
                     window.extent,
-                    "./images",
+                    "images",
                 );
             }
 
@@ -1842,7 +1842,7 @@ pub const AppState = struct {
             try gen.add_bind_enum(resources_mod.UniformBinds);
             try gen.add_bind_enum(resources_mod.VertexBinds);
             try gen.add_bind_enum(resources_mod.VertexInputLocations);
-            try gen.dump_shader("./src/uniforms.glsl");
+            try gen.dump_shader("src/uniforms.glsl");
         }
 
         @memcpy(self.uniform_buffer, ubo_buffer);

@@ -1073,10 +1073,13 @@ pub const Gltf = struct {
         head: usize = 0,
         alloc: std.mem.Allocator,
 
-        fn load(alloc: std.mem.Allocator, path: []const u8) !@This() {
-            const buf = try std.fs.cwd().readFileAllocOptions(
+        fn load(alloc: std.mem.Allocator, _path: []const u8) !@This() {
+            const path = try utils.fspath.cwd_join(allocator.*, _path);
+            defer allocator.free(path);
+            var file = try std.fs.openFileAbsolute(path, .{});
+            defer file.close();
+            const buf = try file.readToEndAllocOptions(
                 alloc,
-                path,
                 100 * 1000 * 1000,
                 null,
                 8,
@@ -1203,10 +1206,13 @@ pub const Wav = struct {
         buf: []const u8,
         head: usize = 0,
 
-        fn load(path: []const u8) !@This() {
-            const buf = try std.fs.cwd().readFileAllocOptions(
+        fn load(_path: []const u8) !@This() {
+            const path = try utils.fspath.cwd_join(allocator.*, _path);
+            defer allocator.free(path);
+            var file = try std.fs.openFileAbsolute(path, .{});
+            defer file.close();
+            const buf = try file.readToEndAllocOptions(
                 allocator.*,
-                path,
                 100 * 1000 * 1000,
                 null,
                 8,
@@ -1282,9 +1288,10 @@ pub const TypeSchemaGenerator = struct {
         self.buf.deinit();
     }
 
-    pub fn write_to_file(self: *@This(), path: []const u8) !void {
-        const cwd = std.fs.cwd();
-        const file = try cwd.createFile(path, .{});
+    pub fn write_to_file(self: *@This(), _path: []const u8) !void {
+        const path = try utils.fspath.cwd_join(allocator.*, _path);
+        defer allocator.free(path);
+        var file = try std.fs.createFileAbsolute(path, .{});
         defer file.close();
 
         const w = file.writer();

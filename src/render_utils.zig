@@ -2171,7 +2171,7 @@ pub fn dump_image_to_file(
     ctx: *Engine.VulkanContext,
     pool: vk.CommandPool,
     copy_extent: vk.Extent2D,
-    path: []const u8,
+    _path: []const u8,
 ) !void {
     const buf = blk: {
         const old_layout = image.io.image_layout;
@@ -2214,12 +2214,14 @@ pub fn dump_image_to_file(
     const filename = try std.fmt.allocPrint(allocator.*, "{d}.png", .{ts});
     defer allocator.free(filename);
 
-    try std.fs.cwd().makePath(path);
+    const path = try utils.fspath.cwd_join(allocator.*, _path);
+    defer allocator.free(path);
+    try std.fs.makeDirAbsolute(path);
 
     const joined_path = try std.fs.path.join(allocator.*, &[_][]const u8{ path, filename });
     defer allocator.free(joined_path);
 
-    const file = try std.fs.cwd().createFile(joined_path, .{});
+    const file = try std.fs.createFileAbsolute(joined_path, .{});
     defer file.close();
     try file.writeAll(blob);
 }

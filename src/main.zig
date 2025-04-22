@@ -57,14 +57,12 @@ const HotReloader = struct {
         const libpath = path ++ options.hotlib_name;
         const hot_cache = hotcache_path ++ options.hotlib_name;
 
-        const cwd = std.fs.cwd();
-        try cwd.copyFile(libpath, cwd, hot_cache, .{});
-
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const pwd = try std.posix.getcwd(&buf);
-
-        const hot_lib = try std.fs.path.join(allocator.*, &.{ pwd, hot_cache });
+        const hot_lib = try utils_mod.fspath.cwd_join(allocator.*, hot_cache);
         errdefer allocator.free(hot_lib);
+
+        const hot_lib_src = try utils_mod.fspath.cwd_join(allocator.*, libpath);
+        errdefer allocator.free(hot_lib_src);
+        try std.fs.copyFileAbsolute(hot_lib_src, hot_lib, .{});
 
         var dyn = try std.DynLib.open(hot_lib);
         errdefer dyn.close();
@@ -78,7 +76,7 @@ const HotReloader = struct {
         errdefer fs.deinit();
 
         return .{
-            .libpath = libpath,
+            .libpath = hot_lib_src,
             .path = path,
             .hot_cache = hot_lib,
             .dylib = dyn,
@@ -113,8 +111,7 @@ const HotReloader = struct {
                     std.debug.print("loading: {s}\n", .{new_path});
                     defer self.count += 1;
                     defer allocator.free(new_path);
-                    const cwd = std.fs.cwd();
-                    try cwd.copyFile(self.libpath, cwd, new_path, .{});
+                    try std.fs.copyFileAbsolute(self.libpath, new_path, .{});
 
                     switch (self.vtable.pre_reload(self.app)) {
                         .quit => return false,
@@ -168,8 +165,8 @@ pub fn main() !void {
         },
         .hotexe => {
             var app = try HotReloader.init(
-                if (@import("builtin").target.os.tag == .windows) "./zig-out/bin/" else "./zig-out/lib/",
-                "./zig-out/hot-cache/",
+                if (@import("builtin").target.os.tag == .windows) "zig-out/bin/" else "zig-out/lib/",
+                "zig-out/hot-cache/",
             );
             defer app.deinit();
             while (try app.tick()) {}
