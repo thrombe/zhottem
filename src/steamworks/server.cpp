@@ -1,7 +1,9 @@
 
+#include <cstring>
+
 #include "steamworks/impl.h"
 
-CALLCONV_C(bool) server_init(void *_ctx) {
+CALLCONV_C(bool) server_init(ZhottSteamCtx _ctx, ServerCallbacks callbacks) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->server = {
       .version = "1.0.0.0",
@@ -10,6 +12,7 @@ CALLCONV_C(bool) server_init(void *_ctx) {
       .description = "zhottem test game",
       .port = 27015,
       .updater_port = 27016,
+      .callbacks = callbacks,
   };
   auto server = &ctx->server;
 
@@ -42,7 +45,7 @@ CALLCONV_C(bool) server_init(void *_ctx) {
   return true;
 }
 
-CALLCONV_C(void) server_deinit(void *_ctx) {
+CALLCONV_C(void) server_deinit(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->server.initialized = false;
 
@@ -73,7 +76,7 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
       //   SteamGameServer()->SetMaxPlayerCount(4);
       //   SteamGameServer()->SetPasswordProtected(false);
       //   SteamGameServer()->SetServerName("zhottem server");
-      //   SteamGameServer()->SetBotPlayerCount(0); // optional, defaults to zero
+      //   SteamGameServer()->SetBotPlayerCount(0); // optional, default 0
       //   SteamGameServer()->SetMapName("testmap");
       // }
     } break;
@@ -99,14 +102,6 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
                   event->m_hConn, ctx->server.poll_group)) {
             printf("!!!connection added to invalid poll group\n");
           }
-
-          printf("sent ping to client %llu %d\n",
-                 event->m_info.m_identityRemote.GetSteamID().ConvertToUint64(),
-                 event->m_hConn);
-          auto ping = "ping";
-          auto _ = SteamGameServerNetworkingSockets()->SendMessageToConnection(
-              event->m_hConn, ping, strlen(ping),
-              k_nSteamNetworkingSend_Reliable, NULL);
         } else {
           auto _ = SteamGameServerNetworkingSockets()->CloseConnection(
               event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic,
@@ -155,22 +150,57 @@ static void server_socket_tick(ZhottSteamContext *ctx) {
   for (int idxMsg = 0; idxMsg < numMessages; idxMsg++) {
     SteamNetworkingMessage_t *message = msgs[idxMsg];
 
-    printf("server recved: %.*s\n", message->GetSize(),
-           (char *)message->GetData());
+    auto callbacks = ctx->server.callbacks;
+    callbacks.msg_recv(
+        callbacks.ctx,
+        NetworkMessage{
+            .data = (uint8_t *)message->GetData(),
+            .len = message->GetSize(),
+            .conn = message->m_conn,
+            .user_steam_id =
+                message->m_identityPeer.GetSteamID().ConvertToUint64(),
+            .message_number = message->m_nMessageNumber,
+        });
 
     message->Release();
     message = nullptr;
   }
-
-  if (numMessages > 0) {
-    printf("recved %d messages\n", numMessages);
-  }
 }
 
-CALLCONV_C(void) server_tick(void *_ctx) {
+CALLCONV_C(void) server_tick(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
 
   // SteamGameServer_RunCallbacks();
   server_callback_tick(ctx);
   server_socket_tick(ctx);
+}
+
+CALLCONV_C(void)
+server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, OutgoingMessage msg) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+
+  uint32_t flags = 0;
+  if (msg.flags.reliable) {
+    flags = k_nSteamNetworkingSend_Reliable;
+  } else {
+    flags = k_nSteamNetworkingSend_Unreliable;
+  }
+  if (msg.flags.force_flush) {
+    flags |= k_nSteamNetworkingSend_NoNagle;
+  }
+  if (msg.flags.no_delay) {
+    flags |= k_nSteamNetworkingSend_NoDelay;
+  }
+  auto buf = (uint8_t*)zalloc(sizeof(ClientMessageHeader) + msg.len);
+  *((ClientMessageHeader*)buf) = ClientMessageHeader{
+      .conn = conn,
+      .user_steam_id = 0,
+      .message_number = 0,
+  };
+  memcpy(buf + sizeof(ClientMessageHeader), msg.data, msg.len);
+
+  auto _ = SteamGameServerNetworkingSockets()->SendMessageToConnection(
+      conn, buf, sizeof(ClientMessageHeader) + msg.len, flags, NULL);
+
+  zfree(buf);
 }

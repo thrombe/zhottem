@@ -2,6 +2,9 @@ const std = @import("std");
 
 const utils_mod = @import("utils.zig");
 
+const network_mod = @import("network.zig");
+const Event = network_mod.Event;
+
 const main = @import("main.zig");
 const allocator = main.allocator;
 
@@ -29,9 +32,9 @@ pub const NetworkingContext = struct {
                     return;
                 }
 
-                self.tick() catch |e| {
-                    utils_mod.dump_error(e);
-                };
+                // self.tick() catch |e| {
+                //     utils_mod.dump_error(e);
+                // };
 
                 std.Thread.sleep(self.options.tick_fps_inv);
             }
@@ -48,6 +51,21 @@ pub const NetworkingContext = struct {
 
     const Options = struct {
         tick_fps_inv: u64 = 150,
+    };
+
+    const OutgoingMessage = struct {
+        event: Event,
+        flags: @FieldType(c.OutgoingMessage, "flags") = .{
+            .reliable = true,
+            .force_flush = false,
+            .no_delay = false,
+            .restart_broken_session = true,
+        },
+    };
+    const RecvedMessage = struct {
+        conn: u32,
+        msg_num: i64,
+        event: Event,
     };
 
     pub fn init(options: Options) !@This() {
@@ -107,15 +125,24 @@ pub const NetworkingContext = struct {
         c.steam_deinit(ctx.steam);
     }
 
+    pub fn tick(self: *@This()) void {
+        self.ctx.tick() catch |e| {
+            utils_mod.dump_error(e);
+        };
+    }
+
     pub const Server = struct {
         ctx: *Ctx,
-        messages: utils_mod.Channel(struct {}),
+        messages: utils_mod.Channel(RecvedMessage),
 
         fn init(ctx: *Ctx) !*@This() {
             ctx.ctx_mutex.lock();
             defer ctx.ctx_mutex.unlock();
 
-            if (!c.server_init(ctx.steam)) {
+            if (!c.server_init(ctx.steam, .{
+                .ctx = &ctx.server,
+                .msg_recv = @ptrCast(&msg_recv),
+            })) {
                 return error.CouldNotInitServer;
             }
             errdefer c.server_deinit(ctx.steam);
@@ -138,17 +165,38 @@ pub const NetworkingContext = struct {
         fn tick(self: *@This()) void {
             c.server_tick(self.ctx.steam);
         }
+
+        fn msg_recv(self: *@This(), msg: c.NetworkMessage) callconv(.C) void {
+            const event = std.mem.bytesToValue(Event, msg.data[0..msg.len]);
+            self.messages.send(.{
+                .conn = msg.conn,
+                .msg_num = msg.message_number,
+                .event = event,
+            }) catch @panic("OOM");
+        }
+
+        pub fn send_message(self: *@This(), conn: u32, msg: OutgoingMessage) void {
+            const event = msg.event;
+            c.server_msg_send(self.ctx.steam, conn, .{
+                .data = @ptrCast(&event),
+                .len = @sizeOf(@TypeOf(msg.event)),
+                .flags = msg.flags,
+            });
+        }
     };
 
     pub const Client = struct {
         ctx: *Ctx,
-        messages: utils_mod.Channel(struct {}),
+        messages: utils_mod.Channel(RecvedMessage),
 
         fn init(ctx: *Ctx) !*@This() {
             ctx.ctx_mutex.lock();
             defer ctx.ctx_mutex.unlock();
 
-            c.client_init(ctx.steam);
+            c.client_init(ctx.steam, .{
+                .ctx = &ctx.client,
+                .msg_recv = @ptrCast(&msg_recv),
+            });
             errdefer c.client_deinit(ctx.steam);
 
             ctx.client = .{ .ctx = ctx, .messages = try .init(allocator.*) };
@@ -168,6 +216,31 @@ pub const NetworkingContext = struct {
 
         fn tick(self: *@This()) void {
             c.client_tick(self.ctx.steam);
+        }
+
+        fn msg_recv(self: *@This(), msg: c.NetworkMessage) callconv(.C) void {
+            const event = std.mem.bytesToValue(Event, msg.data[0..msg.len]);
+            self.messages.send(.{
+                .conn = msg.conn,
+                .msg_num = msg.message_number,
+                .event = event,
+            }) catch @panic("OOM");
+        }
+
+        pub fn send_message(self: *@This(), msg: OutgoingMessage) void {
+            const event = msg.event;
+            c.client_msg_send(self.ctx.steam, .{
+                .data = @ptrCast(&event),
+                .len = @sizeOf(@TypeOf(msg.event)),
+                .flags = msg.flags,
+            });
+        }
+
+        pub fn wait_for_connection(self: *@This()) !void {
+            while (!c.client_is_connected(self.ctx.steam)) {
+                std.Thread.sleep(std.time.ns_per_ms * 50);
+                try self.ctx.tick();
+            }
         }
     };
 };

@@ -31,9 +31,6 @@ const DescriptorPool = render_utils.DescriptorPool;
 const DescriptorSet = render_utils.DescriptorSet;
 const CmdBuffer = render_utils.CmdBuffer;
 
-const network_mod = @import("network.zig");
-const Socket = network_mod.Socket;
-
 const ecs_mod = @import("ecs.zig");
 const Entity = ecs_mod.Entity;
 
@@ -77,9 +74,6 @@ command_pool: vk.CommandPool,
 stages: ShaderStageManager,
 recorder: AudioRecorder,
 audio: AudioPlayer,
-
-socket: Socket,
-server_addr: std.net.Address,
 
 net_ctx: NetworkingContext,
 net_server: ?*NetworkingContext.Server = null,
@@ -522,7 +516,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
             .hold = true,
         },
-        C.PlayerId{ .id = 0 },
+        C.PlayerId{ .id = 0, .conn = 0 },
         try world.phy.add_character(.{
             .pos = t.pos.xyz(),
             .rot = t.rotation,
@@ -730,7 +724,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
     try cmdbuf.apply(@ptrCast(&world));
 
-    const player = try world.ecs.get(player_id, struct { transform: C.Transform, camera: math.Camera, controller: C.Controller });
+    const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, transform: C.Transform, camera: math.Camera, controller: C.Controller });
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
     errdefer uniforms.deinit(device);
 
@@ -773,13 +767,44 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
-    const addr = try std.net.Address.parseIp("127.0.0.1", 8072);
-    var socket = try Socket.init(addr);
-    errdefer socket.deinit();
-
-    if (!socket.ctx.is_server) {
-        try socket.send(.{ .join = {} }, addr);
+    std.debug.print("waiting to connect to server...\n", .{});
+    try net_client.wait_for_connection();
+    std.debug.print("connected to server...\n", .{});
+    net_client.send_message(.{
+        .flags = .{ .reliable = true },
+        .event = .{ .join = {} },
+    });
+    while (!net_client.messages.can_recv()) {
+        if (net_server) |s| {
+            if (s.messages.try_recv()) |msg| {
+                switch (msg.event) {
+                    .join => {
+                        s.send_message(msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } });
+                    },
+                    else => @panic("unexpected message"),
+                }
+            }
+        }
+        std.Thread.sleep(std.time.ns_per_ms * 50);
+        net_ctx.tick();
     }
+    std.debug.print("waiting for server message...\n", .{});
+
+    const msg = net_client.messages.try_recv().?;
+    switch (msg.event) {
+        .setid => |e| {
+            player.pid.id = e.id;
+            player.pid.conn = msg.conn;
+
+            // net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
+            //     .x = player.transform.pos.x,
+            //     .y = player.transform.pos.y,
+            //     .z = player.transform.pos.z,
+            // } } } });
+        },
+        else => @panic("unexpected message"),
+    }
+    std.debug.print("starting game...\n", .{});
 
     return @This(){
         .world = world,
@@ -798,8 +823,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .recorder = recorder,
         .audio = audio,
 
-        .socket = socket,
-        .server_addr = addr,
         .net_ctx = net_ctx,
         .net_server = net_server,
         .net_client = net_client,
@@ -841,7 +864,6 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.texture_img.deinit();
     defer self.texture.deinit(device);
 
-    defer self.socket.deinit();
     defer self.net_ctx.deinit();
     defer if (self.net_server) |s| s.deinit();
     defer self.net_client.deinit();
@@ -1230,10 +1252,11 @@ pub const AppState = struct {
             }
             if (kb.escape.just_pressed() and !self.focus) {
                 window.queue_close();
-                if (app.socket.ctx.is_server) {
-                    try app.socket.ctx.channel.send(.{ .event = .quit, .addr = app.server_addr });
+
+                if (app.net_server) |_| {
+                    app.net_client.send_message(.{ .event = .{ .quit = {} } });
                 } else {
-                    try app.socket.send(.{ .despawn_player = .{ .id = pid.id } }, app.server_addr);
+                    app.net_client.send_message(.{ .event = .{ .despawn_player = .{ .id = pid.id } } });
                 }
             }
             if (kb.escape.just_pressed() and self.focus) {
@@ -1258,77 +1281,59 @@ pub const AppState = struct {
         }
 
         {
-            try app.socket.ctx.channel.send(.{ .event = .{ .input = .{ .id = pid.id, .input = input } }, .addr = app.server_addr });
-            try app.socket.send(.{ .input = .{ .id = pid.id, .input = input } }, app.server_addr);
+            app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
+            app.net_ctx.tick();
 
-            while (app.socket.ctx.channel.try_recv()) |e| {
-                if (app.socket.ctx.is_server) {
-                    switch (e.event) {
-                        .join => {
-                            self.client_count += 1;
-                            try app.socket.send(.{ .setid = .{ .id = self.client_count } }, e.addr);
-                        },
-                        .spawn_player => {
-                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.Transform });
-                            while (it.next()) |p| {
-                                // notify new player about all other players.
-                                try app.socket.send(.{ .spawn_player = .{ .id = p.p.id, .pos = .{
-                                    .x = p.t.pos.x,
-                                    .y = p.t.pos.y,
-                                    .z = p.t.pos.z,
-                                } } }, e.addr);
-
-                                // notify other players about this player
-                                if (p.p.addr) |addr| {
-                                    try app.socket.send(e.event, addr);
-                                }
-                            }
-                        },
-                        .despawn_player => {
-                            // tell everyone this player left
-                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
-                            while (it.next()) |p| {
-                                if (p.p.addr) |addr| {
-                                    try app.socket.send(e.event, addr);
-                                }
-                            }
-                        },
-                        .input => |pinput| {
-                            // send this player's inputs to everyone
-                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
-                            while (it.next()) |p| {
-                                if (p.p.id == pinput.id) continue;
-                                if (p.p.addr) |addr| {
-                                    try app.socket.send(e.event, addr);
-                                }
-                            }
-                        },
-                        .quit => {
-                            // tell everyone to quit themselves
-                            var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
-                            while (it.next()) |p| {
-                                if (p.p.addr) |addr| {
-                                    try app.socket.send(e.event, addr);
-                                }
-                            }
-                        },
-                        .setid => {
-                            std.debug.print("YIKES server received: {any} event\n", .{std.meta.activeTag(e.event)});
-                            continue;
-                        },
-                    }
-                }
-
+            if (app.net_server) |s| while (s.messages.try_recv()) |e| {
                 switch (e.event) {
-                    .setid => |id| {
-                        const p = try app.world.ecs.get(app.handles.player, struct { p: C.PlayerId, t: C.Transform });
-                        p.p.id = id.id;
-                        try app.socket.send(.{ .spawn_player = .{ .id = id.id, .pos = .{
-                            .x = p.t.pos.x,
-                            .y = p.t.pos.y,
-                            .z = p.t.pos.z,
-                        } } }, e.addr);
+                    .join => {
+                        self.client_count += 1;
+                        s.send_message(e.conn, .{ .event = .{ .setid = .{ .id = self.client_count } } });
                     },
+                    .spawn_player => {
+                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.Transform });
+                        while (it.next()) |p| {
+                            // notify new player about all other players.
+                            s.send_message(p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
+                                .x = p.t.pos.x,
+                                .y = p.t.pos.y,
+                                .z = p.t.pos.z,
+                            } } } });
+
+                            // notify other players about this player
+                            s.send_message(e.conn, .{ .event = e.event });
+                        }
+                    },
+                    .despawn_player => {
+                        // tell everyone this player left
+                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
+                        while (it.next()) |p| {
+                            s.send_message(p.p.conn, .{ .event = e.event });
+                        }
+                    },
+                    .input => {
+                        // send this player's inputs to everyone
+                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
+                        while (it.next()) |p| {
+                            s.send_message(p.p.conn, .{ .event = e.event });
+                        }
+                    },
+                    .quit => {
+                        // tell everyone to quit themselves
+                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
+                        while (it.next()) |p| {
+                            s.send_message(p.p.conn, .{ .event = e.event });
+                        }
+                    },
+                    .setid => {
+                        std.debug.print("YIKES server received: {any} event\n", .{std.meta.activeTag(e.event)});
+                        continue;
+                    },
+                }
+            };
+
+            while (app.net_client.messages.try_recv()) |e| {
+                switch (e.event) {
                     .spawn_player => |id| {
                         const t = C.Transform{ .pos = .{
                             .x = id.pos.x,
@@ -1341,7 +1346,7 @@ pub const AppState = struct {
                             C.LastTransform{ .t = t },
                             C.Controller{},
                             C.StaticRender{ .mesh = app.handles.mesh.cube },
-                            C.PlayerId{ .id = id.id, .addr = e.addr },
+                            C.PlayerId{ .id = id.id, .conn = e.conn },
                             C.Shooter{
                                 .audio = app.handles.audio.shot,
                                 .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
@@ -1489,7 +1494,7 @@ pub const AppState = struct {
                     .quit => {
                         window.queue_close();
                     },
-                    .join => {},
+                    .setid, .join => {},
                 }
             }
         }

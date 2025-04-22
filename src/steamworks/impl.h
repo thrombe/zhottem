@@ -21,6 +21,7 @@ typedef struct {
   bool initialized;
   HSteamListenSocket listen_socket;
   HSteamNetPollGroup poll_group;
+  ServerCallbacks callbacks;
 } ZhottServer;
 
 typedef struct {
@@ -28,13 +29,22 @@ typedef struct {
   const char *lobby_password;
 
   bool initialized;
+  bool connected;
   SteamAPICall_t lobby_request;
   SteamAPICall_t lobby_created;
   CSteamID lobby_id;
   HSteamNetConnection server_conn;
+  ClientCallbacks callbacks;
 } ZhottClient;
 
 typedef struct {
   ZhottServer server;
   ZhottClient client;
 } ZhottSteamContext;
+
+// server needs to send client's info in addition to the data sent by the clients
+typedef struct {
+  uint32_t conn;
+  uint64_t user_steam_id;
+  int64_t message_number;
+} ClientMessageHeader;

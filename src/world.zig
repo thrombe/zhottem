@@ -743,7 +743,7 @@ pub const Components = struct {
 
     pub const PlayerId = struct {
         id: u8,
-        addr: ?std.net.Address = null,
+        conn: u32,
     };
 
     pub const StaticRender = struct {

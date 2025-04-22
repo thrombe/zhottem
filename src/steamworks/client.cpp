@@ -1,7 +1,7 @@
 
 #include "steamworks/impl.h"
 
-CALLCONV_C(void) client_init(void *_ctx) {
+CALLCONV_C(void) client_init(ZhottSteamCtx _ctx, ClientCallbacks callbacks) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->client = {
       .gamedir = "zhottem",
@@ -10,6 +10,7 @@ CALLCONV_C(void) client_init(void *_ctx) {
       .lobby_created = k_uAPICallInvalid,
       .lobby_id = CSteamID(),
       .server_conn = k_HSteamNetConnection_Invalid,
+      .callbacks = callbacks,
   };
   SteamMatchmaking()->AddRequestLobbyListStringFilter(
       "zhott_password", ctx->client.lobby_password, k_ELobbyComparisonEqual);
@@ -19,7 +20,7 @@ CALLCONV_C(void) client_init(void *_ctx) {
   SteamNetworkingUtils()->InitRelayNetworkAccess();
 }
 
-CALLCONV_C(void) client_deinit(void *_ctx) {
+CALLCONV_C(void) client_deinit(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->client.initialized = false;
 
@@ -142,6 +143,8 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
               k_ESteamNetworkingConnectionState_Connected) {
         // connected successfully to remote
         printf("successfully connected to remote\n");
+
+        ctx->client.connected = true;
       } else if (event->m_eOldState ==
                      k_ESteamNetworkingConnectionState_Connected &&
                  event->m_info.m_eState ==
@@ -195,22 +198,53 @@ static void client_socket_tick(ZhottSteamContext *ctx) {
   for (int i = 0; i < res; i++) {
     SteamNetworkingMessage_t *message = msgs[i];
 
-    printf("client recved: %.*s\n", message->GetSize(),
-           (char *)message->GetData());
-    auto pong = "pong";
-    SteamNetworkingSockets()->SendMessageToConnection(
-        ctx->client.server_conn, pong, strlen(pong),
-        k_nSteamNetworkingSend_Reliable, NULL);
+    uint8_t* buf = (uint8_t *)message->GetData();
+    auto header = (ClientMessageHeader*)buf;
+
+    auto callbacks = ctx->client.callbacks;
+    callbacks.msg_recv(
+        callbacks.ctx,
+        NetworkMessage{
+            .data = buf + sizeof(ClientMessageHeader),
+            .len = message->GetSize() - (uint32_t)sizeof(ClientMessageHeader),
+            .conn = header->conn,
+            .user_steam_id = header->user_steam_id,
+            .message_number = header->message_number,
+        });
 
     message->Release();
     message = nullptr;
   }
 }
 
-CALLCONV_C(void) client_tick(void *_ctx) {
+CALLCONV_C(void) client_tick(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
 
   // SteamAPI_RunCallbacks();
   client_callback_tick(ctx);
   client_socket_tick(ctx);
+}
+
+CALLCONV_C(void) client_msg_send(ZhottSteamCtx _ctx, OutgoingMessage msg) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+
+  uint32_t flags = 0;
+  if (msg.flags.reliable) {
+      flags |= k_nSteamNetworkingSend_Reliable;
+  } else {
+      flags |= k_nSteamNetworkingSend_Unreliable;
+  }
+  if (msg.flags.force_flush) {
+      flags |= k_nSteamNetworkingSend_NoNagle;
+  }
+  if (msg.flags.no_delay) {
+      flags |= k_nSteamNetworkingSend_NoDelay;
+  }
+  auto _ = SteamNetworkingSockets()->SendMessageToConnection(
+      ctx->client.server_conn, msg.data, msg.len, flags, NULL);
+}
+
+CALLCONV_C(bool) client_is_connected(ZhottSteamCtx _ctx) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+    return ctx->client.connected;
 }

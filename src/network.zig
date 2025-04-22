@@ -11,7 +11,7 @@ const Engine = @import("engine.zig");
 
 const posix = std.posix;
 
-const Event = union(enum(u8)) {
+pub const Event = union(enum(u8)) {
     join,
     setid: packed struct {
         id: u8,
