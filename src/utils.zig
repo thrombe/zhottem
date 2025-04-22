@@ -441,7 +441,10 @@ pub const FsFuse = struct {
     thread: std.Thread,
 
     pub fn init(path: [:0]const u8) !@This() {
-        const pathZ = try allocator.dupeZ(u8, path);
+        var _buf: [std.fs.max_path_bytes]u8 = undefined;
+        const pwd = try std.posix.getcwd(&_buf);
+        const _path = try std.fs.path.join(allocator.*, &[_][]const u8{ pwd, path });
+        const pathZ = try allocator.dupeZ(u8, _path);
 
         const watch = try start(pathZ);
         return watch;
@@ -603,9 +606,19 @@ pub const StbImage = struct {
     pub const UnormImage = PixelType.unorm.img_typ();
 
     pub fn from_file(path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
-        var file = try std.fs.cwd().openFile(path, .{});
+        std.debug.print("here 33\n", .{});
+
+        var _buf: [std.fs.max_path_bytes]u8 = undefined;
+        const pwd = try std.posix.getcwd(&_buf);
+        const _path = try std.fs.path.join(allocator.*, &[_][]const u8{ pwd, path });
+        std.debug.print("{s} {s}\n", .{ path, pwd });
+        // std.fs.cwd().access(path, .{}) catch |e| std.debug.print("{any}\n", .{e});
+        std.debug.print("here 36\n", .{});
+        var file = try std.fs.openFileAbsolute(_path, .{});
+        std.debug.print("here 34\n", .{});
         defer file.close();
 
+        std.debug.print("here 35\n", .{});
         const buf = try file.readToEndAlloc(allocator.*, 50 * 1000 * 1000);
         defer allocator.free(buf);
 
@@ -1064,7 +1077,10 @@ pub const ShaderUtils = struct {
         }
 
         pub fn dump_shader(self: *@This(), path: []const u8) !void {
-            const file = try std.fs.cwd().createFile(path, .{});
+            var _buf: [std.fs.max_path_bytes]u8 = undefined;
+            const pwd = try std.posix.getcwd(&_buf);
+            const _path = try std.fs.path.join(allocator.*, &[_][]const u8{ pwd, path });
+            const file = try std.fs.createFileAbsolute(_path, .{});
             defer file.close();
 
             try file.writeAll(self.shader.items);
@@ -1444,7 +1460,10 @@ pub const Glslc = struct {
                 args.deinit();
             }
             if (builtin.os.tag == .windows) {
-                try args.append(try alloc.dupe(u8, "zig-out/bin/glslc.exe"));
+                var _buf: [std.fs.max_path_bytes]u8 = undefined;
+                const pwd = try std.posix.getcwd(&_buf);
+                const _path = try std.fs.path.join(allocator.*, &[_][]const u8{ pwd, "zig-out/bin/glslc.exe" });
+                try args.append(try alloc.dupe(u8, _path));
             } else {
                 try args.append(try alloc.dupe(u8, "glslc"));
             }

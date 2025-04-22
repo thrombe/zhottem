@@ -98,27 +98,37 @@ const Assets = struct {
     // toilet: assets_mod.Mesh,
 
     fn init() !@This() {
-        var bunny_glb = try assets_mod.Gltf.parse_glb("./assets/dance.glb");
+        std.debug.print("here 16\n", .{});
+        var bunny_glb = try assets_mod.Gltf.parse_glb("assets/tmp/dance.glb");
+        std.debug.print("here 17\n", .{});
         errdefer bunny_glb.deinit();
+        std.debug.print("here 18\n", .{});
         const bunny = try bunny_glb.to_model("Cube.015", "metarig");
 
-        var well_glb = try assets_mod.Gltf.parse_glb("./assets/well.glb");
+        std.debug.print("here 19\n", .{});
+        var well_glb = try assets_mod.Gltf.parse_glb("./assets/tmp/well.glb");
         errdefer well_glb.deinit();
+        std.debug.print("here 20\n", .{});
         const well = try well_glb.to_model("well", null);
 
         // var toilet = try assets_mod.ObjParser.mesh_from_file("./assets/object.obj");
         // errdefer toilet.deinit();
 
+        std.debug.print("here 21\n", .{});
         var cube = try assets_mod.Mesh.cube();
         errdefer cube.deinit();
 
+        std.debug.print("here 22\n", .{});
         var plane = try assets_mod.Mesh.plane();
         errdefer plane.deinit();
 
-        var sphere_gltf = try assets_mod.Gltf.parse_glb("./assets/sphere.glb");
+        std.debug.print("here 23\n", .{});
+        var sphere_gltf = try assets_mod.Gltf.parse_glb("./assets/tmp/sphere.glb");
         errdefer sphere_gltf.deinit();
+        std.debug.print("here 24\n", .{});
         const sphere = try sphere_gltf.to_model("Icosphere", null);
 
+        std.debug.print("here 25\n", .{});
         return .{
             .dance = bunny_glb,
             .bunny = bunny,
@@ -388,10 +398,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
     errdefer world.deinit();
 
-    var image = try utils.StbImage.from_file("./assets/images/mandlebulb.png", .unorm);
+    std.debug.print("here 1\n", .{});
+    var image = try utils.StbImage.from_file("assets/images/mandlebulb.png", .unorm);
     errdefer image.deinit();
     const slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(image.buffer));
 
+    std.debug.print("here 2\n", .{});
     var gpu_img = try Image.new_from_slice(ctx, cmd_pool, .{
         .extent = .{ .width = @intCast(image.width), .height = @intCast(image.height) },
         .bind_desc_type = .combined_image_sampler,
@@ -402,19 +414,25 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, slice);
     errdefer gpu_img.deinit(device);
 
+    std.debug.print("here 3\n", .{});
     var assets = try Assets.init();
     errdefer assets.deinit();
 
+    std.debug.print("here 4\n", .{});
     var cpu = ResourceManager.CpuResources.init();
     errdefer cpu.deinit();
 
+    std.debug.print("here 5\n", .{});
     const audio_handles = try Handles.AudioHandles.init(&cpu);
 
+    std.debug.print("here 6\n", .{});
     const bones_handle = try cpu.reserve_bones(1500);
 
+    std.debug.print("here 7\n", .{});
     var instance_manager = InstanceManager.init(bones_handle);
     errdefer instance_manager.deinit();
 
+    std.debug.print("here 8\n", .{});
     const cube_instance_handle = try cpu.batch_reserve(1000);
     const cube_mesh_handle = try cpu.add_mesh(&assets.cube);
     try instance_manager.instances.append(.{
@@ -451,12 +469,14 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .instances = bunny_instance_handle,
     });
 
+    std.debug.print("here 9\n", .{});
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
 
     var t: C.Transform = .{
         .pos = .{ .y = 5 },
     };
+    std.debug.print("here 51\n", .{});
     const player_id = try cmdbuf.insert(.{
         try C.Name.from("player"),
         math.Camera.init(
@@ -499,6 +519,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
+    std.debug.print("here 52\n", .{});
     _ = try cmdbuf.insert(.{
         try C.Name.from("wall"),
         t,
@@ -618,6 +639,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
+    std.debug.print("here 53\n", .{});
     const bones = try allocator.alloc(math.Mat4x4, assets.bunny.bones.len);
     // errdefer allocator.free(bones);
     const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.bunny.bones.len);
@@ -677,12 +699,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .motion_type = .static,
         }),
     });
+    std.debug.print("here 54\n", .{});
     try cmdbuf.apply(@ptrCast(&world));
 
+    std.debug.print("here 55\n", .{});
     const player = try world.ecs.get(player_id, struct { transform: C.Transform, camera: math.Camera, controller: C.Controller });
+    std.debug.print("here 56\n", .{});
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
     errdefer uniforms.deinit(device);
 
+    std.debug.print("here 10\n", .{});
     var gpu = try cpu.upload(engine, cmd_pool);
     errdefer gpu.deinit(device);
 
@@ -703,9 +729,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var model_desc_set = try model_desc_set_builder.build(device);
     errdefer model_desc_set.deinit(device);
 
+    std.debug.print("here 11\n", .{});
     var stages = try ShaderStageManager.init();
     errdefer stages.deinit();
 
+    std.debug.print("here 12\n", .{});
     var recorder = try AudioRecorder.init(.{
         .recorded = try utils.Channel([256]f32).init(allocator.*),
     }, .{});
@@ -718,18 +746,22 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // errdefer audio.deinit() catch |e| utils.dump_error(e);
     // try audio.start();
 
+    std.debug.print("here 13\n", .{});
     var audio = try AudioPlayer.init(try AudioPlayer.Ctx.init(cpu.audio.items), .{});
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
+    std.debug.print("here 14\n", .{});
     const addr = try std.net.Address.parseIp("127.0.0.1", 8072);
     var socket = try Socket.init(addr);
     errdefer socket.deinit();
 
+    std.debug.print("here 15\n", .{});
     if (!socket.ctx.is_server) {
         try socket.send(.{ .join = {} }, addr);
     }
 
+    std.debug.print("here 16\n", .{});
     return @This(){
         .world = world,
         .uniforms = uniforms,

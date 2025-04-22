@@ -286,15 +286,18 @@ pub const Gltf = struct {
     buf: []const u8,
 
     pub fn parse_glb(path: []const u8) !@This() {
+        std.debug.print("here 25\n", .{});
         var arena = try allocator.create(std.heap.ArenaAllocator);
         errdefer allocator.destroy(arena);
         arena.* = std.heap.ArenaAllocator.init(allocator.*);
         errdefer arena.deinit();
         const alloc = arena.allocator();
 
+        std.debug.print("here 26\n", .{});
         var reader = try Reader.load(alloc, path);
         errdefer reader.deinit();
 
+        std.debug.print("here 27\n", .{});
         const header = try reader.read(Header);
         if (!std.mem.eql(u8, &header.magic, "glTF")) {
             return error.InvalidGltfHeader;
@@ -303,6 +306,7 @@ pub const Gltf = struct {
             return error.CurruptedFile;
         }
 
+        std.debug.print("here 28\n", .{});
         var json_chunk = try reader.chunk();
         if (!std.mem.eql(u8, &json_chunk.typ, "JSON")) {
             return error.InvalidJsonChunk;
@@ -313,9 +317,11 @@ pub const Gltf = struct {
             return error.InvalidBinChunk;
         }
 
+        std.debug.print("here 29\n", .{});
         var info = try json_chunk.read_json(Info);
         errdefer info.deinit();
 
+        std.debug.print("here 30\n", .{});
         return .{
             .header = header,
             .buf = reader.buf,
@@ -1074,9 +1080,16 @@ pub const Gltf = struct {
         alloc: std.mem.Allocator,
 
         fn load(alloc: std.mem.Allocator, path: []const u8) !@This() {
-            const buf = try std.fs.cwd().readFileAllocOptions(
+            var _buf: [std.fs.max_path_bytes]u8 = undefined;
+            const pwd = try std.posix.getcwd(&_buf);
+            const _path = try std.fs.path.join(allocator.*, &[_][]const u8{ pwd, path });
+            var file = try std.fs.openFileAbsolute(_path, .{});
+
+            std.debug.print("here 30\n", .{});
+            // const cwd = std.fs.cwd();
+            std.debug.print("here 32\n", .{});
+            const buf = try file.readToEndAllocOptions(
                 alloc,
-                path,
                 100 * 1000 * 1000,
                 null,
                 8,
@@ -1084,6 +1097,7 @@ pub const Gltf = struct {
             );
             errdefer alloc.free(buf);
 
+            std.debug.print("here 31\n", .{});
             return .{
                 .alloc = alloc,
                 .buf = buf,
@@ -1204,9 +1218,16 @@ pub const Wav = struct {
         head: usize = 0,
 
         fn load(path: []const u8) !@This() {
-            const buf = try std.fs.cwd().readFileAllocOptions(
+            var _buf: [std.fs.max_path_bytes]u8 = undefined;
+            const pwd = try std.posix.getcwd(&_buf);
+            const _path = try std.fs.path.join(allocator.*, &[_][]const u8{ pwd, path });
+            var file = try std.fs.openFileAbsolute(_path, .{});
+
+            std.debug.print("here 30\n", .{});
+            // const cwd = std.fs.cwd();
+            std.debug.print("here 32\n", .{});
+            const buf = try file.readToEndAllocOptions(
                 allocator.*,
-                path,
                 100 * 1000 * 1000,
                 null,
                 8,
