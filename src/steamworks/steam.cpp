@@ -27,9 +27,11 @@ CALLCONV_C(void *) steam_init() {
   }
   SteamAPI_ManualDispatch_Init();
 
-  SteamClient()->SetWarningMessageHook(&steam_api_dbg_hook);
+  auto client = SteamClient();
+  SteamAPI_ISteamClient_SetWarningMessageHook(client, &steam_api_dbg_hook);
 
-  if (!SteamUser()->BLoggedOn()) {
+  auto user = SteamAPI_SteamUser();
+  if (!SteamAPI_ISteamUser_BLoggedOn(user)) {
     printf("Steam user is not logged in\n");
     return NULL;
   }

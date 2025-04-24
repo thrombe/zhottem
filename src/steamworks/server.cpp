@@ -18,30 +18,35 @@ CALLCONV_C(bool) server_init(ZhottSteamCtx _ctx, ServerCallbacks callbacks) {
 
   SteamErrMsg errMsg = {0};
   if (SteamGameServer_InitEx(0, server->port, server->updater_port,
-                             eServerModeAuthenticationAndSecure,
-                             server->version,
+                             eServerModeAuthentication, server->version,
                              &errMsg) != k_ESteamAPIInitResult_OK) {
     printf("SteamGameServer_Init call failed: %s\n", errMsg);
     return false;
   }
   server->initialized = true;
 
-  SteamGameServer()->SetModDir(server->moddir);
-  SteamGameServer()->SetProduct(server->product);
-  SteamGameServer()->SetGameDescription(server->description);
+  auto game_server = SteamAPI_SteamGameServer();
+  SteamAPI_ISteamGameServer_SetModDir(game_server, server->moddir);
+  SteamAPI_ISteamGameServer_SetProduct(game_server, server->product);
+  SteamAPI_ISteamGameServer_SetGameDescription(game_server,
+                                               server->description);
 
-  SteamGameServer()->SetPasswordProtected(false);
+  SteamAPI_ISteamGameServer_SetPasswordProtected(game_server, false);
 
-  // SteamGameServer()->LogOn("token?");
-  SteamGameServer()->LogOnAnonymous();
+  // SteamAPI_ISteamGameServer_LogOn(game_server, "token?");
+  SteamAPI_ISteamGameServer_LogOnAnonymous(game_server);
 
-  SteamNetworkingUtils()->InitRelayNetworkAccess();
+  auto net_utils = SteamAPI_SteamNetworkingUtils_SteamAPI();
+  SteamAPI_ISteamNetworkingUtils_InitRelayNetworkAccess(net_utils);
 
-  // SteamGameServer()->SetAdvertiseServerActive(true);
+  // SteamAPI_ISteamGameServer_SetAdvertiseServerActive(game_server, true);
 
+  auto net_sockets = SteamAPI_SteamGameServerNetworkingSockets_SteamAPI();
   server->listen_socket =
-      SteamGameServerNetworkingSockets()->CreateListenSocketP2P(0, 0, nullptr);
-  server->poll_group = SteamGameServerNetworkingSockets()->CreatePollGroup();
+      SteamAPI_ISteamNetworkingSockets_CreateListenSocketP2P(net_sockets, 0, 0,
+                                                             nullptr);
+  server->poll_group =
+      SteamAPI_ISteamNetworkingSockets_CreatePollGroup(net_sockets);
   return true;
 }
 
@@ -49,19 +54,24 @@ CALLCONV_C(void) server_deinit(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->server.initialized = false;
 
-  SteamGameServerNetworkingSockets()->CloseListenSocket(
-      ctx->server.listen_socket);
-  SteamGameServerNetworkingSockets()->DestroyPollGroup(ctx->server.poll_group);
+  auto net_sockets = SteamAPI_SteamGameServerNetworkingSockets_SteamAPI();
+  auto _ = SteamAPI_ISteamNetworkingSockets_CloseListenSocket(
+      net_sockets, ctx->server.listen_socket);
+  _ = SteamAPI_ISteamNetworkingSockets_DestroyPollGroup(net_sockets,
+                                                        ctx->server.poll_group);
   ctx->server.listen_socket = 0;
   ctx->server.poll_group = 0;
 
-  SteamGameServer()->LogOff();
+  auto game_server = SteamAPI_SteamGameServer();
+  SteamAPI_ISteamGameServer_LogOff(game_server);
 
   SteamGameServer_Shutdown();
 }
 
 static void server_callback_tick(ZhottSteamContext *ctx) {
-  HSteamPipe hSteamPipe = SteamGameServer_GetHSteamPipe();
+  auto net_sockets = SteamAPI_SteamGameServerNetworkingSockets_SteamAPI();
+
+  auto hSteamPipe = SteamGameServer_GetHSteamPipe();
   SteamAPI_ManualDispatch_RunFrame(hSteamPipe);
   CallbackMsg_t callback;
   while (SteamAPI_ManualDispatch_GetNextCallback(hSteamPipe, &callback)) {
@@ -95,17 +105,17 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
               k_ESteamNetworkingConnectionState_Connecting) {
         // received new connection
         printf("received connection\n");
-        auto res = SteamGameServerNetworkingSockets()->AcceptConnection(
-            event->m_hConn);
+        auto res = SteamAPI_ISteamNetworkingSockets_AcceptConnection(
+            net_sockets, event->m_hConn);
         if (res == k_EResultOK) {
-          if (!SteamGameServerNetworkingSockets()->SetConnectionPollGroup(
-                  event->m_hConn, ctx->server.poll_group)) {
+          if (!SteamAPI_ISteamNetworkingSockets_SetConnectionPollGroup(
+                  net_sockets, event->m_hConn, ctx->server.poll_group)) {
             printf("!!!connection added to invalid poll group\n");
           }
         } else {
-          auto _ = SteamGameServerNetworkingSockets()->CloseConnection(
-              event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic,
-              NULL, false);
+          auto _ = SteamAPI_ISteamNetworkingSockets_CloseConnection(
+              net_sockets, event->m_hConn,
+              k_ESteamNetConnectionEnd_AppException_Generic, NULL, false);
         }
       } else if ((event->m_eOldState ==
                       k_ESteamNetworkingConnectionState_Connecting ||
@@ -115,9 +125,9 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
                      k_ESteamNetworkingConnectionState_ProblemDetectedLocally) {
         // closed by localhost
         printf("closed connection by localhost\n");
-        auto _ = SteamGameServerNetworkingSockets()->CloseConnection(
-            event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic, NULL,
-            false);
+        auto _ = SteamAPI_ISteamNetworkingSockets_CloseConnection(
+            net_sockets, event->m_hConn,
+            k_ESteamNetConnectionEnd_AppException_Generic, NULL, false);
       }
     } break;
     case GSPolicyResponse_t::k_iCallback: {
@@ -131,8 +141,21 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
     } break;
     case GSClientApprove_t::k_iCallback: {
       auto event = (GSClientApprove_t *)callback.m_pubParam;
-      printf("approved client connect: %llu\n",
-             event->m_SteamID.ConvertToUint64());
+      printf("approved client connect\n");
+    } break;
+    case SteamAPICallCompleted_t::k_iCallback: {
+      auto pCallCompleted = (SteamAPICallCompleted_t *)callback.m_pubParam;
+      void *pTmpCallResult = zalloc(callback.m_cubParam);
+      bool bFailed;
+      if (SteamAPI_ManualDispatch_GetAPICallResult(
+              hSteamPipe, pCallCompleted->m_hAsyncCall, pTmpCallResult,
+              callback.m_cubParam, callback.m_iCallback, &bFailed)) {
+        // Dispatch the call result to the registered handler(s) for the
+        // call identified by pCallCompleted->m_hAsyncCall
+        printf("manual dispatch %d %llu\n", pCallCompleted->m_iCallback,
+               pCallCompleted->m_hAsyncCall);
+      }
+      zfree(pTmpCallResult);
     } break;
     default: {
     } break;
@@ -143,26 +166,26 @@ static void server_callback_tick(ZhottSteamContext *ctx) {
 }
 
 static void server_socket_tick(ZhottSteamContext *ctx) {
+  auto net_sockets = SteamAPI_SteamGameServerNetworkingSockets_SteamAPI();
   SteamNetworkingMessage_t *msgs[128];
-  int numMessages =
-      SteamGameServerNetworkingSockets()->ReceiveMessagesOnPollGroup(
-          ctx->server.poll_group, msgs, 128);
+  int numMessages = SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnPollGroup(
+      net_sockets, ctx->server.poll_group, msgs, 128);
   for (int idxMsg = 0; idxMsg < numMessages; idxMsg++) {
     SteamNetworkingMessage_t *message = msgs[idxMsg];
 
+    auto steam_id =
+        SteamAPI_SteamNetworkingIdentity_GetSteamID(&message->m_identityPeer);
     auto callbacks = ctx->server.callbacks;
-    callbacks.msg_recv(
-        callbacks.ctx,
-        NetworkMessage{
-            .data = (uint8_t *)message->GetData(),
-            .len = message->GetSize(),
-            .conn = message->m_conn,
-            .user_steam_id =
-                message->m_identityPeer.GetSteamID().ConvertToUint64(),
-            .message_number = message->m_nMessageNumber,
-        });
+    callbacks.msg_recv(callbacks.ctx,
+                       NetworkMessage{
+                           .data = (uint8_t *)message->m_pData,
+                           .len = (uint32_t)message->m_cbSize,
+                           .conn = message->m_conn,
+                           .user_steam_id = steam_id,
+                           .message_number = message->m_nMessageNumber,
+                       });
 
-    message->Release();
+    SteamAPI_SteamNetworkingMessage_t_Release(message);
     message = nullptr;
   }
 }
@@ -176,7 +199,8 @@ CALLCONV_C(void) server_tick(ZhottSteamCtx _ctx) {
 }
 
 CALLCONV_C(void)
-server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, uint32_t from_conn, OutgoingMessage msg) {
+server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, uint32_t from_conn,
+                OutgoingMessage msg) {
   auto ctx = (ZhottSteamContext *)_ctx;
 
   uint32_t flags = 0;
@@ -199,8 +223,10 @@ server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, uint32_t from_conn, OutgoingM
   };
   memcpy(buf + sizeof(ClientMessageHeader), msg.data, msg.len);
 
-  auto _ = SteamGameServerNetworkingSockets()->SendMessageToConnection(
-      conn, buf, sizeof(ClientMessageHeader) + msg.len, flags, NULL);
+  auto net_sockets = SteamAPI_SteamGameServerNetworkingSockets_SteamAPI();
+  auto _ = SteamAPI_ISteamNetworkingSockets_SendMessageToConnection(
+      net_sockets, conn, buf, sizeof(ClientMessageHeader) + msg.len, flags,
+      NULL);
 
   zfree(buf);
 }

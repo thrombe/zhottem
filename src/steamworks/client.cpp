@@ -8,16 +8,20 @@ CALLCONV_C(void) client_init(ZhottSteamCtx _ctx, ClientCallbacks callbacks) {
       .lobby_password = "zhottpass",
       .lobby_request = k_uAPICallInvalid,
       .lobby_created = k_uAPICallInvalid,
-      .lobby_id = CSteamID(),
+      .lobby_id = 0,
       .server_conn = k_HSteamNetConnection_Invalid,
       .callbacks = callbacks,
   };
-  SteamMatchmaking()->AddRequestLobbyListStringFilter(
-      "zhott_password", ctx->client.lobby_password, k_ELobbyComparisonEqual);
+
+  auto matchmaking = SteamAPI_SteamMatchmaking();
+  SteamAPI_ISteamMatchmaking_AddRequestLobbyListStringFilter(
+      matchmaking, "zhott_password", ctx->client.lobby_password,
+      k_ELobbyComparisonEqual);
 
   ctx->client.initialized = true;
 
-  SteamNetworkingUtils()->InitRelayNetworkAccess();
+  auto net_utils = SteamAPI_SteamNetworkingUtils_SteamAPI();
+  SteamAPI_ISteamNetworkingUtils_InitRelayNetworkAccess(net_utils);
 }
 
 CALLCONV_C(void) client_deinit(ZhottSteamCtx _ctx) {
@@ -25,15 +29,21 @@ CALLCONV_C(void) client_deinit(ZhottSteamCtx _ctx) {
   ctx->client.initialized = false;
 
   if (ctx->client.server_conn) {
-    SteamNetworkingSockets()->CloseConnection(
-        ctx->client.server_conn, k_ESteamNetConnectionEnd_AppException_Generic,
-        NULL, false);
+    auto net_sockets = SteamAPI_SteamNetworkingSockets_SteamAPI();
+    auto _ = SteamAPI_ISteamNetworkingSockets_CloseConnection(
+        net_sockets, ctx->client.server_conn,
+        k_ESteamNetConnectionEnd_AppException_Generic, NULL, false);
   }
 }
 
 static void client_callback_tick(ZhottSteamContext *ctx) {
-  HSteamPipe hSteamPipe = SteamAPI_GetHSteamPipe();
+  auto matchmaking = SteamAPI_SteamMatchmaking();
+  auto gameserver = SteamAPI_SteamGameServer();
+  auto net_sockets = SteamAPI_SteamNetworkingSockets_SteamAPI();
+
+  auto hSteamPipe = SteamAPI_GetHSteamPipe();
   SteamAPI_ManualDispatch_RunFrame(hSteamPipe);
+
   CallbackMsg_t callback;
   while (SteamAPI_ManualDispatch_GetNextCallback(hSteamPipe, &callback)) {
     switch (callback.m_iCallback) {
@@ -42,15 +52,15 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
 
       bool found = false;
       for (int i = 0; i < event->m_nLobbiesMatching; i++) {
-        auto lobby = SteamMatchmaking()->GetLobbyByIndex(i);
-        SteamMatchmaking()->JoinLobby(lobby);
+        auto lobby = SteamAPI_ISteamMatchmaking_GetLobbyByIndex(matchmaking, i);
+        auto _ = SteamAPI_ISteamMatchmaking_JoinLobby(matchmaking, lobby);
         found = true;
         break;
       }
 
       if (!found) {
-        ctx->client.lobby_created =
-            SteamMatchmaking()->CreateLobby(k_ELobbyTypePublic, 4);
+        ctx->client.lobby_created = SteamAPI_ISteamMatchmaking_CreateLobby(
+            matchmaking, k_ELobbyTypePublic, 4);
       }
     } break;
     case LobbyCreated_t::k_iCallback: {
@@ -58,35 +68,39 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
       ctx->client.lobby_id = event->m_ulSteamIDLobby;
       printf("lobby created: %llu\n", event->m_ulSteamIDLobby);
 
-      SteamMatchmaking()->SetLobbyGameServer(ctx->client.lobby_id, 0, 0,
-                                             SteamGameServer()->GetSteamID());
-      SteamMatchmaking()->SetLobbyData(ctx->client.lobby_id, "name",
-                                       "zhottem lobby lesgoo");
-      SteamMatchmaking()->SetLobbyData(ctx->client.lobby_id, "zhott_password",
-                                       ctx->client.lobby_password);
+      auto server_id = SteamAPI_ISteamGameServer_GetSteamID(gameserver);
+      SteamAPI_ISteamMatchmaking_SetLobbyGameServer(
+          matchmaking, ctx->client.lobby_id, 0, 0, server_id);
+      auto _ = SteamAPI_ISteamMatchmaking_SetLobbyData(
+          matchmaking, ctx->client.lobby_id, "name", "zhottem lobby lesgoo");
+      _ = SteamAPI_ISteamMatchmaking_SetLobbyData(
+          matchmaking, ctx->client.lobby_id, "zhott_password",
+          ctx->client.lobby_password);
     } break;
     case LobbyEnter_t::k_iCallback: {
       auto event = (LobbyEnter_t *)callback.m_pubParam;
       if (event->m_EChatRoomEnterResponse == k_EChatRoomEnterResponseSuccess) {
         printf("lobby joined successfully\n");
 
-        CSteamID server_id = CSteamID();
-        if (SteamMatchmaking()->GetLobbyGameServer(event->m_ulSteamIDLobby,
-                                                   NULL, NULL, &server_id)) {
-          SteamNetworkingIdentity identity;
-          identity.SetSteamID(server_id);
+        uint64_steamid server_id = 0;
+        if (SteamAPI_ISteamMatchmaking_GetLobbyGameServer(
+                matchmaking, event->m_ulSteamIDLobby, NULL, NULL,
+                (CSteamID *)&server_id)) {
+          SteamNetworkingIdentity identity = {};
+          SteamAPI_SteamNetworkingIdentity_Clear(&identity);
+          SteamAPI_SteamNetworkingIdentity_SetSteamID(&identity, server_id);
+
           printf("trying to connect to server\n");
-          ctx->client.server_conn =
-              SteamNetworkingSockets()->ConnectP2P(identity, 0, 0, nullptr);
+          ctx->client.server_conn = SteamAPI_ISteamNetworkingSockets_ConnectP2P(
+              net_sockets, identity, 0, 0, NULL);
         }
 
-        auto num =
-            SteamMatchmaking()->GetNumLobbyMembers(event->m_ulSteamIDLobby);
+        auto num = SteamAPI_ISteamMatchmaking_GetNumLobbyMembers(
+            matchmaking, event->m_ulSteamIDLobby);
         for (int i = 0; i < num; i++) {
-          printf("lobby member %d %llu\n", i,
-                 SteamMatchmaking()
-                     ->GetLobbyMemberByIndex(event->m_ulSteamIDLobby, i)
-                     .ConvertToUint64());
+          auto lobby = SteamAPI_ISteamMatchmaking_GetLobbyMemberByIndex(
+              matchmaking, event->m_ulSteamIDLobby, i);
+          printf("lobby member %d %llu\n", i, lobby);
         }
       } else {
         printf("can't join lobby %d\n", event->m_EChatRoomEnterResponse);
@@ -95,29 +109,32 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
     case LobbyDataUpdate_t::k_iCallback: {
       auto event = (LobbyDataUpdate_t *)callback.m_pubParam;
       auto lobby = event->m_ulSteamIDLobby;
-      auto num = SteamMatchmaking()->GetLobbyDataCount(lobby);
+      auto num =
+          SteamAPI_ISteamMatchmaking_GetLobbyDataCount(matchmaking, lobby);
+
       for (int i = 0; i < num; i++) {
         char key[256];
         char val[256];
-        if (SteamMatchmaking()->GetLobbyDataByIndex(lobby, i, key, 256, val,
-                                                    256)) {
+        if (SteamAPI_ISteamMatchmaking_GetLobbyDataByIndex(
+                matchmaking, lobby, i, key, 256, val, 256)) {
           printf("lobby %llu data %d %s: %s\n", lobby, i, key, val);
         }
       }
     } break;
     case SteamAPICallCompleted_t::k_iCallback: {
-      // auto pCallCompleted = (SteamAPICallCompleted_t *)callback.m_pubParam;
-      // void *pTmpCallResult = zalloc(callback.m_cubParam);
-      // bool bFailed;
-      // if (SteamAPI_ManualDispatch_GetAPICallResult(
-      //         hSteamPipe, pCallCompleted->m_hAsyncCall, pTmpCallResult,
-      //         callback.m_cubParam, callback.m_iCallback, &bFailed)) {
-      //   // Dispatch the call result to the registered handler(s) for the
-      //   // call identified by pCallCompleted->m_hAsyncCall
-      //   printf("manual dispatch %d %llu\n", pCallCompleted->m_iCallback,
-      //          pCallCompleted->m_hAsyncCall);
-      // }
-      // zfree(pTmpCallResult);
+      auto pCallCompleted = (SteamAPICallCompleted_t *)callback.m_pubParam;
+
+      void *pTmpCallResult = zalloc(callback.m_cubParam);
+      bool bFailed;
+      if (SteamAPI_ManualDispatch_GetAPICallResult(
+              hSteamPipe, pCallCompleted->m_hAsyncCall, pTmpCallResult,
+              callback.m_cubParam, callback.m_iCallback, &bFailed)) {
+        // Dispatch the call result to the registered handler(s) for the
+        // call identified by pCallCompleted->m_hAsyncCall
+        printf("manual dispatch %d %llu\n", pCallCompleted->m_iCallback,
+               pCallCompleted->m_hAsyncCall);
+      }
+      zfree(pTmpCallResult);
     } break;
     case SteamNetAuthenticationStatus_t::k_iCallback: {
       auto event = (SteamNetAuthenticationStatus_t *)callback.m_pubParam;
@@ -130,7 +147,8 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
              event->m_eAvail);
       if (event->m_eAvail == k_ESteamNetworkingAvailability_Current) {
         printf("lobby request made from client\n");
-        ctx->client.lobby_request = SteamMatchmaking()->RequestLobbyList();
+        ctx->client.lobby_request =
+            SteamAPI_ISteamMatchmaking_RequestLobbyList(matchmaking);
       }
     } break;
     case SteamNetConnectionStatusChangedCallback_t::k_iCallback: {
@@ -153,9 +171,9 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
                      k_ESteamNetworkingConnectionState_ClosedByPeer) {
         // rejected/closed by remote
         printf("rejected/closed connection by remote\n");
-        auto _ = SteamNetworkingSockets()->CloseConnection(
-            event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic, NULL,
-            false);
+        auto _ = SteamAPI_ISteamNetworkingSockets_CloseConnection(
+            net_sockets, event->m_hConn,
+            k_ESteamNetConnectionEnd_AppException_Generic, NULL, false);
       } else if ((event->m_eOldState ==
                       k_ESteamNetworkingConnectionState_Connecting ||
                   event->m_eOldState ==
@@ -164,20 +182,26 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
                      k_ESteamNetworkingConnectionState_ProblemDetectedLocally) {
         // closed by localhost
         printf("rejected/closed connection by localhost\n");
-        auto _ = SteamNetworkingSockets()->CloseConnection(
-            event->m_hConn, k_ESteamNetConnectionEnd_AppException_Generic, NULL,
-            false);
+        auto _ = SteamAPI_ISteamNetworkingSockets_CloseConnection(
+            net_sockets, event->m_hConn,
+            k_ESteamNetConnectionEnd_AppException_Generic, NULL, false);
 
-        auto server_id = CSteamID();
-        SteamMatchmaking()->GetLobbyGameServer(ctx->client.lobby_id, NULL, NULL,
-                                               &server_id);
-        printf("server ids %llu %llu\n", server_id.ConvertToUint64(),
-               SteamGameServer()->GetSteamID().ConvertToUint64());
+        uint64_steamid server_id = 0;
+        _ = SteamAPI_ISteamMatchmaking_GetLobbyGameServer(
+            matchmaking, ctx->client.lobby_id, NULL, NULL,
+            (CSteamID *)&server_id);
+
+        auto gameserver_steamid =
+            SteamAPI_ISteamGameServer_GetSteamID(gameserver);
+        printf("server ids %llu %llu\n", server_id, gameserver_steamid);
+
         SteamNetworkingIdentity identity;
-        identity.SetSteamID(server_id);
+        SteamAPI_SteamNetworkingIdentity_Clear(&identity);
+        SteamAPI_SteamNetworkingIdentity_SetSteamID(&identity, server_id);
+
         printf("trying to connect to server\n");
-        ctx->client.server_conn =
-            SteamNetworkingSockets()->ConnectP2P(identity, 0, 0, nullptr);
+        ctx->client.server_conn = SteamAPI_ISteamNetworkingSockets_ConnectP2P(
+            net_sockets, identity, 0, 0, NULL);
       }
     } break;
     default: {
@@ -189,32 +213,33 @@ static void client_callback_tick(ZhottSteamContext *ctx) {
 }
 
 static void client_socket_tick(ZhottSteamContext *ctx) {
-  if (!SteamNetworkingSockets())
+  auto net_sockets = SteamAPI_SteamNetworkingSockets_SteamAPI();
+  if (!net_sockets)
     return;
   if (ctx->client.server_conn == k_HSteamNetConnection_Invalid)
     return;
 
   SteamNetworkingMessage_t *msgs[32];
-  int res = SteamNetworkingSockets()->ReceiveMessagesOnConnection(
-      ctx->client.server_conn, msgs, 32);
+  int res = SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnConnection(
+      net_sockets, ctx->client.server_conn, msgs, 32);
   for (int i = 0; i < res; i++) {
     SteamNetworkingMessage_t *message = msgs[i];
 
-    uint8_t *buf = (uint8_t *)message->GetData();
+    uint8_t *buf = (uint8_t *)message->m_pData;
     auto header = (ClientMessageHeader *)buf;
 
     auto callbacks = ctx->client.callbacks;
-    callbacks.msg_recv(
-        callbacks.ctx,
-        NetworkMessage{
-            .data = buf + sizeof(ClientMessageHeader),
-            .len = message->GetSize() - (uint32_t)sizeof(ClientMessageHeader),
-            .conn = header->conn,
-            .user_steam_id = header->user_steam_id,
-            .message_number = header->message_number,
-        });
+    callbacks.msg_recv(callbacks.ctx,
+                       NetworkMessage{
+                           .data = buf + sizeof(ClientMessageHeader),
+                           .len = (uint32_t)message->m_cbSize -
+                                  (uint32_t)sizeof(ClientMessageHeader),
+                           .conn = header->conn,
+                           .user_steam_id = header->user_steam_id,
+                           .message_number = header->message_number,
+                       });
 
-    message->Release();
+    SteamAPI_SteamNetworkingMessage_t_Release(message);
     message = nullptr;
   }
 }
@@ -242,8 +267,9 @@ CALLCONV_C(void) client_msg_send(ZhottSteamCtx _ctx, OutgoingMessage msg) {
   if (msg.flags.no_delay) {
     flags |= k_nSteamNetworkingSend_NoDelay;
   }
-  auto _ = SteamNetworkingSockets()->SendMessageToConnection(
-      ctx->client.server_conn, msg.data, msg.len, flags, NULL);
+  auto net_sockets = SteamAPI_SteamNetworkingSockets_SteamAPI();
+  auto _ = SteamAPI_ISteamNetworkingSockets_SendMessageToConnection(
+      net_sockets, ctx->client.server_conn, msg.data, msg.len, flags, NULL);
 }
 
 CALLCONV_C(bool) client_is_connected(ZhottSteamCtx _ctx) {

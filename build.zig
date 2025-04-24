@@ -272,7 +272,7 @@ fn step(b: *std.Build, v: struct {
             compile_step.addIncludePath(v.stb_dep.path("./"));
             compile_step.addIncludePath(b.path("./src"));
 
-            compile_step.addIncludePath(v.steamworks_dep.path("./public/steam"));
+            compile_step.addIncludePath(v.steamworks_dep.path("./public"));
             if (is_windows) {
                 compile_step.addLibraryPath(v.steamworks_dep.path("./redistributable_bin/win64"));
                 compile_step.linkSystemLibrary("steam_api64");
@@ -285,6 +285,7 @@ fn step(b: *std.Build, v: struct {
             var steam_flags = Flags.init(v.alloc);
             try steam_flags.appendSlice(compile_commands_flags);
             try steam_flags.append("-Wno-invalid-offsetof");
+            try steam_flags.append("-Wgnu-alignof-expression");
             if (!is_windows) try steam_flags.appendSlice(strict_cxx_flags);
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src/steamworks"),
@@ -357,7 +358,7 @@ fn step(b: *std.Build, v: struct {
             try jolt_flags.appendSlice(&[_][]const u8{
                 "-std=c++17",
                 "-fno-exceptions",
-                "-fno-sanitize=undefined",
+                // "-fno-sanitize=undefined",
                 "-fno-access-control",
                 "-fno-rtti",
             });

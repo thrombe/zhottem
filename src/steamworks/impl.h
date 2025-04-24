@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-#include <steam_api.h>
-#include <steam_gameserver.h>
+#include <steam/steam_api_flat.h>
+#include <steam/steam_gameserver.h>
 
 extern "C" {
 #define CALLCONV_C(typ) extern "C" typ __cdecl
@@ -32,7 +32,7 @@ typedef struct {
   bool connected;
   SteamAPICall_t lobby_request;
   SteamAPICall_t lobby_created;
-  CSteamID lobby_id;
+  uint64_steamid lobby_id;
   HSteamNetConnection server_conn;
   ClientCallbacks callbacks;
 } ZhottClient;
