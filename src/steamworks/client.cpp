@@ -28,6 +28,11 @@ CALLCONV_C(void) client_deinit(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   ctx->client.initialized = false;
 
+  if (ctx->client.lobby_id) {
+      auto matchmaking = SteamAPI_SteamMatchmaking();
+      SteamAPI_ISteamMatchmaking_LeaveLobby(matchmaking, ctx->client.lobby_id);
+  }
+
   if (ctx->client.server_conn) {
     auto net_sockets = SteamAPI_SteamNetworkingSockets_SteamAPI();
     auto _ = SteamAPI_ISteamNetworkingSockets_CloseConnection(
