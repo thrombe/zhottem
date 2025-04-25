@@ -16,59 +16,6 @@ pub const NetworkingContext = struct {
     ctx: *Ctx,
     thread: ?std.Thread,
 
-    const Ctx = struct {
-        steam: c.ZhottSteamCtx,
-        options: Options,
-
-        client: ?Client = null,
-        server: ?Server = null,
-
-        ctx_mutex: std.Thread.Mutex = .{},
-        quit: utils_mod.Fuse = .{},
-
-        fn start(self: *@This()) void {
-            while (true) {
-                if (self.quit.unfuse()) {
-                    return;
-                }
-
-                self.tick() catch |e| {
-                    utils_mod.dump_error(e);
-                };
-
-                std.Thread.sleep(self.options.tick_fps_inv);
-            }
-        }
-
-        fn tick(self: *@This()) !void {
-            self.ctx_mutex.lock();
-            defer self.ctx_mutex.unlock();
-
-            if (self.client) |*e| e.tick();
-            if (self.server) |*e| e.tick();
-        }
-    };
-
-    const Options = struct {
-        tick_thread: bool = false,
-        tick_fps_inv: u64 = 150,
-    };
-
-    const OutgoingMessage = struct {
-        event: Event,
-        flags: @FieldType(c.OutgoingMessage, "flags") = .{
-            .reliable = true,
-            .force_flush = false,
-            .no_delay = false,
-            .restart_broken_session = true,
-        },
-    };
-    const RecvedMessage = struct {
-        conn: u32,
-        msg_num: i64,
-        event: Event,
-    };
-
     pub fn init(options: Options) !@This() {
         const path = try utils_mod.fspath.cwd_join(allocator.*, "steam_appid.txt");
         defer allocator.free(path);
@@ -184,7 +131,7 @@ pub const NetworkingContext = struct {
             }) catch @panic("OOM");
         }
 
-        pub fn send_message(self: *@This(), conn: u32, from_conn: u32, msg: OutgoingMessage) void {
+        pub fn send_message(self: *@This(), conn: u32, from_conn: u32, msg: OutgoingMessage) !void {
             const event = msg.event;
             c.server_msg_send(self.ctx.steam, conn, from_conn, .{
                 .data = @ptrCast(&event),
@@ -192,6 +139,59 @@ pub const NetworkingContext = struct {
                 .flags = msg.flags,
             });
         }
+    };
+
+    const Ctx = struct {
+        steam: c.ZhottSteamCtx,
+        options: Options,
+
+        client: ?Client = null,
+        server: ?Server = null,
+
+        ctx_mutex: std.Thread.Mutex = .{},
+        quit: utils_mod.Fuse = .{},
+
+        fn start(self: *@This()) void {
+            while (true) {
+                if (self.quit.check()) {
+                    return;
+                }
+
+                self.tick() catch |e| {
+                    utils_mod.dump_error(e);
+                };
+
+                std.Thread.sleep(self.options.tick_fps_inv);
+            }
+        }
+
+        fn tick(self: *@This()) !void {
+            self.ctx_mutex.lock();
+            defer self.ctx_mutex.unlock();
+
+            if (self.client) |*e| e.tick();
+            if (self.server) |*e| e.tick();
+        }
+    };
+
+    const Options = struct {
+        tick_thread: bool = false,
+        tick_fps_inv: u64 = 150,
+    };
+
+    const OutgoingMessage = struct {
+        event: Event,
+        flags: @FieldType(c.OutgoingMessage, "flags") = .{
+            .reliable = true,
+            .force_flush = false,
+            .no_delay = false,
+            .restart_broken_session = true,
+        },
+    };
+    const RecvedMessage = struct {
+        conn: u32,
+        msg_num: i64,
+        event: Event,
     };
 
     pub const Client = struct {
@@ -236,7 +236,7 @@ pub const NetworkingContext = struct {
             }) catch @panic("OOM");
         }
 
-        pub fn send_message(self: *@This(), msg: OutgoingMessage) void {
+        pub fn send_message(self: *@This(), msg: OutgoingMessage) !void {
             const event = msg.event;
             c.client_msg_send(self.ctx.steam, .{
                 .data = @ptrCast(&event),

@@ -770,7 +770,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     std.debug.print("waiting to connect to server...\n", .{});
     try net_client.wait_for_connection();
     std.debug.print("connected to server...\n", .{});
-    net_client.send_message(.{
+    try net_client.send_message(.{
         .flags = .{ .reliable = true },
         .event = .{ .join = {} },
     });
@@ -779,7 +779,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             if (s.messages.try_recv()) |msg| {
                 switch (msg.event) {
                     .join => {
-                        s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } });
+                        try s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } });
                     },
                     else => @panic("unexpected message"),
                 }
@@ -796,7 +796,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             player.pid.id = e.id;
             player.pid.conn = msg.conn;
 
-            net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
+            try net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
                 .x = player.transform.pos.x,
                 .y = player.transform.pos.y,
                 .z = player.transform.pos.z,
@@ -1255,9 +1255,9 @@ pub const AppState = struct {
                 window.queue_close();
 
                 if (app.net_server) |_| {
-                    app.net_client.send_message(.{ .event = .{ .quit = {} } });
+                    try app.net_client.send_message(.{ .event = .{ .quit = {} } });
                 } else {
-                    app.net_client.send_message(.{ .event = .{ .despawn_player = .{ .id = pid.id } } });
+                    try app.net_client.send_message(.{ .event = .{ .despawn_player = .{ .id = pid.id } } });
                 }
             }
             if (kb.escape.just_pressed() and self.focus) {
@@ -1282,48 +1282,48 @@ pub const AppState = struct {
         }
 
         {
-            app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
+            try app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
 
             try app.net_ctx.tick();
             if (app.net_server) |s| while (s.messages.try_recv()) |e| {
                 switch (e.event) {
                     .join => {
                         self.client_count += 1;
-                        s.send_message(e.conn, 0, .{ .event = .{ .setid = .{ .id = self.client_count } } });
+                        try s.send_message(e.conn, 0, .{ .event = .{ .setid = .{ .id = self.client_count } } });
                     },
                     .spawn_player => {
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.Transform });
                         while (it.next()) |p| {
                             // notify new player about all other players.
-                            s.send_message(e.conn, p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
+                            try s.send_message(e.conn, p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
                                 .x = p.t.pos.x,
                                 .y = p.t.pos.y,
                                 .z = p.t.pos.z,
                             } } } });
 
                             // notify other players about this player
-                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
+                            try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .despawn_player => {
                         // tell everyone this player left
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
-                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
+                            try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .input => {
                         // send this player's inputs to everyone
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
-                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
+                            try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .quit => {
                         // tell everyone to quit themselves
                         var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
-                            s.send_message(p.p.conn, e.conn, .{ .event = e.event });
+                            try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .setid => {
