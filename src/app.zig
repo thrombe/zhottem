@@ -45,7 +45,10 @@ const InstanceManager = resources_mod.InstanceManager;
 const InstanceAllocator = resources_mod.InstanceAllocator;
 
 const steamworks_mod = @import("steamworks.zig");
-const NetworkingContext = steamworks_mod.NetworkingContext;
+// const NetworkingContext = steamworks_mod.NetworkingContext;
+
+const network_mod = @import("network.zig");
+const NetworkingContext = network_mod.NetworkingContext;
 
 const C = struct {
     usingnamespace Components;
