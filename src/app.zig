@@ -778,18 +778,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .event = .{ .join = {} },
     });
     while (!net_client.messages.can_recv()) {
-        if (net_server) |s| {
-            if (s.messages.try_recv()) |msg| {
-                switch (msg.event) {
-                    .join => {
-                        try s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } });
-                    },
-                    else => @panic("unexpected message"),
-                }
-            }
-        }
-        std.Thread.sleep(std.time.ns_per_ms * 50);
+        if (net_server) |s| if (s.messages.try_recv()) |msg| switch (msg.event) {
+            .join => try s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } }),
+            else => @panic("unexpected message"),
+        };
         try net_ctx.tick();
+        std.Thread.sleep(std.time.ns_per_ms * net_ctx.ctx.options.tick_fps_inv);
     }
     std.debug.print("waiting for server message...\n", .{});
 

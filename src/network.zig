@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const utils_mod = @import("utils.zig");
 
@@ -10,6 +11,12 @@ const allocator = main.allocator;
 const Engine = @import("engine.zig");
 
 const posix = std.posix;
+
+// windows does not support MSG.DONTWAIT
+// so we only use non-blocking sockets on windows.
+// on linux however - we can keep the blocking sockets and set them to non-blocking
+// for one call to recvfrom using MSG.DONTWAIT
+const is_windows = builtin.os.tag == .windows;
 
 pub const Event = union(enum(u8)) {
     join,
@@ -144,7 +151,11 @@ pub const NetworkingContext = struct {
         quit: utils_mod.Fuse = .{},
 
         fn init(ctx: *Ctx) !*@This() {
-            const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
+            const sock = try posix.socket(
+                posix.AF.INET,
+                posix.SOCK.DGRAM | if (is_windows) posix.SOCK.NONBLOCK else 0,
+                posix.IPPROTO.UDP,
+            );
             errdefer posix.close(sock);
 
             try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&posix.timeval{
@@ -189,8 +200,8 @@ pub const NetworkingContext = struct {
         }
 
         fn start(ctx: *Ctx) void {
-            while (true) if (ctx.server) |*e| if (e.quit.check()) break else e.tick_once(true) catch |err| switch (err) {
-                error.WouldBlock => continue,
+            while (true) if (ctx.server) |*e| if (e.quit.check()) break else e.tick_once(0) catch |err| switch (err) {
+                error.WouldBlock => if (is_windows) std.Thread.sleep(ctx.options.tick_fps_inv),
                 else => {
                     utils_mod.dump_error(err);
                     std.Thread.sleep(ctx.options.tick_fps_inv);
@@ -211,12 +222,10 @@ pub const NetworkingContext = struct {
             ctx.server = null;
         }
 
-        fn tick_once(self: *@This(), blocking: bool) !void {
+        fn tick_once(self: *@This(), flags: u32) !void {
             var buf: [1500]u8 = undefined;
             var src_addrlen: posix.socklen_t = @sizeOf(posix.sockaddr);
             var src_addr: posix.sockaddr align(4) = std.mem.zeroes(posix.sockaddr);
-
-            const flags: u32 = if (blocking) 0 else posix.MSG.DONTWAIT;
 
             const n = try posix.recvfrom(
                 self.socket,
@@ -247,8 +256,8 @@ pub const NetworkingContext = struct {
             });
         }
 
-        pub fn tick(self: *@This()) !void {
-            while (true) self.tick_once(false) catch |e| switch (e) {
+        fn tick(self: *@This()) !void {
+            while (true) self.tick_once(if (is_windows) 0 else posix.MSG.DONTWAIT) catch |e| switch (e) {
                 error.WouldBlock => break,
                 else => return e,
             };
@@ -282,7 +291,11 @@ pub const NetworkingContext = struct {
         quit: utils_mod.Fuse = .{},
 
         fn init(ctx: *Ctx) !*@This() {
-            const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
+            const sock = try posix.socket(
+                posix.AF.INET,
+                posix.SOCK.DGRAM | if (is_windows) posix.SOCK.NONBLOCK else 0,
+                posix.IPPROTO.UDP,
+            );
             errdefer posix.close(sock);
 
             try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&posix.timeval{
@@ -318,8 +331,8 @@ pub const NetworkingContext = struct {
         }
 
         fn start(ctx: *Ctx) void {
-            while (true) if (ctx.client) |*e| if (e.quit.check()) break else e.tick_once(true) catch |err| switch (err) {
-                error.WouldBlock => continue,
+            while (true) if (ctx.client) |*e| if (e.quit.check()) break else e.tick_once(0) catch |err| switch (err) {
+                error.WouldBlock => if (is_windows) std.Thread.sleep(ctx.options.tick_fps_inv),
                 else => {
                     utils_mod.dump_error(err);
                     std.Thread.sleep(ctx.options.tick_fps_inv);
@@ -338,12 +351,10 @@ pub const NetworkingContext = struct {
             ctx.client = null;
         }
 
-        fn tick_once(self: *@This(), blocking: bool) !void {
+        fn tick_once(self: *@This(), flags: u32) !void {
             var buf: [1500]u8 = undefined;
             var src_addrlen: posix.socklen_t = @sizeOf(posix.sockaddr);
             var src_addr: posix.sockaddr align(4) = std.mem.zeroes(posix.sockaddr);
-
-            const flags: u32 = if (blocking) 0 else posix.MSG.DONTWAIT;
 
             const n = try posix.recvfrom(
                 self.socket,
@@ -365,8 +376,8 @@ pub const NetworkingContext = struct {
             });
         }
 
-        pub fn tick(self: *@This()) !void {
-            while (true) self.tick_once(false) catch |e| switch (e) {
+        fn tick(self: *@This()) !void {
+            while (true) self.tick_once(if (is_windows) 0 else posix.MSG.DONTWAIT) catch |e| switch (e) {
                 error.WouldBlock => break,
                 else => return e,
             };
@@ -406,6 +417,7 @@ pub const NetworkingContext = struct {
         }
 
         pub fn wait_for_connection(self: *@This()) !void {
+            // no need to wait as there's no connection for raw udp sockets.
             _ = self;
         }
     };
