@@ -125,6 +125,7 @@
           shaderc
           glfw
           portaudio
+          wine64
 
           vulkan-headers
           vulkan-validation-layers

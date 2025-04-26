@@ -501,6 +501,7 @@ pub fn build(b: *std.Build) !void {
     hot_run_step.dependOn(&hot_run_cmd.step);
 
     const exe_run_cmd = b.addRunArtifact(exe);
+    b.enable_wine = true;
     exe_run_cmd.step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     if (b.args) |args| {
         exe_run_cmd.addArgs(args);
