@@ -45,7 +45,7 @@ const HotReloader = struct {
 
     path: [:0]const u8,
     hot_cache: []const u8,
-    libpath: [:0]const u8,
+    libpath: []const u8,
 
     dylib: std.DynLib,
     vtable: HotVtable,
@@ -93,6 +93,7 @@ const HotReloader = struct {
         defer _ = self.vtable.deinit(self.app);
         defer self.fs.deinit();
         defer allocator.free(self.hot_cache);
+        defer allocator.free(self.libpath);
     }
 
     fn tick(self: *@This()) !bool {
@@ -193,9 +194,7 @@ export fn hot_init() callconv(.c) ?*anyopaque {
 
 export fn hot_tick(_app: *anyopaque) callconv(.c) HotAction {
     switch (options.mode) {
-        .exe, .hotexe => {
-            return .quit;
-        },
+        .exe, .hotexe => return .quit,
         .hotlib => {
             const app: *HotApp = @ptrCast(@alignCast(_app));
 
@@ -211,9 +210,7 @@ export fn hot_tick(_app: *anyopaque) callconv(.c) HotAction {
 
 export fn hot_pre_reload(_app: *anyopaque) callconv(.c) HotAction {
     switch (options.mode) {
-        .exe, .hotexe => {
-            return .nothing;
-        },
+        .exe, .hotexe => return .nothing,
         .hotlib => {
             const app: *HotApp = @ptrCast(@alignCast(_app));
 
@@ -229,9 +226,7 @@ export fn hot_pre_reload(_app: *anyopaque) callconv(.c) HotAction {
 
 export fn hot_post_reload(_app: *anyopaque) callconv(.c) HotAction {
     switch (options.mode) {
-        .exe, .hotexe => {
-            return .nothing;
-        },
+        .exe, .hotexe => return .nothing,
         .hotlib => {
             const app: *HotApp = @ptrCast(@alignCast(_app));
 
@@ -247,9 +242,7 @@ export fn hot_post_reload(_app: *anyopaque) callconv(.c) HotAction {
 
 export fn hot_deinit(_app: *anyopaque) callconv(.c) HotAction {
     switch (options.mode) {
-        .exe, .hotexe => {
-            return .quit;
-        },
+        .exe, .hotexe => return .quit,
         .hotlib => {
             const app: *HotApp = @ptrCast(@alignCast(_app));
 
