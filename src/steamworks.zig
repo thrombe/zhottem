@@ -87,59 +87,23 @@ pub const NetworkingContext = struct {
         try self.ctx.tick();
     }
 
-    pub const Server = struct {
-        ctx: *Ctx,
-        messages: utils_mod.Channel(RecvedMessage),
+    pub fn pre_reload(self: *@This()) !void {
+        _ = self.ctx.quit.fuse();
+        defer _ = self.ctx.quit.unfuse();
+        if (self.thread) |t| t.join();
 
-        fn init(ctx: *Ctx) !*@This() {
-            ctx.ctx_mutex.lock();
-            defer ctx.ctx_mutex.unlock();
+        if (self.ctx.client) |*e| e.pre_reload();
+        if (self.ctx.server) |*e| e.pre_reload();
+    }
 
-            if (!c.server_init(ctx.steam, .{
-                .ctx = &ctx.server,
-                .msg_recv = @ptrCast(&msg_recv),
-            })) {
-                return error.CouldNotInitServer;
-            }
-            errdefer c.server_deinit(ctx.steam);
+    pub fn post_reload(self: *@This()) !void {
+        if (self.ctx.client) |*e| e.post_reload();
+        if (self.ctx.server) |*e| e.post_reload();
 
-            ctx.server = .{ .ctx = ctx, .messages = try .init(allocator.*) };
-            return &ctx.server.?;
+        if (self.ctx.options.tick_thread) {
+            self.thread = try std.Thread.spawn(.{}, Ctx.start, .{self.ctx});
         }
-
-        pub fn deinit(self: *@This()) void {
-            const ctx = self.ctx;
-            ctx.ctx_mutex.lock();
-            defer ctx.ctx_mutex.unlock();
-
-            c.server_deinit(ctx.steam);
-            self.messages.deinit();
-
-            ctx.server = null;
-        }
-
-        fn tick(self: *@This()) void {
-            c.server_tick(self.ctx.steam);
-        }
-
-        fn msg_recv(self: *@This(), msg: c.NetworkMessage) callconv(.C) void {
-            const event = std.mem.bytesToValue(Event, msg.data[0..msg.len]);
-            self.messages.send(.{
-                .conn = msg.conn,
-                .msg_num = msg.message_number,
-                .event = event,
-            }) catch @panic("OOM");
-        }
-
-        pub fn send_message(self: *@This(), conn: u32, from_conn: u32, msg: OutgoingMessage) !void {
-            const event = msg.event;
-            c.server_msg_send(self.ctx.steam, conn, from_conn, .{
-                .data = @ptrCast(&event),
-                .len = @sizeOf(@TypeOf(msg.event)),
-                .flags = msg.flags,
-            });
-        }
-    };
+    }
 
     const Ctx = struct {
         steam: c.ZhottSteamCtx,
@@ -194,6 +158,71 @@ pub const NetworkingContext = struct {
         event: Event,
     };
 
+    pub const Server = struct {
+        ctx: *Ctx,
+        messages: utils_mod.Channel(RecvedMessage),
+
+        fn init(ctx: *Ctx) !*@This() {
+            ctx.ctx_mutex.lock();
+            defer ctx.ctx_mutex.unlock();
+
+            if (!c.server_init(ctx.steam, .{
+                .ctx = &ctx.server,
+                .msg_recv = @ptrCast(&msg_recv),
+            })) {
+                return error.CouldNotInitServer;
+            }
+            errdefer c.server_deinit(ctx.steam);
+
+            ctx.server = .{ .ctx = ctx, .messages = try .init(allocator.*) };
+            return &ctx.server.?;
+        }
+
+        pub fn deinit(self: *@This()) void {
+            const ctx = self.ctx;
+            ctx.ctx_mutex.lock();
+            defer ctx.ctx_mutex.unlock();
+
+            c.server_deinit(ctx.steam);
+            self.messages.deinit();
+
+            ctx.server = null;
+        }
+
+        fn tick(self: *@This()) void {
+            c.server_tick(self.ctx.steam);
+        }
+
+        fn pre_reload(self: *@This()) void {
+            c.server_pre_reload(self.ctx.steam);
+        }
+
+        fn post_reload(self: *@This()) void {
+            c.server_post_reload(self.ctx.steam, .{
+                .ctx = self,
+                .msg_recv = @ptrCast(&msg_recv),
+            });
+        }
+
+        fn msg_recv(self: *@This(), msg: c.NetworkMessage) callconv(.C) void {
+            const event = std.mem.bytesToValue(Event, msg.data[0..msg.len]);
+            self.messages.send(.{
+                .conn = msg.conn,
+                .msg_num = msg.message_number,
+                .event = event,
+            }) catch @panic("OOM");
+        }
+
+        pub fn send_message(self: *@This(), conn: u32, from_conn: u32, msg: OutgoingMessage) !void {
+            const event = msg.event;
+            c.server_msg_send(self.ctx.steam, conn, from_conn, .{
+                .data = @ptrCast(&event),
+                .len = @sizeOf(@TypeOf(msg.event)),
+                .flags = msg.flags,
+            });
+        }
+    };
+
     pub const Client = struct {
         ctx: *Ctx,
         messages: utils_mod.Channel(RecvedMessage),
@@ -225,6 +254,17 @@ pub const NetworkingContext = struct {
 
         fn tick(self: *@This()) void {
             c.client_tick(self.ctx.steam);
+        }
+
+        fn pre_reload(self: *@This()) void {
+            c.client_pre_reload(self.ctx.steam);
+        }
+
+        fn post_reload(self: *@This()) void {
+            c.client_post_reload(self.ctx.steam, .{
+                .ctx = self,
+                .msg_recv = @ptrCast(&msg_recv),
+            });
         }
 
         fn msg_recv(self: *@This(), msg: c.NetworkMessage) callconv(.C) void {

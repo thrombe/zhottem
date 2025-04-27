@@ -230,3 +230,14 @@ server_msg_send(ZhottSteamCtx _ctx, uint32_t conn, uint32_t from_conn,
 
   zfree(buf);
 }
+
+CALLCONV_C(void) server_pre_reload(ZhottSteamCtx _ctx) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+  ctx->server.callbacks = {};
+}
+
+CALLCONV_C(void)
+server_post_reload(ZhottSteamCtx _ctx, ServerCallbacks callbacks) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+  ctx->server.callbacks = callbacks;
+}

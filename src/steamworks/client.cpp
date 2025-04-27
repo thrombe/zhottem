@@ -29,8 +29,8 @@ CALLCONV_C(void) client_deinit(ZhottSteamCtx _ctx) {
   ctx->client.initialized = false;
 
   if (ctx->client.lobby_id) {
-      auto matchmaking = SteamAPI_SteamMatchmaking();
-      SteamAPI_ISteamMatchmaking_LeaveLobby(matchmaking, ctx->client.lobby_id);
+    auto matchmaking = SteamAPI_SteamMatchmaking();
+    SteamAPI_ISteamMatchmaking_LeaveLobby(matchmaking, ctx->client.lobby_id);
   }
 
   if (ctx->client.server_conn) {
@@ -280,4 +280,15 @@ CALLCONV_C(void) client_msg_send(ZhottSteamCtx _ctx, OutgoingMessage msg) {
 CALLCONV_C(bool) client_is_connected(ZhottSteamCtx _ctx) {
   auto ctx = (ZhottSteamContext *)_ctx;
   return ctx->client.connected;
+}
+
+CALLCONV_C(void) client_pre_reload(ZhottSteamCtx _ctx) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+  ctx->client.callbacks = {};
+}
+
+CALLCONV_C(void)
+client_post_reload(ZhottSteamCtx _ctx, ClientCallbacks callbacks) {
+  auto ctx = (ZhottSteamContext *)_ctx;
+  ctx->client.callbacks = callbacks;
 }
