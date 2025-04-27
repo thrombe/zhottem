@@ -119,9 +119,8 @@ const HotReloader = struct {
                         .nothing => {},
                         .errored => return error.Errored,
                     }
+                    errdefer _ = self.vtable.post_reload(self.app);
 
-                    // _ = self.vtable.deinit(self.app);
-                    self.dylib.close();
                     var dyn = try std.DynLib.open(new_path);
                     errdefer dyn.close();
 
@@ -130,13 +129,17 @@ const HotReloader = struct {
                         return true;
                     };
 
-                    self.dylib = dyn;
-                    self.vtable = vtable;
-                    switch (self.vtable.post_reload(self.app)) {
+                    switch (vtable.post_reload(self.app)) {
                         .quit => return false,
                         .nothing => {},
                         .errored => return error.Errored,
                     }
+
+                    // NOTE: closing this dylib before we open the new one crashes somewhere i can't debug
+                    // so don't do that.
+                    self.dylib.close();
+                    self.dylib = dyn;
+                    self.vtable = vtable;
                 }
             }
         }
@@ -349,13 +352,13 @@ const HotApp = struct {
     }
 
     fn pre_reload(self: *@This()) !void {
-        self.engine.pre_reload();
         try self.app.pre_reload();
+        try self.engine.pre_reload();
     }
 
     fn post_reload(self: *@This()) !void {
         allocator.* = self.gpa.allocator();
-        self.engine.post_reload();
+        try self.engine.post_reload();
         try self.app.post_reload();
     }
 

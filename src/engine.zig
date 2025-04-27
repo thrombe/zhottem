@@ -51,11 +51,11 @@ pub fn deinit(self: *@This()) void {
     self.window.deinit();
 }
 
-pub fn pre_reload(self: *@This()) void {
+pub fn pre_reload(self: *@This()) !void {
     self.window.pre_reload();
 }
 
-pub fn post_reload(self: *@This()) void {
+pub fn post_reload(self: *@This()) !void {
     self.window.post_reload();
 }
 
