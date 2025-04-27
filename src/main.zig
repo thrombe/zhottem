@@ -136,8 +136,10 @@ const HotReloader = struct {
                     }
 
                     // NOTE: closing this dylib before we open the new one crashes somewhere i can't debug
-                    // so don't do that.
-                    self.dylib.close();
+                    //   so don't do that.
+                    // NOTE: closing the dylib at all crashes on windows. se we don't get to do that either.
+                    //   luckily we don't need to care.
+                    // self.dylib.close();
                     self.dylib = dyn;
                     self.vtable = vtable;
                 }
