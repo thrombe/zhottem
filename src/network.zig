@@ -91,6 +91,16 @@ pub const NetworkingContext = struct {
         if (self.ctx.client) |*e| try e.tick();
     }
 
+    pub fn pre_reload(self: *@This()) !void {
+        if (self.ctx.server) |*e| try e.pre_reload();
+        if (self.ctx.client) |*e| try e.pre_reload();
+    }
+
+    pub fn post_reload(self: *@This()) !void {
+        if (self.ctx.server) |*e| try e.post_reload();
+        if (self.ctx.client) |*e| try e.post_reload();
+    }
+
     const Options = struct {
         tick_thread: bool = false,
         tick_fps_inv: u64 = 150,
@@ -207,6 +217,19 @@ pub const NetworkingContext = struct {
                     std.Thread.sleep(ctx.options.tick_fps_inv);
                 },
             };
+        }
+
+        fn pre_reload(self: *@This()) !void {
+            _ = self.quit.fuse();
+            defer _ = self.quit.unfuse();
+
+            if (self.thread) |t| t.join();
+        }
+
+        fn post_reload(self: *@This()) !void {
+            if (self.ctx.options.tick_thread) {
+                self.thread = try std.Thread.spawn(.{}, @This().start, .{self.ctx});
+            }
         }
 
         pub fn deinit(self: *@This()) void {
@@ -338,6 +361,19 @@ pub const NetworkingContext = struct {
                     std.Thread.sleep(ctx.options.tick_fps_inv);
                 },
             };
+        }
+
+        fn pre_reload(self: *@This()) !void {
+            _ = self.quit.fuse();
+            defer _ = self.quit.unfuse();
+
+            if (self.thread) |t| t.join();
+        }
+
+        fn post_reload(self: *@This()) !void {
+            if (self.ctx.options.tick_thread) {
+                self.thread = try std.Thread.spawn(.{}, @This().start, .{self.ctx});
+            }
         }
 
         pub fn deinit(self: *@This()) void {

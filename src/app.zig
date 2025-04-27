@@ -870,12 +870,14 @@ pub fn pre_reload(self: *@This()) !void {
     self.world.phy.pre_reload();
     try self.recorder.pre_reload();
     try self.audio.pre_reload();
+    try self.net_ctx.pre_reload();
 }
 
 pub fn post_reload(self: *@This()) !void {
     self.world.phy.post_reload();
     try self.recorder.post_reload();
     try self.audio.post_reload();
+    try self.net_ctx.post_reload();
 }
 
 pub fn present(
