@@ -11,6 +11,7 @@ const Vec4 = math.Vec4;
 const Vec3 = math.Vec3;
 
 const assets_mod = @import("assets.zig");
+const loader_mod = @import("loader.zig");
 
 const Engine = @import("engine.zig");
 const c = Engine.c;
@@ -94,7 +95,6 @@ const Assets = struct {
     well: assets_mod.Model,
 
     scenes_gltf: assets_mod.Gltf,
-    castle: assets_mod.Model,
 
     cube: assets_mod.Mesh,
     plane: assets_mod.Mesh,
@@ -102,12 +102,6 @@ const Assets = struct {
     // toilet: assets_mod.Mesh,
 
     fn init() !@This() {
-        // std.debug.print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", .{});
-        // var scenes = try assets_mod.Gltf.parse_glb("assets/exports/scenes.glb");
-        // errdefer scenes.deinit();
-
-        // if (true) return error.oof_m8;
-
         var bunny_glb = try assets_mod.Gltf.parse_glb("assets/tmp/dance.glb");
         errdefer bunny_glb.deinit();
         const bunny = try bunny_glb.to_model("Cube.015", "metarig");
@@ -118,7 +112,6 @@ const Assets = struct {
 
         var scenes_glb = try assets_mod.Gltf.parse_glb("assets/exports/scenes.glb");
         errdefer scenes_glb.deinit();
-        const castle = try scenes_glb.to_model("castle", null);
 
         // var toilet = try assets_mod.ObjParser.mesh_from_file("assets/tmp/toilet.obj");
         // errdefer toilet.deinit();
@@ -144,7 +137,6 @@ const Assets = struct {
             .well = well,
 
             .scenes_gltf = scenes_glb,
-            .castle = castle,
 
             .cube = cube,
             .plane = plane,
@@ -487,13 +479,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .instances = static_bunny_instance_handle,
     });
 
-    const castle_mesh_handle = try cpu.add_mesh(&assets.castle.mesh);
-    const castle_instance_handle = try cpu.batch_reserve(10);
-    try instance_manager.instances.append(.{
-        .mesh = castle_mesh_handle,
-        .instances = castle_instance_handle,
-    });
-
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
 
@@ -521,22 +506,24 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    // t = .{
-    //     .pos = .{ .y = -3 },
-    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    // };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("floor"),
-    //     t,
-    //     C.LastTransform{ .t = t },
-    //     C.StaticRender{ .mesh = plane_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //     }),
-    // });
+    try loader_mod.load_gltf(&world, &cpu, &instance_manager, &cmdbuf, &assets.scenes_gltf);
+
+    t = .{
+        .pos = .{ .y = -5.5 },
+        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    };
+    _ = try cmdbuf.insert(.{
+        try C.Name.from("floor"),
+        t,
+        C.LastTransform{ .t = t },
+        C.StaticRender{ .mesh = plane_mesh_handle },
+        try world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.scale.xyz() } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.rotation,
+        }),
+    });
     // t = .{
     //     .pos = .{ .y = 50, .x = 50 },
     //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
@@ -703,23 +690,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     //     }),
     // });
 
-    t = C.Transform{ .pos = .{ .z = 0, .y = 0 } };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("castle"),
-        t,
-        C.LastTransform{ .t = t },
-        C.StaticRender{ .mesh = castle_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .mesh = .{
-                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.castle.mesh.faces)),
-                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.castle.mesh.vertices)),
-            } },
-            .friction = 0.4,
-            .rotation = t.rotation,
-            .pos = t.pos.xyz(),
-            .motion_type = .static,
-        }),
-    });
     try cmdbuf.apply(@ptrCast(&world));
 
     const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, transform: C.Transform, camera: math.Camera, controller: C.Controller });

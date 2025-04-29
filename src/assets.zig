@@ -721,6 +721,15 @@ pub const Gltf = struct {
         pub const MaterialIndex = usize;
         // pub const CameraIndex = usize;
 
+        pub const ZhottExtras = struct {
+            zhott_components: []Component,
+
+            pub const Component = struct {
+                component_name: []const u8,
+                value: std.json.Value,
+            };
+        };
+
         pub const SceneInfo = struct {
             name: []const u8 = &.{},
             nodes: []NodeIndex = &.{},
@@ -742,7 +751,7 @@ pub const Gltf = struct {
 
             children: []NodeIndex = &.{},
 
-            extras: ?std.json.Value = null,
+            extras: ?ZhottExtras = null,
 
             pub fn transform(self: *const @This()) Transform {
                 if (self.matrix) |m| {
