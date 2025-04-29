@@ -362,11 +362,18 @@ class EXPORT_OT_export(bpy.types.Operator):
     def execute(self, context):
         filename = os.path.basename(bpy.data.filepath).replace(".blend", "")
         glb_path = os.path.join(os.path.dirname(__file__), f"../exports/{filename}.glb")
-        bpy.ops.export_scene.gltf(
-            filepath=glb_path,
-            export_format="GLB",
-            export_extras=True,
-        )
+
+        formats = [
+            "GLB",
+            "GLTF_SEPARATE",
+        ]
+        for format in formats:
+            bpy.ops.export_scene.gltf(
+                filepath=glb_path,
+                export_format=format,
+                export_extras=True,
+                use_visible=True,
+            )
         return {"FINISHED"}
 
 
