@@ -41,8 +41,6 @@ const HotVtable = struct {
 // NOTE: global state breaks when hot reloading is turned on.
 // things that use global state must be separated into another dylib (like glfw)
 const HotReloader = struct {
-    const utils = @import("utils.zig");
-
     path: [:0]const u8,
     hot_cache: []const u8,
     libpath: []const u8,
@@ -50,7 +48,7 @@ const HotReloader = struct {
     dylib: std.DynLib,
     vtable: HotVtable,
     app: *anyopaque,
-    fs: utils.FsFuse,
+    fs: utils_mod.FsFuse,
     count: u32 = 0,
 
     fn init(comptime path: [:0]const u8, comptime hotcache_path: [:0]const u8) !@This() {
@@ -72,7 +70,7 @@ const HotReloader = struct {
         const app = vtable.init() orelse return error.CouldNotInitApp;
         errdefer _ = vtable.deinit(app);
 
-        var fs = try utils.FsFuse.init(path);
+        var fs = try utils_mod.FsFuse.init(path);
         errdefer fs.deinit();
 
         return .{

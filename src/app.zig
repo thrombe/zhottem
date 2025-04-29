@@ -38,6 +38,7 @@ const world_mod = @import("world.zig");
 const jolt = world_mod.Jphysics.jolt;
 const World = world_mod.World;
 const Components = world_mod.Components;
+const C = world_mod.C;
 
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
@@ -49,12 +50,6 @@ const steamworks_mod = @import("steamworks.zig");
 
 const network_mod = @import("network.zig");
 const NetworkingContext = network_mod.NetworkingContext;
-
-const C = struct {
-    usingnamespace Components;
-    const BodyId = world_mod.Jphysics.BodyId;
-    const CharacterBody = world_mod.Jphysics.CharacterBody;
-};
 
 const main = @import("main.zig");
 const allocator = main.allocator;

@@ -344,7 +344,7 @@ pub const Gltf = struct {
         return model;
     }
 
-    fn parse_mesh(self: *@This(), mesh: *Info.MeshInfo) !Mesh {
+    pub fn parse_mesh(self: *@This(), mesh: *Info.MeshInfo) !Mesh {
         var vertices = std.ArrayList([3]f32).init(self.alloc);
         errdefer vertices.deinit();
         var normals = std.ArrayList([3]f32).init(self.alloc);
@@ -691,7 +691,7 @@ pub const Gltf = struct {
         length: u32,
     };
 
-    const Info = struct {
+    pub const Info = struct {
         scene: SceneIndex,
         scenes: []SceneInfo,
         nodes: []Node,
@@ -709,23 +709,23 @@ pub const Gltf = struct {
             uri: ?[]const u8 = null,
         },
 
-        const AccessorIndex = usize;
-        const SceneIndex = usize;
-        const NodeIndex = usize;
-        const SamplerIndex = usize;
-        const SkinIndex = usize;
-        const MeshIndex = usize;
-        const ImageIndex = usize;
-        const BufferIndex = usize;
-        const BufferViewIndex = usize;
-        const MaterialIndex = usize;
-        // const CameraIndex = usize;
+        pub const AccessorIndex = usize;
+        pub const SceneIndex = usize;
+        pub const NodeIndex = usize;
+        pub const SamplerIndex = usize;
+        pub const SkinIndex = usize;
+        pub const MeshIndex = usize;
+        pub const ImageIndex = usize;
+        pub const BufferIndex = usize;
+        pub const BufferViewIndex = usize;
+        pub const MaterialIndex = usize;
+        // pub const CameraIndex = usize;
 
-        const SceneInfo = struct {
+        pub const SceneInfo = struct {
             name: []const u8 = &.{},
             nodes: []NodeIndex = &.{},
         };
-        const Node = struct {
+        pub const Node = struct {
             name: []const u8 = &.{},
 
             mesh: ?MeshIndex = null,
@@ -781,7 +781,7 @@ pub const Gltf = struct {
                 };
             }
         };
-        const MeshInfo = struct {
+        pub const MeshInfo = struct {
             name: []const u8 = &.{},
             primitives: []struct {
                 attributes: Attributes,
@@ -799,28 +799,28 @@ pub const Gltf = struct {
                 // targets: []struct {}, // not supported
             },
         };
-        const MaterialInfo = struct {
+        pub const MaterialInfo = struct {
             name: []const u8 = &.{},
         };
-        const SkinInfo = struct {
+        pub const SkinInfo = struct {
             name: []const u8 = &.{},
             inverseBindMatrices: ?AccessorIndex = null,
             skeleton: ?NodeIndex = null,
             joints: []NodeIndex,
         };
-        const ImageInfo = struct {
+        pub const ImageInfo = struct {
             name: []const u8 = &.{},
 
             // uri: ?[]const u8 = null, // not supported
             mimeType: []const u8,
             bufferView: BufferViewIndex,
         };
-        const TextureInfo = struct {
+        pub const TextureInfo = struct {
             name: []const u8 = &.{},
             sampler: ?SamplerIndex = null,
             source: ImageIndex,
         };
-        const SamplerInfo = struct {
+        pub const SamplerInfo = struct {
             name: []const u8 = &.{},
             wrapT: Wrap = .repeat,
             wrapS: Wrap = .repeat,
@@ -837,13 +837,13 @@ pub const Gltf = struct {
                 linear_mipmap_linear = 9987,
             } = null,
 
-            const Wrap = enum(u32) {
+            pub const Wrap = enum(u32) {
                 clamp_to_edge = 33071,
                 mirror_repeat = 33648,
                 repeat = 10497,
             };
         };
-        const AnimationInfo = struct {
+        pub const AnimationInfo = struct {
             name: []const u8 = &.{},
             channels: []struct {
                 sampler: SamplerIndex,
@@ -873,7 +873,7 @@ pub const Gltf = struct {
                 } = .LINEAR,
             },
         };
-        const PrimitiveAttribute = struct {
+        pub const PrimitiveAttribute = struct {
             typ: PrimitiveAttributeType,
             acc: AccessorIndex,
 
@@ -902,7 +902,7 @@ pub const Gltf = struct {
                 return error.MissingField;
             }
         };
-        const PrimitiveAttributeType = union(enum) {
+        pub const PrimitiveAttributeType = union(enum) {
             position,
             normal,
             tangent,
@@ -927,7 +927,7 @@ pub const Gltf = struct {
                 };
             }
         };
-        const Attributes = struct {
+        pub const Attributes = struct {
             items: []PrimitiveAttribute,
 
             pub fn jsonParse(alloc: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
@@ -956,7 +956,7 @@ pub const Gltf = struct {
                 };
             }
         };
-        const Accessor = struct {
+        pub const Accessor = struct {
             bufferView: BufferViewIndex,
             byteOffset: u32 = 0,
             componentType: enum(u32) {
@@ -1034,7 +1034,7 @@ pub const Gltf = struct {
                 return self.componentType.typ(T) and self.type.components() == length;
             }
         };
-        const BufferView = struct {
+        pub const BufferView = struct {
             name: []const u8 = &.{},
             buffer: BufferIndex,
             byteOffset: usize = 0,

@@ -18,6 +18,12 @@ const EntityComponentStore = ecs_mod.EntityComponentStore;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+pub const C = struct {
+    pub usingnamespace Components;
+    pub const BodyId = Jphysics.BodyId;
+    pub const CharacterBody = Jphysics.CharacterBody;
+};
+
 pub const Jphysics = struct {
     pub const jolt = @import("jolt/jolt.zig");
 
@@ -106,9 +112,9 @@ pub const Jphysics = struct {
         const bodyi = self.phy.getBodyInterfaceMut();
         var body_settings = jolt.BodyCreationSettings{
             .position = settings.pos.withw(0).to_buf(),
+            .rotation = settings.rotation.to_buf(),
             .linear_velocity = settings.velocity.withw(0).to_buf(),
             .angular_velocity = settings.angular_velocity.withw(0).to_buf(),
-            .rotation = settings.rotation.to_buf(),
             .motion_type = settings.motion_type,
             .motion_quality = settings.motion_quality,
             .friction = settings.friction,
@@ -143,7 +149,12 @@ pub const Jphysics = struct {
                     s.index_buffer,
                 );
                 defer shape.release();
-                body_settings.shape = try shape.createShape();
+                const scaled_shape = try jolt.DecoratedShapeSettings.createScaled(
+                    shape.asShapeSettings(),
+                    settings.scale.to_buf(),
+                );
+                defer scaled_shape.release();
+                body_settings.shape = try scaled_shape.createShape();
             },
         }
         // it is refcounted so we release this one
@@ -226,6 +237,7 @@ pub const Jphysics = struct {
         motion_quality: jolt.MotionQuality = .discrete,
         pos: Vec3 = .{},
         rotation: Vec4 = Vec4.quat_identity_rot(),
+        scale: Vec3 = Vec3.splat(1.0),
         velocity: Vec3 = .{},
         angular_velocity: Vec3 = .{},
         friction: f32 = 0,
@@ -661,11 +673,19 @@ pub const Components = struct {
             return translate.mul_mat(rot).mul_mat(scale);
         }
 
-        pub fn transform_pos(self: *const @This(), pos: Vec4) Vec4 {
+        pub inline fn from_asset_transform(t: anytype) @This() {
+            return .{
+                .pos = t.translation,
+                .rotation = t.rotation,
+                .scale = t.scale,
+            };
+        }
+
+        pub inline fn transform_pos(self: *const @This(), pos: Vec4) Vec4 {
             return self.pos.add(self.rotation.rotate_vector(pos.mul(self.scale)));
         }
 
-        pub fn inverse_transform_pos(self: *const @This(), pos: Vec4) Vec4 {
+        pub inline fn inverse_transform_pos(self: *const @This(), pos: Vec4) Vec4 {
             return self.rotation.inverse_rotate_vector(pos.sub(self.pos)).mul(.{
                 .x = 1.0 / self.scale.x,
                 .y = 1.0 / self.scale.y,
@@ -673,8 +693,20 @@ pub const Components = struct {
             });
         }
 
-        pub fn transform_direction(self: *const @This(), dir: Vec4) Vec4 {
+        pub inline fn transform_direction(self: *const @This(), dir: Vec4) Vec4 {
             return self.rotation.rotate_vector(dir.scale(self.scale));
+        }
+
+        pub inline fn apply_global(self: *const @This(), transform: @This()) @This() {
+            return .{
+                .pos = transform.pos.add(transform.rotation.rotate_vector(self.pos)),
+                .rotation = transform.rotation.quat_local_rot(self.rotation),
+                .scale = transform.scale.mul(self.scale),
+            };
+        }
+
+        pub inline fn apply_local(self: *const @This(), transform: @This()) @This() {
+            return transform.apply_global(self.*);
         }
     };
 
