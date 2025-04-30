@@ -1259,6 +1259,7 @@ pub const TypeSchemaGenerator = struct {
     pub fn init(comptime special: struct {
         transform: ?type = null,
         entity: ?type = null,
+        name: ?type = null,
     }) !@This() {
         var self = @This(){ .buf = .init(allocator.*) };
         const w = self.buf.writer();

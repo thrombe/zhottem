@@ -483,6 +483,10 @@ def on_component_add(reg: ComponentRegistry, obj: Object, type: str):
     # TODO: can insert objects like collision shape and add a driver to it controlled by our component
 
     match reg.component_special_type.get(type):
+        case "name":
+            name: PropertyGroup = getattr(top_prop, type)
+
+            setattr(name, "name", obj.name)
         case "transform":
             setattr(obj, "rotation_mode", "QUATERNION")
 
