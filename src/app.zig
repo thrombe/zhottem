@@ -397,6 +397,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
     errdefer world.deinit();
+    try loader_mod.generate_type_registry();
 
     // start net context early
     var net_ctx = try NetworkingContext.init(.{});

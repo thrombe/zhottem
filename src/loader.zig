@@ -22,6 +22,27 @@ const InstanceAllocator = resources_mod.InstanceAllocator;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+const types = .{
+    .{ .type = Entity },
+    .{ .type = C.Name },
+    .{ .type = C.Transform, .default = C.Transform{} },
+};
+
+pub fn generate_type_registry() !void {
+    var importer = try assets_mod.TypeSchemaGenerator.init(.{
+        .entity = Entity,
+        .transform = C.Transform,
+    });
+    defer importer.deinit();
+
+    inline for (&types) |typ| {
+        const default = if (@hasField(@TypeOf(typ), "default")) @field(typ, "default") else null;
+        try importer.write_schema(typ.type, default);
+    }
+
+    try importer.write_to_file("blender/components.json");
+}
+
 const Meshes = std.ArrayList(struct {
     mesh: assets_mod.Mesh,
     handle: ResourceManager.MeshResourceHandle,
@@ -78,17 +99,16 @@ fn spawn_node(
 
     const entity = try cmdbuf.insert(.{
         try C.Name.from(node.name),
-        local,
     });
 
-    if (node.mesh) |mi| {
-        const mesh = &meshes.items[mi];
-        mesh.count += 1;
-        try cmdbuf.add_component(entity, C.StaticRender{ .mesh = mesh.handle });
+    const mesh = if (node.mesh) |mi| &meshes.items[mi] else null;
+    if (mesh) |m| {
+        m.count += 1;
+        try cmdbuf.add_component(entity, C.StaticRender{ .mesh = m.handle });
         try cmdbuf.add_component(entity, try world.phy.add_body(.{
             .shape = .{ .mesh = .{
-                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(mesh.mesh.faces)),
-                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(mesh.mesh.vertices)),
+                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(m.mesh.faces)),
+                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(m.mesh.vertices)),
             } },
             .pos = local.pos.xyz(),
             .rotation = local.rotation,
@@ -98,30 +118,24 @@ fn spawn_node(
         }));
     }
 
-    // if (node.extras) |extras| {
-    //     try add_components(cmdbuf, entity, extras.zhott_components);
-    // }
-}
+    if (node.extras) |extras| {
+        for (extras.zhott_components) |comp| {
+            inline for (&types) |typ| {
+                if (std.mem.eql(u8, @typeName(typ.type), comp.component_name)) {
+                    const component = try std.json.parseFromValue(
+                        typ.type,
+                        allocator.*,
+                        comp.value,
+                        .{ .allocate = .alloc_always },
+                    );
+                    defer component.deinit();
+                    try cmdbuf.add_component(entity, component.value);
 
-fn add_components(
-    cmdbuf: *EntityComponentStore.CmdBuf,
-    entity: Entity,
-    components: []GltfInfo.ZhottExtras.Component,
-) !void {
-    for (components) |comp| {
-        const t = C.Transform;
-        // inline for (&.{C.Transform}) |t| {
-        if (std.mem.eql(u8, @typeName(t), comp.component_name)) {
-            const component = try std.json.parseFromValue(t, allocator.*, comp.value, .{ .allocate = .alloc_always });
-            try cmdbuf.add_component(entity, component);
-
-            switch (t) {
-                C.Transform => {
-                    try cmdbuf.add_component(entity, C.LastTransform{ .t = component });
-                },
-                else => {},
+                    switch (typ.type) {
+                        else => {},
+                    }
+                }
             }
         }
-        // }
     }
 }
