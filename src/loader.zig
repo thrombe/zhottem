@@ -30,6 +30,7 @@ const types = .{
 
 pub fn generate_type_registry() !void {
     var importer = try assets_mod.TypeSchemaGenerator.init(.{
+        .name = C.Name,
         .entity = Entity,
         .transform = C.Transform,
     });
@@ -97,9 +98,8 @@ fn spawn_node(
         try spawn_node(world, cmdbuf, ci, nodes, meshes, transform.apply_local(local));
     }
 
-    const entity = try cmdbuf.insert(.{
-        try C.Name.from(node.name),
-    });
+    const entity = if (node.extras) |*e| try maybe_get_entity(e) orelse cmdbuf.reserve() else cmdbuf.reserve();
+    try cmdbuf.insert_reserved(entity, .{});
 
     const mesh = if (node.mesh) |mi| &meshes.items[mi] else null;
     if (mesh) |m| {
@@ -129,13 +129,36 @@ fn spawn_node(
                         .{ .allocate = .alloc_always },
                     );
                     defer component.deinit();
-                    try cmdbuf.add_component(entity, component.value);
 
                     switch (typ.type) {
-                        else => {},
+                        Entity => {},
+                        C.Name => {
+                            const value = try C.Name.from(component.value.name);
+                            try cmdbuf.add_component(entity, value);
+                        },
+                        else => {
+                            try cmdbuf.add_component(entity, component.value);
+                        },
                     }
                 }
             }
         }
     }
+}
+
+fn maybe_get_entity(extras: *GltfInfo.ZhottExtras) !?Entity {
+    for (extras.zhott_components) |comp| {
+        if (std.mem.eql(u8, @typeName(Entity), comp.component_name)) {
+            const component = try std.json.parseFromValue(
+                Entity,
+                allocator.*,
+                comp.value,
+                .{ .allocate = .alloc_if_needed },
+            );
+            defer component.deinit();
+
+            return component.value;
+        }
+    }
+    return null;
 }

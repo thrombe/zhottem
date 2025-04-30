@@ -762,9 +762,19 @@ pub const EntityComponentStore = struct {
             return mem;
         }
 
-        pub fn insert(self: *@This(), components: anytype) !Entity {
+        pub fn reserve(self: *@This()) Entity {
             const e = Entity{ .id = self.ecs.entity_id };
             defer self.ecs.entity_id += 1;
+            return e;
+        }
+
+        pub fn insert(self: *@This(), components: anytype) !Entity {
+            const e = self.reserve();
+            try self.insert_reserved(e, components);
+            return e;
+        }
+
+        pub fn insert_reserved(self: *@This(), e: Entity, components: anytype) !void {
             const alloc = self.alloc.allocator();
 
             try self.inserted.append(alloc, .{
@@ -776,8 +786,6 @@ pub const EntityComponentStore = struct {
                     }
                 }).insert),
             });
-
-            return e;
         }
 
         pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
