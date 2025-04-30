@@ -316,7 +316,7 @@ class OBJECT_PT_game_components(Panel):
                 self.draw_type(getattr(obj, name), box, vname, vtype)
         elif defn["type"] == "enum":
             row = layout.row()
-            row.prop(obj, name, text="variant")
+            row.prop(obj, name, text=name)
         else:
             row = layout.row()
             row.prop(obj, name, text=name)
