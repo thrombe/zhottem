@@ -1558,32 +1558,32 @@ pub const AppState = struct {
         {
             const animate = struct {
                 fn animate(ar: *C.AnimatedRender, model: *assets_mod.Model, time: f32) bool {
-                    const animation = model.animations[0];
-                    const bones = model.bones;
-                    const indices = ar.indices;
+                    const animation = &model.animations[0];
 
                     for (ar.bones) |*t| {
                         t.* = math.Mat4x4.scaling_mat(Vec4.splat3(1));
                     }
 
                     var updated = false;
-                    for (ar.bones, 0..) |*arb, i| {
+                    for (ar.bones, ar.indices, 0..) |*arb, *index, i| {
+                        const bone = &animation.bones[i];
                         var out_t = math.Vec4{ .w = 1 };
-                        if (get_lerped(&out_t, animation.bones[i].translation_keyframes.items, &indices[i].translation, time)) {
+                        if (get_lerped(&out_t, bone.translation_keyframes.items, &index.translation, time)) {
                             updated = true;
                         }
                         var out_r = math.Vec4.quat_identity_rot();
-                        if (get_lerped(&out_r, animation.bones[i].rotation_keyframes.items, &indices[i].rotation, time)) {
+                        if (get_lerped(&out_r, bone.rotation_keyframes.items, &index.rotation, time)) {
                             updated = true;
                         }
                         var out_s = math.Vec4.splat(1);
-                        if (get_lerped(&out_s, animation.bones[i].scale_keyframes.items, &indices[i].scale, time)) {
+                        if (get_lerped(&out_s, bone.scale_keyframes.items, &index.scale, time)) {
                             updated = true;
                         }
 
                         arb.* = math.Mat4x4.translation_mat(out_t).mul_mat(math.Mat4x4.rot_mat_from_quat(out_r)).mul_mat(math.Mat4x4.scaling_mat(out_s));
                     }
 
+                    const bones = model.bones;
                     for (bones, 0..) |*b, i| {
                         if (b.parent == null) {
                             apply(ar, b.children, bones, ar.bones[i]);
