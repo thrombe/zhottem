@@ -26,6 +26,37 @@ const types = .{
     .{ .type = Entity },
     .{ .type = C.Name },
     .{ .type = C.Transform, .default = C.Transform{} },
+    .{ .type = Rigidbody, .default = Rigidbody{} },
+};
+
+pub const Rigidbody = struct {
+    collider_shape: ColliderShape = .mesh,
+    motion_type: world_mod.Jphysics.jolt.MotionType = .static,
+    motion_quality: world_mod.Jphysics.jolt.MotionQuality = .discrete,
+    friction: f32 = 0.0,
+
+    pub const ColliderShape = union(enum) {
+        mesh: struct {},
+        sphere: Sphere,
+        plane: Plane,
+        box: Box,
+
+        pub const Sphere = struct {
+            center: Vec4 = .{},
+            radius: f32,
+        };
+        pub const Plane = struct {
+            normal: Vec4 = .{ .y = 1 },
+            offset: f32 = 0,
+        };
+        pub const Box = struct {
+            half_extent: Vec3,
+        };
+    };
+    pub const ColliderType = enum {
+        dynamic,
+        static,
+    };
 };
 
 pub fn generate_type_registry() !void {
@@ -105,17 +136,6 @@ fn spawn_node(
     if (mesh) |m| {
         m.count += 1;
         try cmdbuf.add_component(entity, C.StaticRender{ .mesh = m.handle });
-        try cmdbuf.add_component(entity, try world.phy.add_body(.{
-            .shape = .{ .mesh = .{
-                .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(m.mesh.faces)),
-                .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(m.mesh.vertices)),
-            } },
-            .pos = local.pos.xyz(),
-            .rotation = local.rotation,
-            .scale = local.scale.xyz(),
-            .motion_type = .static,
-            .friction = 0.4,
-        }));
     }
 
     if (node.extras) |extras| {
@@ -135,6 +155,30 @@ fn spawn_node(
                         C.Name => {
                             const value = try C.Name.from(component.value.name);
                             try cmdbuf.add_component(entity, value);
+                        },
+                        Rigidbody => {
+                            const value: Rigidbody = component.value;
+                            const shape: world_mod.Jphysics.ShapeSettings = blk: switch (value.collider_shape) {
+                                .mesh => {
+                                    const m = mesh orelse return error.MissingMesh;
+                                    break :blk .{ .mesh = .{
+                                        .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(m.mesh.faces)),
+                                        .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(m.mesh.vertices)),
+                                    } };
+                                },
+                                .sphere => |s| .{ .sphere = .{ .radius = s.radius } },
+                                .box => |s| .{ .box = .{ .size = s.half_extent } },
+                                else => return error.ShapeNotSupportedYet,
+                            };
+                            try cmdbuf.add_component(entity, try world.phy.add_body(.{
+                                .shape = shape,
+                                .pos = local.pos.xyz(),
+                                .rotation = local.rotation,
+                                .scale = local.scale.xyz(),
+                                .motion_quality = component.value.motion_quality,
+                                .motion_type = component.value.motion_type,
+                                .friction = component.value.friction,
+                            }));
                         },
                         else => {
                             try cmdbuf.add_component(entity, component.value);
