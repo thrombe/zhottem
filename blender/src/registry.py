@@ -279,6 +279,10 @@ class OBJECT_PT_game_components(Panel):
 
         for i, name in enumerate(components):
             name = name.type
+            if name not in reg.components:
+                print(f"component: {name} missing from registry")
+                continue
+
             comp = reg.components[name]
 
             box = layout.box()
@@ -297,6 +301,16 @@ class OBJECT_PT_game_components(Panel):
         name: str,
         defn: dict,
     ):
+        # TODO: MAYBE: collapsable components in UI
+        #  - you just gotta add a boolean field to every collapsable box
+        #    and not render whatever is collapsed
+        #  - row = box.row()
+        #    row.prop(obj, "expanded",
+        #        icon="TRIA_DOWN" if obj.expanded else "TRIA_RIGHT",
+        #        icon_only=True, emboss=False
+        #    )
+        #    row.label(text=pname)
+
         if defn["type"] == "struct":
             for pname, ptype in defn["properties"].items():
                 box = layout
@@ -487,6 +501,15 @@ def on_component_add(reg: ComponentRegistry, obj: Object, type: str):
             name: PropertyGroup = getattr(top_prop, type)
 
             setattr(name, "name", obj.name)
+
+            # TODO: name is not animatable, so can't add a driver to it.
+            #   maybe look for another way to hook into that :/ (or just don't)
+            # driver: FCurve = name.driver_add("name", 0)  # type:ignore
+            # driver.driver.expression = "var"  # type:ignore
+            # var: DriverVariable = driver.driver.variables.new()  # type:ignore
+            # var.name = "var"
+            # var.targets[0].id = obj
+            # var.targets[0].data_path = "name"
         case "transform":
             setattr(obj, "rotation_mode", "QUATERNION")
 
