@@ -79,7 +79,6 @@ fn spawn_node(
     const entity = try cmdbuf.insert(.{
         try C.Name.from(node.name),
         local,
-        C.LastTransform{ .t = local },
     });
 
     if (node.mesh) |mi| {

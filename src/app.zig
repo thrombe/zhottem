@@ -493,7 +493,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         ),
         C.Controller{},
         t,
-        C.LastTransform{ .t = t },
         C.Shooter{
             .audio = audio_handles.shot,
             .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
@@ -515,7 +514,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     _ = try cmdbuf.insert(.{
         try C.Name.from("floor"),
         t,
-        C.LastTransform{ .t = t },
         C.StaticRender{ .mesh = plane_mesh_handle },
         try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -532,7 +530,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("wall"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = plane_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -550,7 +547,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("wall"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = plane_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -568,7 +564,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("wall"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = plane_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -586,7 +581,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("wall"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = plane_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -624,7 +618,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("block"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = cube_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -638,7 +631,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("block"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = cube_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
@@ -658,7 +650,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("dance"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     // C.StaticRender{ .mesh = static_bunny_mesh_handle },
     //     C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
     //     try world.phy.add_body(.{
@@ -677,7 +668,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // _ = try cmdbuf.insert(.{
     //     try C.Name.from("ball"),
     //     t,
-    //     C.LastTransform{ .t = t },
     //     C.StaticRender{ .mesh = sphere_mesh_handle },
     //     try world.phy.add_body(.{
     //         .shape = .{ .mesh = .{
@@ -1184,6 +1174,7 @@ pub const AppState = struct {
         const pid = pexp.get_component(C.PlayerId).?;
         const player_id = pid.id;
 
+        // local input tick
         {
             var mouse = &input.mouse;
             var kb = &input.keys;
@@ -1245,6 +1236,7 @@ pub const AppState = struct {
             }
         }
 
+        // networking tick
         {
             try app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
 
@@ -1312,7 +1304,6 @@ pub const AppState = struct {
                         _ = try self.cmdbuf.insert(.{
                             try C.Name.from("player"),
                             t,
-                            C.LastTransform{ .t = t },
                             C.Controller{},
                             C.StaticRender{ .mesh = app.handles.mesh.cube },
                             C.PlayerId{ .id = id.id, .conn = e.conn },
@@ -1436,7 +1427,6 @@ pub const AppState = struct {
                                 _ = try self.cmdbuf.insert(.{
                                     try C.Name.from("bullet"),
                                     t,
-                                    C.LastTransform{ .t = t },
                                     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
                                     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
                                     C.StaticRender{ .mesh = app.handles.mesh.cube },
@@ -1468,6 +1458,7 @@ pub const AppState = struct {
             }
         }
 
+        // physics tick
         {
             self.physics.acctime += delta;
             self.physics.interpolation_acctime += delta;
@@ -1527,15 +1518,9 @@ pub const AppState = struct {
                     e.ft.t = e.t.*;
                 }
             }
-
-            // {
-            //     var it = try app.world.ecs.iterator(struct { r: C.Rigidbody });
-            //     while (it.next()) |e| {
-            //         e.r.force = .{};
-            //     }
-            // }
         }
 
+        // alive state tick
         {
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });
             while (it.next()) |e| {
@@ -1568,6 +1553,7 @@ pub const AppState = struct {
             }
         }
 
+        // animation tick
         {
             const animate = struct {
                 fn animate(ar: *C.AnimatedRender, model: *assets_mod.Model, time: f32) bool {
@@ -1650,6 +1636,7 @@ pub const AppState = struct {
             }
         }
 
+        // render instance tick
         {
             app.instance_manager.reset();
             defer if (app.instance_manager.update()) {
@@ -1694,6 +1681,7 @@ pub const AppState = struct {
             }
         }
 
+        // audio tick
         {
             const playing = &app.audio.ctx.ctx.playing;
 
@@ -1733,12 +1721,34 @@ pub const AppState = struct {
             }
         }
 
+        // add missing last transforms
         {
-            const player = try app.world.ecs.get(app.handles.player, struct { camera: math.Camera, controller: C.Controller, lt: C.LastTransform, transform: C.Transform });
-            app.uniforms.uniform_buffer = try self.uniforms(window, &self.physics.interpolated(player.lt, player.transform), player.camera, player.controller);
+            var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.Transform });
+            while (it.next()) |e| {
+                var ee = it.current_entity_explorer();
+                if (ee.get_component(C.LastTransform) == null) {
+                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .t = e.t.* });
+                }
+            }
         }
 
         try self.cmdbuf.apply(@ptrCast(&app.world));
+
+        // camera tick
+        {
+            const player = try app.world.ecs.get(app.handles.player, struct {
+                camera: math.Camera,
+                controller: C.Controller,
+                lt: C.LastTransform,
+                transform: C.Transform,
+            });
+            app.uniforms.uniform_buffer = try self.uniforms(
+                window,
+                &self.physics.interpolated(player.lt, player.transform),
+                player.camera,
+                player.controller,
+            );
+        }
     }
 
     fn uniforms(
