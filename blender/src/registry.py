@@ -434,7 +434,10 @@ class glTF2ExportUserExtension:
 
             component_value: dict = self.serialize_component(prop_group, comp.defn)  # type:ignore
             component_value = on_component_export(reg, component_value, comp.name)
-            comp_data = {"component_name": comp.name, "value": component_value}
+            comp_data = {
+                "component_name": comp.name.replace("::", "."),
+                "value": component_value,
+            }
             components_data.append(comp_data)
 
         gltf2_object.extras = {reg.name_prefix + "components": components_data}
@@ -533,10 +536,13 @@ def vec_inplace_blender_to_gltf(vec: List[float]):
     vec[2] = -y
 
 
+def coord_arr_to_struct(vec: List[float]) -> dict:
+    return {k: v for k, v in zip(["x", "y", "z", "w"], vec)}
+
+
 def on_component_export(reg: ComponentRegistry, value: dict, type: str) -> dict:
     match reg.component_special_type.get(type):
         case "transform":
-            print(value)
             rot = value["rotation"]
             size = math.sqrt(rot[0] ** 2 + rot[1] ** 2 + rot[2] ** 2 + rot[3] ** 2)
             rot[0] /= size
@@ -546,7 +552,10 @@ def on_component_export(reg: ComponentRegistry, value: dict, type: str) -> dict:
             vec_inplace_blender_to_gltf(rot)
             vec_inplace_blender_to_gltf(value["pos"])
             vec_inplace_blender_to_gltf(value["scale"])
-            print(value)
+
+            value["pos"] = coord_arr_to_struct(value["pos"])
+            value["rotation"] = coord_arr_to_struct(value["rotation"])
+            value["scale"] = coord_arr_to_struct(value["scale"])
         case _:
             pass
 
