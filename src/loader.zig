@@ -125,8 +125,9 @@ fn spawn_node(
 ) !void {
     const node = &nodes[node_index];
     const local = C.Transform.from_asset_transform(node.transform());
+    const global = transform.apply_local(local);
     for (node.children) |ci| {
-        try spawn_node(world, cmdbuf, ci, nodes, meshes, transform.apply_local(local));
+        try spawn_node(world, cmdbuf, ci, nodes, meshes, global);
     }
 
     const entity = if (node.extras) |*e| try maybe_get_entity(e) orelse cmdbuf.reserve() else cmdbuf.reserve();
@@ -172,13 +173,17 @@ fn spawn_node(
                             };
                             try cmdbuf.add_component(entity, try world.phy.add_body(.{
                                 .shape = shape,
-                                .pos = local.pos.xyz(),
-                                .rotation = local.rotation,
-                                .scale = local.scale.xyz(),
+                                .pos = global.pos.xyz(),
+                                .rotation = global.rotation,
+                                .scale = global.scale.xyz(),
                                 .motion_quality = component.value.motion_quality,
                                 .motion_type = component.value.motion_type,
                                 .friction = component.value.friction,
                             }));
+                        },
+                        C.Transform => {
+                            // try cmdbuf.add_component(entity, global);
+                            try cmdbuf.add_component(entity, transform.apply_local(component.value));
                         },
                         else => {
                             try cmdbuf.add_component(entity, component.value);
