@@ -369,9 +369,32 @@ class COMPONENT_MT_add(Menu):
             props.component_type = comp_type
 
 
-class EXPORT_OT_export(bpy.types.Operator):
+class EXPORT_OT_export_gltf(bpy.types.Operator):
     bl_idname = "zhottem.export_scene_gltf"
     bl_label = "Export current scene as gltf"
+
+    def execute(self, context):
+        filename = os.path.basename(bpy.data.filepath).replace(".blend", "")
+        gltf_path = os.path.join(
+            os.path.dirname(__file__), f"../exports/{filename}.gltf"
+        )
+
+        formats = [
+            "GLTF_SEPARATE",
+        ]
+        for format in formats:
+            bpy.ops.export_scene.gltf(
+                filepath=gltf_path,
+                export_format=format,
+                export_extras=True,
+                use_visible=True,
+            )
+        return {"FINISHED"}
+
+
+class EXPORT_OT_export_glb(bpy.types.Operator):
+    bl_idname = "zhottem.export_scene_glb"
+    bl_label = "Export current scene as glb"
 
     def execute(self, context):
         filename = os.path.basename(bpy.data.filepath).replace(".blend", "")
@@ -379,7 +402,6 @@ class EXPORT_OT_export(bpy.types.Operator):
 
         formats = [
             "GLB",
-            "GLTF_SEPARATE",
         ]
         for format in formats:
             bpy.ops.export_scene.gltf(
@@ -396,7 +418,8 @@ classes = (
     OBJECT_OT_add_game_component,
     OBJECT_PT_game_components,
     COMPONENT_MT_add,
-    EXPORT_OT_export,
+    EXPORT_OT_export_glb,
+    EXPORT_OT_export_gltf,
 )
 
 
