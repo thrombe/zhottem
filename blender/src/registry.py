@@ -563,6 +563,13 @@ def vec_inplace_blender_to_gltf(vec: List[float]):
     vec[2] = -y
 
 
+def scale_inplace_blender_to_gltf(vec: List[float]):
+    z = vec[2]
+    y = vec[1]
+    vec[1] = z
+    vec[2] = y
+
+
 def coord_arr_to_struct(vec: List[float]) -> dict:
     return {k: v for k, v in zip(["x", "y", "z", "w"], vec)}
 
@@ -578,7 +585,7 @@ def on_component_export(reg: ComponentRegistry, value: dict, type: str) -> dict:
             rot[3] /= size
             vec_inplace_blender_to_gltf(rot)
             vec_inplace_blender_to_gltf(value["pos"])
-            vec_inplace_blender_to_gltf(value["scale"])
+            scale_inplace_blender_to_gltf(value["scale"])
 
             value["pos"] = coord_arr_to_struct(value["pos"])
             value["rotation"] = coord_arr_to_struct(value["rotation"])
