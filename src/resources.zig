@@ -261,8 +261,7 @@ pub const ResourceManager = struct {
         first: u32,
         count: u32,
     };
-    pub const ModelHandle = struct {
-        mesh: MeshResourceHandle,
+    pub const ArmatureHandle = struct {
         index: u32,
     };
     pub const AudioHandle = struct {
@@ -274,24 +273,24 @@ pub const ResourceManager = struct {
         triangles: Triangles,
         instances: Instances,
         bones: Bones,
-        models: Models,
+        armatures: Armatures,
         audio: AudioSamples,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
         const Instances = std.ArrayList(Instance);
         const Bones = std.ArrayList(math.Mat4x4);
-        const Models = std.ArrayList(assets_mod.Model);
+        const Armatures = std.ArrayList(assets_mod.Armature);
         const AudioSamples = std.ArrayList(assets_mod.Wav);
 
         pub fn init() @This() {
             return .{
-                .vertices = Vertices.init(allocator.*),
-                .triangles = Triangles.init(allocator.*),
-                .instances = Instances.init(allocator.*),
-                .bones = Bones.init(allocator.*),
-                .models = Models.init(allocator.*),
-                .audio = AudioSamples.init(allocator.*),
+                .vertices = .init(allocator.*),
+                .triangles = .init(allocator.*),
+                .instances = .init(allocator.*),
+                .bones = .init(allocator.*),
+                .armatures = .init(allocator.*),
+                .audio = .init(allocator.*),
             };
         }
 
@@ -300,7 +299,7 @@ pub const ResourceManager = struct {
             self.triangles.deinit();
             self.instances.deinit();
             self.bones.deinit();
-            self.models.deinit();
+            self.armatures.deinit();
 
             for (self.audio.items) |*sample| {
                 sample.deinit();
@@ -314,16 +313,12 @@ pub const ResourceManager = struct {
             return handle;
         }
 
-        pub fn add_model(self: *@This(), m: assets_mod.Model) !ModelHandle {
-            const model_handle = self.models.items.len;
+        pub fn add_armature(self: *@This(), a: assets_mod.Armature) !ArmatureHandle {
+            const handle = self.armatures.items.len;
 
-            try self.models.append(m);
-            const mesh = try self.add_mesh(&m.mesh);
+            try self.armatures.append(a);
 
-            return .{
-                .mesh = mesh,
-                .index = @intCast(model_handle),
-            };
+            return .{ .index = @intCast(handle) };
         }
 
         pub fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshResourceHandle {

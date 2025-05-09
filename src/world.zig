@@ -783,7 +783,8 @@ pub const Components = struct {
     };
 
     pub const AnimatedRender = struct {
-        model: ResourceManager.ModelHandle,
+        mesh: ResourceManager.MeshResourceHandle,
+        armature: ResourceManager.ArmatureHandle,
 
         // relative to the start of this animation
         // += dt each frame

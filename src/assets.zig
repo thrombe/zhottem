@@ -8,8 +8,7 @@ const allocator = main.allocator;
 const utils = @import("utils.zig");
 
 // - [OpenGL Skeletal Animation Tutorial #1 - YouTube](https://www.youtube.com/watch?v=f3Cr8Yx3GGA)
-pub const Model = struct {
-    mesh: Mesh,
+pub const Armature = struct {
     bones: []Bone,
     animations: []Animation,
 };
@@ -333,17 +332,6 @@ pub const Gltf = struct {
         allocator.destroy(self.arena);
     }
 
-    pub fn to_model(self: *@This(), mesh_name: []const u8, skin_name: ?[]const u8) !Model {
-        const meshi = self.find_mesh(mesh_name) orelse return error.MeshNotFound;
-        const skini = if (skin_name) |name| self.find_skin(name) else null;
-
-        var mesh = try self.parse_mesh(meshi);
-        errdefer mesh.deinit();
-        const model = try self.parse_model(mesh, skini);
-
-        return model;
-    }
-
     pub fn parse_mesh(self: *@This(), mesh: *Info.MeshInfo) !Mesh {
         var vertices = std.ArrayList([3]f32).init(self.alloc);
         errdefer vertices.deinit();
@@ -487,14 +475,8 @@ pub const Gltf = struct {
         };
     }
 
-    fn parse_model(self: *@This(), mesh: Mesh, maybe_skini: ?*Info.SkinInfo) !Model {
+    pub fn parse_armature(self: *@This(), skini: *Info.SkinInfo) !Armature {
         var bones = std.ArrayList(Bone).init(self.alloc);
-
-        const skini = maybe_skini orelse return .{
-            .mesh = mesh,
-            .bones = try bones.toOwnedSlice(),
-            .animations = try self.alloc.alloc(Animation, 0),
-        };
 
         if (skini.inverseBindMatrices) |ibm| {
             const matrices = try self.get_slice(ibm, [16]f32);
@@ -538,7 +520,6 @@ pub const Gltf = struct {
         const animations = try self.parse_skin_animations(&joint_to_bone);
 
         return .{
-            .mesh = mesh,
             .bones = try bones.toOwnedSlice(),
             .animations = animations,
         };
@@ -553,9 +534,9 @@ pub const Gltf = struct {
             const name = anim.name;
             const bone_keyframes = try self.alloc.alloc(BoneAnimation, joint_to_bone.count());
             @memset(bone_keyframes, BoneAnimation{
-                .translation_keyframes = std.ArrayList(Keyframe).init(self.alloc),
-                .rotation_keyframes = std.ArrayList(Keyframe).init(self.alloc),
-                .scale_keyframes = std.ArrayList(Keyframe).init(self.alloc),
+                .translation_keyframes = .init(self.alloc),
+                .rotation_keyframes = .init(self.alloc),
+                .scale_keyframes = .init(self.alloc),
             });
 
             for (anim.channels) |channel| {
@@ -609,6 +590,9 @@ pub const Gltf = struct {
                 }
             }
 
+            if (bone_keyframes[0].translation_keyframes.items.len == 0) {
+                continue;
+            }
             try animations.append(.{
                 .name = try self.alloc.dupe(u8, name),
                 .bones = bone_keyframes,

@@ -81,6 +81,8 @@ const Meshes = std.ArrayList(struct {
     count: u32 = 0,
 });
 
+const Armatures = std.ArrayList(struct { handle: ResourceManager.ArmatureHandle, len: usize });
+
 pub fn load_gltf(
     world: *world_mod.World,
     cpu_resources: *ResourceManager.CpuResources,
@@ -101,10 +103,29 @@ pub fn load_gltf(
         });
     }
 
+    var armatures = Armatures.init(allocator.*);
+    defer armatures.deinit();
+
+    for (info.skins) |*skin| {
+        const armature = try gltf.parse_armature(skin);
+        try armatures.append(.{
+            .handle = try cpu_resources.add_armature(armature),
+            .len = skin.joints.len,
+        });
+    }
+
     const scene = &info.scenes[info.scene];
     std.debug.print("spawning {s} scene\n", .{scene.name});
     for (scene.nodes) |ni| {
-        try spawn_node(world, cmdbuf, ni, info.nodes, &meshes, .{});
+        try spawn_node(
+            world,
+            cmdbuf,
+            ni,
+            info.nodes,
+            &meshes,
+            &armatures,
+            .{},
+        );
     }
 
     for (meshes.items) |mesh| {
@@ -121,22 +142,46 @@ fn spawn_node(
     node_index: GltfInfo.NodeIndex,
     nodes: []GltfInfo.Node,
     meshes: *Meshes,
+    armatures: *Armatures,
     transform: C.Transform,
 ) !void {
     const node = &nodes[node_index];
     const local = C.Transform.from_asset_transform(node.transform());
     const global = transform.apply_local(local);
     for (node.children) |ci| {
-        try spawn_node(world, cmdbuf, ci, nodes, meshes, global);
+        try spawn_node(
+            world,
+            cmdbuf,
+            ci,
+            nodes,
+            meshes,
+            armatures,
+            global,
+        );
     }
 
     const entity = if (node.extras) |*e| try maybe_get_entity(e) orelse cmdbuf.reserve() else cmdbuf.reserve();
     try cmdbuf.insert_reserved(entity, .{});
 
     const mesh = if (node.mesh) |mi| &meshes.items[mi] else null;
+    const armature = if (node.skin) |si| &armatures.items[si] else null;
     if (mesh) |m| {
         m.count += 1;
-        try cmdbuf.add_component(entity, C.StaticRender{ .mesh = m.handle });
+
+        if (armature) |a| {
+            const bones = try allocator.alloc(math.Mat4x4, a.len);
+            const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, a.len);
+            @memset(bones, .{});
+            @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
+            try cmdbuf.add_component(entity, C.AnimatedRender{
+                .mesh = m.handle,
+                .armature = a.handle,
+                .bones = bones,
+                .indices = indices,
+            });
+        } else {
+            try cmdbuf.add_component(entity, C.StaticRender{ .mesh = m.handle });
+        }
     }
 
     if (node.extras) |extras| {
@@ -176,9 +221,9 @@ fn spawn_node(
                                 .pos = global.pos.xyz(),
                                 .rotation = global.rotation,
                                 .scale = global.scale.xyz(),
-                                .motion_quality = component.value.motion_quality,
-                                .motion_type = component.value.motion_type,
-                                .friction = component.value.friction,
+                                .motion_quality = value.motion_quality,
+                                .motion_type = value.motion_type,
+                                .friction = value.friction,
                             }));
                         },
                         C.Transform => {

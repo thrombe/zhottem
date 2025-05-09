@@ -85,36 +85,14 @@ handles: Handles,
 assets: Assets,
 
 const Assets = struct {
-    dance: assets_mod.Gltf,
-    bunny: assets_mod.Model,
-
-    sphere_gltf: assets_mod.Gltf,
-    sphere: assets_mod.Model,
-
-    well_gltf: assets_mod.Gltf,
-    well: assets_mod.Model,
-
     scenes_gltf: assets_mod.Gltf,
 
     cube: assets_mod.Mesh,
     plane: assets_mod.Mesh,
-    bunny_mesh: assets_mod.Mesh,
-    // toilet: assets_mod.Mesh,
 
     fn init() !@This() {
-        var bunny_glb = try assets_mod.Gltf.parse_glb("assets/tmp/dance.glb");
-        errdefer bunny_glb.deinit();
-        const bunny = try bunny_glb.to_model("Cube.015", "metarig");
-
-        var well_glb = try assets_mod.Gltf.parse_glb("assets/tmp/well.glb");
-        errdefer well_glb.deinit();
-        const well = try well_glb.to_model("well", null);
-
         var scenes_glb = try assets_mod.Gltf.parse_glb("assets/exports/scenes.glb");
         errdefer scenes_glb.deinit();
-
-        // var toilet = try assets_mod.ObjParser.mesh_from_file("assets/tmp/toilet.obj");
-        // errdefer toilet.deinit();
 
         var cube = try assets_mod.Mesh.cube();
         errdefer cube.deinit();
@@ -122,26 +100,11 @@ const Assets = struct {
         var plane = try assets_mod.Mesh.plane();
         errdefer plane.deinit();
 
-        var sphere_gltf = try assets_mod.Gltf.parse_glb("assets/tmp/sphere.glb");
-        errdefer sphere_gltf.deinit();
-        const sphere = try sphere_gltf.to_model("Icosphere", null);
-
         return .{
-            .dance = bunny_glb,
-            .bunny = bunny,
-
-            .sphere_gltf = sphere_gltf,
-            .sphere = sphere,
-
-            .well_gltf = well_glb,
-            .well = well,
-
             .scenes_gltf = scenes_glb,
 
             .cube = cube,
             .plane = plane,
-            .bunny_mesh = try bunny.mesh.boneless(),
-            // .toilet = toilet,
         };
     }
 
@@ -156,9 +119,6 @@ const Assets = struct {
 
 const Handles = struct {
     player: Entity,
-    model: struct {
-        bunny: ResourceManager.ModelHandle,
-    },
     mesh: struct {
         cube: ResourceManager.MeshResourceHandle,
     },
@@ -449,35 +409,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     try instance_manager.instances.append(.{
         .mesh = plane_mesh_handle,
         .instances = plane_instance_handle,
-    });
-
-    const sphere_mesh_handle = try cpu.add_mesh(&assets.sphere.mesh);
-    const sphere_instance_handle = try cpu.batch_reserve(10);
-    try instance_manager.instances.append(.{
-        .mesh = sphere_mesh_handle,
-        .instances = sphere_instance_handle,
-    });
-
-    const well_mesh_handle = try cpu.add_mesh(&assets.well.mesh);
-    const well_instance_handle = try cpu.batch_reserve(10);
-    try instance_manager.instances.append(.{
-        .mesh = well_mesh_handle,
-        .instances = well_instance_handle,
-    });
-
-    const bunny_model_handle = try cpu.add_model(assets.bunny);
-    const bunny_mesh_handle = bunny_model_handle.mesh;
-    const bunny_instance_handle = try cpu.batch_reserve(100);
-    try instance_manager.instances.append(.{
-        .mesh = bunny_mesh_handle,
-        .instances = bunny_instance_handle,
-    });
-
-    const static_bunny_mesh_handle = try cpu.add_mesh(&assets.bunny_mesh);
-    const static_bunny_instance_handle = try cpu.batch_reserve(10);
-    try instance_manager.instances.append(.{
-        .mesh = static_bunny_mesh_handle,
-        .instances = static_bunny_instance_handle,
     });
 
     var cmdbuf = world.ecs.deferred();
@@ -786,9 +717,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .assets = assets,
         .handles = .{
             .player = player_id,
-            .model = .{
-                .bunny = bunny_model_handle,
-            },
             .mesh = .{
                 .cube = cube_mesh_handle,
             },
@@ -1557,8 +1485,9 @@ pub const AppState = struct {
         // animation tick
         {
             const animate = struct {
-                fn animate(ar: *C.AnimatedRender, model: *assets_mod.Model, time: f32) bool {
-                    const animation = &model.animations[0];
+                fn animate(ar: *C.AnimatedRender, armature: *assets_mod.Armature, time: f32) bool {
+                    const animation = &armature.animations[4];
+                    std.debug.print("animation {s}\n", .{animation.name});
 
                     for (ar.bones) |*t| {
                         t.* = math.Mat4x4.scaling_mat(Vec4.splat3(1));
@@ -1583,7 +1512,7 @@ pub const AppState = struct {
                         arb.* = math.Mat4x4.translation_mat(out_t).mul_mat(math.Mat4x4.rot_mat_from_quat(out_r)).mul_mat(math.Mat4x4.scaling_mat(out_s));
                     }
 
-                    const bones = model.bones;
+                    const bones = armature.bones;
                     for (bones, 0..) |*b, i| {
                         if (b.parent == null) {
                             apply(ar, b.children, bones, ar.bones[i]);
@@ -1626,11 +1555,11 @@ pub const AppState = struct {
 
             var it = try app.world.ecs.iterator(struct { m: C.AnimatedRender });
             while (it.next()) |e| {
-                const model = &app.cpu_resources.models.items[app.handles.model.bunny.index];
                 const a: *C.AnimatedRender = e.m;
+                const armature = &app.cpu_resources.armatures.items[a.armature.index];
                 a.time += delta;
 
-                if (!animate(a, model, a.time)) {
+                if (!animate(a, armature, a.time)) {
                     a.time = 0;
                     @memset(a.indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
                 }
@@ -1664,15 +1593,15 @@ pub const AppState = struct {
             {
                 var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform, m: C.AnimatedRender });
                 while (it.next()) |e| {
-                    const instance = app.instance_manager.reserve_instance(e.m.model.mesh);
-                    const model = &app.cpu_resources.models.items[e.m.model.index];
+                    const instance = app.instance_manager.reserve_instance(e.m.mesh);
+                    const armature = &app.cpu_resources.armatures.items[e.m.armature.index];
                     if (instance) |instance_index| {
-                        const first_bone = app.instance_manager.reserve_bones(@intCast(model.bones.len));
+                        const first_bone = app.instance_manager.reserve_bones(@intCast(armature.bones.len));
 
                         if (first_bone) |bone_index| {
                             app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
-                            for (0..model.bones.len) |index| {
-                                app.cpu_resources.bones.items[bone_index + index] = self.physics.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(model.bones[index].inverse_bind_matrix);
+                            for (0..armature.bones.len) |index| {
+                                app.cpu_resources.bones.items[bone_index + index] = self.physics.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(armature.bones[index].inverse_bind_matrix);
                             }
                         } else {
                             app.cpu_resources.instances.items[instance_index].bone_offset = 0;
