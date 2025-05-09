@@ -250,7 +250,7 @@ class OBJECT_OT_add_game_component(Operator):
         top_prop = getattr(obj, reg.name_prefix + "components")  # type:ignore
         components = top_prop.active_components  # type:ignore
 
-        if any(c == self.component_type for c in components):
+        if any(c.type == self.component_type for c in components):
             return {"CANCELLED"}
 
         comp = components.add()
