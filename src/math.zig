@@ -224,12 +224,12 @@ pub const Vec4 = extern struct {
         };
     }
 
-    pub fn quat_angle_axis(angle: f32, axis: Vec4) @This() {
+    pub fn quat_angle_axis(angle: f32, axis: Vec3) @This() {
         // - [Visualizing quaternions, an explorable video series](https://eater.net/quaternions)
         const s = @sin(angle / 2.0);
-        var q = axis.normalize3D().scale(s);
-        q.w = @cos(angle / 2.0);
-        return q;
+        var q = axis.normalize().scale(s);
+        const c = @cos(angle / 2.0);
+        return q.withw(c);
     }
 
     // mult from the right means applying that rotation first.
@@ -257,18 +257,18 @@ pub const Vec4 = extern struct {
         return .{ .w = self.w, .x = -self.x, .y = -self.y, .z = -self.z };
     }
 
-    pub fn rotate_vector(self: *const @This(), v: Vec4) @This() {
+    pub fn rotate_vector(self: *const @This(), v: Vec3) Vec3 {
         const qv = Vec4{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
         const q_conjugate = self.quat_conjugate();
         const q_result = self.quat_mul(qv).quat_mul(q_conjugate);
-        return Vec4{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
+        return Vec3{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
     }
 
-    pub fn inverse_rotate_vector(self: *const @This(), v: Vec4) @This() {
+    pub fn inverse_rotate_vector(self: *const @This(), v: Vec3) Vec3 {
         const qv = Vec4{ .w = 0, .x = v.x, .y = v.y, .z = v.z };
         const q_conjugate = self.quat_conjugate();
         const q_result = q_conjugate.quat_mul(qv).quat_mul(self.*);
-        return Vec4{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
+        return Vec3{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
     }
 
     pub fn to_buf(self: *const @This()) [4]f32 {
@@ -584,7 +584,7 @@ pub const Mat4x4 = extern struct {
         return self;
     }
 
-    pub fn view(eye: Vec4, fwd: Vec4, left: Vec4, up: Vec4) @This() {
+    pub fn view(eye: Vec3, fwd: Vec3, left: Vec3, up: Vec3) @This() {
         // - [» Deriving the View Matrix](https://twodee.org/blog/17560)
         //   - this seems to be left handed
 
@@ -596,62 +596,62 @@ pub const Mat4x4 = extern struct {
         } };
 
         return (Mat4x4{ .data = .{
-            left.normalize3D(),
-            up.normalize3D(),
-            fwd.normalize3D(),
+            left.normalize().withw(0),
+            up.normalize().withw(0),
+            fwd.normalize().withw(0),
             .{ .w = 1 },
         } }).transpose().mul_mat(translate_inv.transpose());
     }
 
-    pub fn scaling_mat(vec3: Vec4) @This() {
+    pub fn scaling_mat(vec: Vec3) @This() {
         return .{ .data = .{
-            .{ .x = vec3.x },
-            .{ .y = vec3.y },
-            .{ .z = vec3.z },
+            .{ .x = vec.x },
+            .{ .y = vec.y },
+            .{ .z = vec.z },
             .{ .w = 1 },
         } };
     }
 
-    pub fn translation_mat(vec3: Vec4) @This() {
+    pub fn translation_mat(vec: Vec3) @This() {
         return .{ .data = .{
             .{ .x = 1 },
             .{ .y = 1 },
             .{ .z = 1 },
-            .{ .x = vec3.x, .y = vec3.y, .z = vec3.z, .w = 1 },
+            .{ .x = vec.x, .y = vec.y, .z = vec.z, .w = 1 },
         } };
     }
 
-    pub fn rot_mat_euler_angles(vec3: Vec4) @This() {
+    pub fn rot_mat_euler_angles(vec: Vec3) @This() {
         const rotz = (@This(){ .data = .{
-            .{ .x = @cos(vec3.z), .y = -@sin(vec3.z), .z = 0 },
-            .{ .x = @sin(vec3.z), .y = @cos(vec3.z), .z = 0 },
+            .{ .x = @cos(vec.z), .y = -@sin(vec.z), .z = 0 },
+            .{ .x = @sin(vec.z), .y = @cos(vec.z), .z = 0 },
             .{ .x = 0, .y = 0, .z = 1 },
             .{ .w = 1 },
         } }).transpose();
         const roty = (@This(){ .data = .{
-            .{ .x = @cos(vec3.y), .y = 0, .z = @sin(vec3.y) },
+            .{ .x = @cos(vec.y), .y = 0, .z = @sin(vec.y) },
             .{ .x = 0, .y = 1, .z = 0 },
-            .{ .x = -@sin(vec3.y), .y = 0, .z = @cos(vec3.y) },
+            .{ .x = -@sin(vec.y), .y = 0, .z = @cos(vec.y) },
             .{ .w = 1 },
         } }).transpose();
         const rotx = (@This(){ .data = .{
             .{ .x = 1, .y = 0, .z = 0 },
-            .{ .x = 0, .y = @cos(vec3.x), .z = -@sin(vec3.x) },
-            .{ .x = 0, .y = @sin(vec3.x), .z = @cos(vec3.x) },
+            .{ .x = 0, .y = @cos(vec.x), .z = -@sin(vec.x) },
+            .{ .x = 0, .y = @sin(vec.x), .z = @cos(vec.x) },
             .{ .w = 1 },
         } }).transpose();
         return roty.mul_mat(rotx).mul_mat(rotz);
     }
 
     pub fn rot_mat_from_quat(rot: Vec4) @This() {
-        const x = Vec4{ .x = 1 };
-        const y = Vec4{ .y = 1 };
-        const z = Vec4{ .z = 1 };
+        const x = Vec3{ .x = 1 };
+        const y = Vec3{ .y = 1 };
+        const z = Vec3{ .z = 1 };
 
         return .{ .data = .{
-            rot.rotate_vector(x),
-            rot.rotate_vector(y),
-            rot.rotate_vector(z),
+            rot.rotate_vector(x).withw(0),
+            rot.rotate_vector(y).withw(0),
+            rot.rotate_vector(z).withw(0),
             .{ .w = 1 },
         } };
     }
@@ -670,9 +670,8 @@ pub const Mat4x4 = extern struct {
         } }).transpose();
     }
 
-    pub fn decompose_rot_trans(self: *const @This()) struct { translation: Vec4, rotation: Vec4 } {
-        var translate = self.data[3];
-        translate.w = 0;
+    pub fn decompose_rot_trans(self: *const @This()) struct { translation: Vec3, rotation: Vec4 } {
+        const translate = self.data[3].xyz();
 
         var rot = Vec4.quat_identity_rot();
         var t: f32 = 0;
@@ -803,14 +802,14 @@ pub const ColorParse = struct {
 
 pub const Camera = struct {
     renderer_basis: struct {
-        fwd: Vec4,
-        right: Vec4,
-        up: Vec4,
+        fwd: Vec3,
+        right: Vec3,
+        up: Vec3,
     },
     world_basis: struct {
-        fwd: Vec4,
-        right: Vec4,
-        up: Vec4,
+        fwd: Vec3,
+        right: Vec3,
+        up: Vec3,
     },
 
     pub const constants = struct {
@@ -819,15 +818,15 @@ pub const Camera = struct {
         pub const basis = struct {
             // right handed -y up
             pub const vulkan = struct {
-                pub const up = Vec4{ .y = -1 };
-                pub const fwd = Vec4{ .z = 1 };
-                pub const right = Vec4{ .x = 1 };
+                pub const up = Vec3{ .y = -1 };
+                pub const fwd = Vec3{ .z = 1 };
+                pub const right = Vec3{ .x = 1 };
             };
             // right handed y up
             pub const opengl = struct {
-                pub const up = Vec4{ .y = 1 };
-                pub const fwd = Vec4{ .z = 1 };
-                pub const right = Vec4{ .x = -1 };
+                pub const up = Vec3{ .y = 1 };
+                pub const fwd = Vec3{ .z = 1 };
+                pub const right = Vec3{ .x = -1 };
             };
         };
     };
@@ -851,7 +850,7 @@ pub const Camera = struct {
     pub fn world_to_screen_mat(self: *const @This(), v: struct {
         width: u32,
         height: u32,
-        pos: Vec4,
+        pos: Vec3,
         pitch: f32,
         yaw: f32,
         near: f32 = 0.1,
@@ -880,9 +879,9 @@ pub const Camera = struct {
 
     pub fn dirs(self: *const @This(), pitch: f32, yaw: f32) struct {
         rot: Vec4,
-        fwd: Vec4,
-        up: Vec4,
-        right: Vec4,
+        fwd: Vec3,
+        up: Vec3,
+        right: Vec3,
     } {
         const rot = self.rot_quat(pitch, yaw);
         const up = rot.rotate_vector(self.world_basis.up);
