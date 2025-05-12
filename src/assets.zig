@@ -49,9 +49,9 @@ pub const Bone = struct {
 };
 
 pub const Transform = struct {
-    translation: math.Vec4 = math.Vec4{},
+    translation: math.Vec3 = math.Vec3{},
     rotation: math.Vec4 = math.Vec4.quat_identity_rot(),
-    scale: math.Vec4 = math.Vec4.splat3(1.0),
+    scale: math.Vec3 = math.Vec3.splat(1.0),
 
     pub fn apply_global(self: *const @This(), transform: @This()) @This() {
         return .{

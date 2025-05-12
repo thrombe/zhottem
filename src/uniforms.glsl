@@ -8,10 +8,10 @@
  };
 
  struct Camera {
-     vec4 eye;
-     vec4 fwd;
-     vec4 right;
-     vec4 up;
+     vec3 eye;
+     vec3 fwd;
+     vec3 right;
+     vec3 up;
      CameraMeta meta;
  };
 

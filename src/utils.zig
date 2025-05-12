@@ -62,6 +62,11 @@ pub const TypeId = extern struct {
 
             hasher.update(@tagName(std.meta.activeTag(Ti)));
 
+            switch (T) {
+                std.mem.Allocator => return .{ .id = hasher.final() },
+                else => {},
+            }
+
             switch (Ti) {
                 .@"struct" => |t| {
                     for (t.fields) |field| {
@@ -882,14 +887,15 @@ pub const ImageMagick = struct {
 
 pub const ShaderUtils = struct {
     const Vec4 = math.Vec4;
+    const Vec3 = math.Vec3;
     const Mat4x4 = math.Mat4x4;
 
     pub const Mouse = extern struct { x: i32, y: i32, left: u32, right: u32 };
     pub const Camera = extern struct {
-        eye: Vec4,
-        fwd: Vec4,
-        right: Vec4,
-        up: Vec4,
+        eye: Vec3,
+        fwd: Vec3,
+        right: Vec3,
+        up: Vec3,
         meta: CameraMeta,
 
         pub const CameraMeta = extern struct {
@@ -974,6 +980,7 @@ pub const ShaderUtils = struct {
 
         fn zig_to_glsl_type(t: type) []const u8 {
             return switch (t) {
+                Vec3 => "vec3",
                 Vec4 => "vec4",
                 Mat4x4 => "mat4",
                 i32 => "int",
@@ -1018,7 +1025,7 @@ pub const ShaderUtils = struct {
             const w = self.shader.writer();
 
             switch (t) {
-                []Mat4x4, Mat4x4, Vec4, i32, u32, f32 => return,
+                []Mat4x4, Mat4x4, Vec4, Vec3, i32, u32, f32 => return,
                 else => switch (@typeInfo(t)) {
                     .array => return,
                     else => {

@@ -219,7 +219,7 @@ const AudioPlayer = Engine.Audio.Stream(.output, struct {
         start_frame: u64,
 
         // relative position of the sound. (listener +z fwd, +x right, -y up)
-        pos: Vec4,
+        pos: Vec3,
         volume: f32,
 
         // the float values supplied to audio apis is the instantaneous amplitude of the wave
@@ -312,8 +312,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     var model_uniform = try ModelUniformBuffer.new(&matrices, ctx);
     errdefer model_uniform.deinit(device);
-    model_uniform.uniform_buffer[0] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.3)).mul_mat(math.Mat4x4.translation_mat(.{ .x = 1.5 }));
-    model_uniform.uniform_buffer[1] = math.Mat4x4.scaling_mat(math.Vec4.splat3(0.5)).mul_mat(math.Mat4x4.translation_mat(.{ .y = 3 }));
+    model_uniform.uniform_buffer[0] = math.Mat4x4.scaling_mat(math.Vec3.splat(0.3)).mul_mat(math.Mat4x4.translation_mat(.{ .x = 1.5 }));
+    model_uniform.uniform_buffer[1] = math.Mat4x4.scaling_mat(math.Vec3.splat(0.5)).mul_mat(math.Mat4x4.translation_mat(.{ .y = 3 }));
     try model_uniform.upload(device);
 
     var screen = try Image.new(ctx, cmd_pool, .{
@@ -355,7 +355,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
     errdefer depth.deinit(device);
 
-    var world = try World.init(math.Camera.constants.basis.opengl.up.xyz());
+    var world = try World.init(math.Camera.constants.basis.opengl.up);
     errdefer world.deinit();
     try loader_mod.generate_type_registry();
 
@@ -414,9 +414,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
 
-    var t: C.Transform = .{
+    var t: C.GlobalTransform = .{ .transform = .{
         .pos = .{ .y = 5 },
-    };
+    } };
     const player_id = try cmdbuf.insert(.{
         try C.Name.from("player"),
         math.Camera.init(
@@ -432,28 +432,28 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
         C.PlayerId{ .id = 0, .conn = 0 },
         try world.phy.add_character(.{
-            .pos = t.pos.xyz(),
-            .rot = t.rotation,
+            .pos = t.transform.pos,
+            .rot = t.transform.rotation,
         }),
     });
 
     try loader_mod.load_gltf(&world, &cpu, &instance_manager, &cmdbuf, &assets.scenes_gltf);
 
-    t = .{
+    t.transform = .{
         .pos = .{ .y = -5.5 },
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("floor"),
-        t,
-        C.StaticRender{ .mesh = plane_mesh_handle },
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.scale.xyz() } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.rotation,
-        }),
-    });
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("floor"),
+    //     t,
+    //     C.StaticRender{ .mesh = plane_mesh_handle },
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.rotation,
+    //     }),
+    // });
     // t = .{
     //     .pos = .{ .y = 50, .x = 50 },
     //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
@@ -614,8 +614,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     try cmdbuf.apply(@ptrCast(&world));
 
-    const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, transform: C.Transform, camera: math.Camera, controller: C.Controller });
-    var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, player.transform, player.camera, player.controller), ctx);
+    const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, t: C.GlobalTransform, camera: math.Camera, controller: C.Controller });
+    var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, &player.t.transform, player.camera, player.controller), ctx);
     errdefer uniforms.deinit(device);
 
     var gpu = try cpu.upload(engine, cmd_pool);
@@ -681,9 +681,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             player.pid.conn = msg.conn;
 
             try net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
-                .x = player.transform.pos.x,
-                .y = player.transform.pos.y,
-                .z = player.transform.pos.z,
+                .x = player.t.transform.pos.x,
+                .y = player.t.transform.pos.y,
+                .z = player.t.transform.pos.z,
             } } } });
         },
         else => @panic("unexpected message"),
@@ -1054,8 +1054,8 @@ pub const AppState = struct {
         acctime: f32 = 0,
         interpolation_acctime: f32 = 0,
 
-        fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.Transform) C.Transform {
-            return lt.lerp(t, self.interpolation_acctime / self.step);
+        fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
+            return lt.transform.lerp(&t.transform, self.interpolation_acctime / self.step);
         }
     } = .{},
 
@@ -1177,13 +1177,13 @@ pub const AppState = struct {
                         try s.send_message(e.conn, 0, .{ .event = .{ .setid = .{ .id = self.client_count } } });
                     },
                     .spawn_player => {
-                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.Transform });
+                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.GlobalTransform });
                         while (it.next()) |p| {
                             // notify new player about all other players.
                             try s.send_message(e.conn, p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
-                                .x = p.t.pos.x,
-                                .y = p.t.pos.y,
-                                .z = p.t.pos.z,
+                                .x = p.t.transform.pos.x,
+                                .y = p.t.transform.pos.y,
+                                .z = p.t.transform.pos.z,
                             } } } });
 
                             // notify other players about this player
@@ -1242,7 +1242,7 @@ pub const AppState = struct {
                                 .hold = true,
                             },
                             try app.world.phy.add_character(.{
-                                .pos = t.pos.xyz(),
+                                .pos = t.pos,
                                 .rot = t.rotation,
                             }),
                         });
@@ -1259,7 +1259,7 @@ pub const AppState = struct {
                         var pit = try app.world.ecs.iterator(struct {
                             pid: C.PlayerId,
                             controller: C.Controller,
-                            t: C.Transform,
+                            t: C.GlobalTransform,
                             lt: C.LastTransform,
                             shooter: C.Shooter,
                             char: C.CharacterBody,
@@ -1287,7 +1287,7 @@ pub const AppState = struct {
                             const fwd = rot.rotate_vector(camera.world_basis.fwd);
                             const right = rot.rotate_vector(camera.world_basis.right);
 
-                            player.t.rotation = rot.normalize();
+                            player.t.transform.rotation = rot.normalize();
                             // char.character.setRotation(player.t.rotation.to_buf());
 
                             var speed = player.controller.speed;
@@ -1302,21 +1302,21 @@ pub const AppState = struct {
 
                             if (char.character.getGroundState() == .on_ground) {
                                 if (kb.w.pressed()) {
-                                    player.char.force = player.char.force.add(fwd.scale(speed).xyz());
+                                    player.char.force = player.char.force.add(fwd.scale(speed));
                                 }
                                 if (kb.a.pressed()) {
-                                    player.char.force = player.char.force.add(right.scale(-speed).xyz());
+                                    player.char.force = player.char.force.add(right.scale(-speed));
                                 }
                                 if (kb.s.pressed()) {
-                                    player.char.force = player.char.force.add(fwd.scale(-speed).xyz());
+                                    player.char.force = player.char.force.add(fwd.scale(-speed));
                                 }
                                 if (kb.d.pressed()) {
-                                    player.char.force = player.char.force.add(right.scale(speed).xyz());
+                                    player.char.force = player.char.force.add(right.scale(speed));
                                 }
                             }
                             if (kb.space.pressed()) {
                                 if (char.character.getGroundState() == .on_ground) {
-                                    char.impulse = up.xyz().scale(10);
+                                    char.impulse = up.scale(10);
                                 }
                             }
 
@@ -1352,7 +1352,7 @@ pub const AppState = struct {
                                 // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
 
                                 const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
-                                const t = C.Transform{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = Vec4.splat3(rng.next()) };
+                                const t = C.GlobalTransform{ .transform = .{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = .splat(rng.next()) } };
                                 _ = try self.cmdbuf.insert(.{
                                     try C.Name.from("bullet"),
                                     t,
@@ -1361,11 +1361,11 @@ pub const AppState = struct {
                                     C.StaticRender{ .mesh = app.handles.mesh.cube },
                                     C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive },
                                     try app.world.phy.add_body(.{
-                                        .shape = .{ .box = .{ .size = t.scale.xyz() } },
-                                        .pos = t.pos.xyz(),
-                                        .velocity = fwd.xyz().scale(50),
+                                        .shape = .{ .box = .{ .size = t.transform.scale } },
+                                        .pos = t.transform.pos,
+                                        .velocity = fwd.scale(50),
                                         .friction = 0.4,
-                                        .rotation = t.rotation,
+                                        .rotation = t.transform.rotation,
                                         .motion_quality = .linear_cast,
                                     }),
                                 });
@@ -1374,7 +1374,7 @@ pub const AppState = struct {
                                         .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),
                                         .state = .alive,
                                     },
-                                    C.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
+                                    C.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.transform.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
                                 });
                             }
                         }
@@ -1442,9 +1442,9 @@ pub const AppState = struct {
                 try app.world.step(self.physics.step * steps, @intFromFloat(steps));
 
                 self.physics.interpolation_acctime = self.physics.acctime;
-                var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform });
+                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform });
                 while (it.next()) |e| {
-                    e.ft.t = e.t.*;
+                    e.ft.transform = e.t.transform;
                 }
             }
         }
@@ -1487,16 +1487,15 @@ pub const AppState = struct {
             const animate = struct {
                 fn animate(ar: *C.AnimatedRender, armature: *assets_mod.Armature, time: f32) bool {
                     const animation = &armature.animations[4];
-                    std.debug.print("animation {s}\n", .{animation.name});
 
                     for (ar.bones) |*t| {
-                        t.* = math.Mat4x4.scaling_mat(Vec4.splat3(1));
+                        t.* = math.Mat4x4.scaling_mat(.splat(1));
                     }
 
                     var updated = false;
                     for (ar.bones, ar.indices, 0..) |*arb, *index, i| {
                         const bone = &animation.bones[i];
-                        var out_t = math.Vec4{ .w = 1 };
+                        var out_t = math.Vec4{};
                         if (get_lerped(&out_t, bone.translation_keyframes.items, &index.translation, time)) {
                             updated = true;
                         }
@@ -1509,7 +1508,7 @@ pub const AppState = struct {
                             updated = true;
                         }
 
-                        arb.* = math.Mat4x4.translation_mat(out_t).mul_mat(math.Mat4x4.rot_mat_from_quat(out_r)).mul_mat(math.Mat4x4.scaling_mat(out_s));
+                        arb.* = math.Mat4x4.translation_mat(out_t.xyz()).mul_mat(math.Mat4x4.rot_mat_from_quat(out_r)).mul_mat(math.Mat4x4.scaling_mat(out_s.xyz()));
                     }
 
                     const bones = armature.bones;
@@ -1574,7 +1573,7 @@ pub const AppState = struct {
             };
 
             {
-                var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform, m: C.StaticRender });
+                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.mesh);
                     if (instance) |instance_index| {
@@ -1591,7 +1590,7 @@ pub const AppState = struct {
             }
 
             {
-                var it = try app.world.ecs.iterator(struct { t: C.Transform, ft: C.LastTransform, m: C.AnimatedRender });
+                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedRender });
                 while (it.next()) |e| {
                     const instance = app.instance_manager.reserve_instance(e.m.mesh);
                     const armature = &app.cpu_resources.armatures.items[e.m.armature.index];
@@ -1626,15 +1625,15 @@ pub const AppState = struct {
 
             playing.samples_buf2.clearRetainingCapacity();
 
-            const player = try app.world.ecs.get(app.handles.player, struct { t: C.Transform });
+            const player = try app.world.ecs.get(app.handles.player, struct { t: C.GlobalTransform });
             {
-                var it = try app.world.ecs.iterator(struct { sound: C.Sound, t: C.Transform });
+                var it = try app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
                 while (it.next()) |e| {
                     try playing.samples_buf2.append(.{
                         .handle = e.sound.audio,
                         .volume = e.sound.volume,
                         .start_frame = e.sound.start_frame,
-                        .pos = player.t.rotation.inverse_rotate_vector(e.t.pos.sub(player.t.pos)),
+                        .pos = player.t.transform.rotation.inverse_rotate_vector(e.t.transform.pos.sub(player.t.transform.pos)),
                     });
                 }
             }
@@ -1645,7 +1644,7 @@ pub const AppState = struct {
                         .handle = e.sound.audio,
                         .volume = e.sound.volume,
                         .start_frame = e.sound.start_frame,
-                        .pos = player.t.rotation.inverse_rotate_vector(e.sound.pos.sub(player.t.pos)),
+                        .pos = player.t.transform.rotation.inverse_rotate_vector(e.sound.pos.sub(player.t.transform.pos)),
                     });
                 }
             }
@@ -1653,11 +1652,11 @@ pub const AppState = struct {
 
         // add missing last transforms
         {
-            var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.Transform });
+            var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
             while (it.next()) |e| {
                 var ee = it.current_entity_explorer();
                 if (ee.get_component(C.LastTransform) == null) {
-                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .t = e.t.* });
+                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .transform = e.t.transform });
                 }
             }
         }
@@ -1670,11 +1669,11 @@ pub const AppState = struct {
                 camera: math.Camera,
                 controller: C.Controller,
                 lt: C.LastTransform,
-                transform: C.Transform,
+                t: C.GlobalTransform,
             });
             app.uniforms.uniform_buffer = try self.uniforms(
                 window,
-                &self.physics.interpolated(player.lt, player.transform),
+                &self.physics.interpolated(player.lt, player.t),
                 player.camera,
                 player.controller,
             );

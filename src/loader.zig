@@ -117,9 +117,10 @@ pub fn load_gltf(
     const scene = &info.scenes[info.scene];
     std.debug.print("spawning {s} scene\n", .{scene.name});
     for (scene.nodes) |ni| {
-        try spawn_node(
+        _ = try spawn_node(
             world,
             cmdbuf,
+            null,
             ni,
             info.nodes,
             &meshes,
@@ -139,29 +140,43 @@ pub fn load_gltf(
 fn spawn_node(
     world: *world_mod.World,
     cmdbuf: *EntityComponentStore.CmdBuf,
+    parent: ?Entity,
     node_index: GltfInfo.NodeIndex,
     nodes: []GltfInfo.Node,
     meshes: *Meshes,
     armatures: *Armatures,
     transform: C.Transform,
-) !void {
+) !Entity {
     const node = &nodes[node_index];
     const local = C.Transform.from_asset_transform(node.transform());
     const global = transform.apply_local(local);
-    for (node.children) |ci| {
-        try spawn_node(
-            world,
-            cmdbuf,
-            ci,
-            nodes,
-            meshes,
-            armatures,
-            global,
-        );
-    }
 
     const entity = if (node.extras) |*e| try maybe_get_entity(e) orelse cmdbuf.reserve() else cmdbuf.reserve();
-    try cmdbuf.insert_reserved(entity, .{});
+
+    {
+        var children = std.ArrayList(Entity).init(allocator.*);
+        errdefer children.deinit();
+        for (node.children) |ci| {
+            const child = try spawn_node(
+                world,
+                cmdbuf,
+                entity,
+                ci,
+                nodes,
+                meshes,
+                armatures,
+                global,
+            );
+            try children.append(child);
+        }
+
+        try cmdbuf.insert_reserved(entity, .{
+            C.Node{ .parent = parent, .children = children },
+            C.LocalTransform{ .transform = local },
+            C.GlobalTransform{ .transform = global },
+            C.LastTransform{ .transform = global },
+        });
+    }
 
     const mesh = if (node.mesh) |mi| &meshes.items[mi] else null;
     const armature = if (node.skin) |si| &armatures.items[si] else null;
@@ -218,9 +233,9 @@ fn spawn_node(
                             };
                             try cmdbuf.add_component(entity, try world.phy.add_body(.{
                                 .shape = shape,
-                                .pos = global.pos.xyz(),
+                                .pos = global.pos,
                                 .rotation = global.rotation,
-                                .scale = global.scale.xyz(),
+                                .scale = global.scale,
                                 .motion_quality = value.motion_quality,
                                 .motion_type = value.motion_type,
                                 .friction = value.friction,
@@ -228,7 +243,7 @@ fn spawn_node(
                         },
                         C.Transform => {
                             // try cmdbuf.add_component(entity, global);
-                            try cmdbuf.add_component(entity, transform.apply_local(component.value));
+                            // try cmdbuf.add_component(entity, transform.apply_local(component.value));
                         },
                         else => {
                             try cmdbuf.add_component(entity, component.value);
@@ -238,6 +253,8 @@ fn spawn_node(
             }
         }
     }
+
+    return entity;
 }
 
 fn maybe_get_entity(extras: *GltfInfo.ZhottExtras) !?Entity {

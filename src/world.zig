@@ -205,21 +205,14 @@ pub const Jphysics = struct {
         return .{ .character = character };
     }
 
-    pub fn get_transform(self: *@This(), bid: BodyId) Components.Transform {
+    pub fn get_transform(self: *@This(), bid: BodyId) struct { active: bool, position: Vec3, rotation: Vec4 } {
         const pos = self.phy.getBodyInterface().getPosition(bid.id);
         const rot = self.phy.getBodyInterface().getRotation(bid.id);
+        const active = self.phy.getBodyInterface().isActive(bid.id);
         return .{
-            .pos = .{
-                .x = pos[0],
-                .y = pos[1],
-                .z = pos[2],
-            },
-            .rotation = .{
-                .x = rot[0],
-                .y = rot[1],
-                .z = rot[2],
-                .w = rot[3],
-            },
+            .active = active,
+            .position = Vec3.from_buf(pos),
+            .rotation = Vec4.from_buf(rot),
         };
     }
 
@@ -604,7 +597,9 @@ pub const World = struct {
         _ = try self.ecs.register(Components.Shooter);
         _ = try self.ecs.register(Components.Sound);
         _ = try self.ecs.register(Components.StaticSound);
-        _ = try self.ecs.register(Components.Transform);
+        _ = try self.ecs.register(Components.Node);
+        _ = try self.ecs.register(Components.LocalTransform);
+        _ = try self.ecs.register(Components.GlobalTransform);
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.TimeDespawn);
         _ = try self.ecs.register(Components.PlayerId);
@@ -624,22 +619,20 @@ pub const World = struct {
     pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
         try self.phy.update(sim_time, steps);
 
-        var it = try self.ecs.iterator(struct { t: Components.Transform, bid: Jphysics.BodyId });
+        var it = try self.ecs.iterator(struct { t: Components.GlobalTransform, bid: Jphysics.BodyId });
         while (it.next()) |e| {
             const t = self.phy.get_transform(e.bid.*);
-            e.t.pos = t.pos;
-            e.t.rotation = t.rotation;
+            e.t.set(.{ .pos = t.position, .rotation = t.rotation, .scale = e.t.transform.scale });
         }
 
-        var player_it = try self.ecs.iterator(struct { t: Components.Transform, char: Jphysics.CharacterBody });
+        var player_it = try self.ecs.iterator(struct { t: Components.GlobalTransform, char: Jphysics.CharacterBody });
         while (player_it.next()) |e| {
             const char: *Jphysics.CharacterBody = e.char;
             char.force = .{};
             char.impulse = .{};
             const pos = Vec3.from_buf(char.character.getPosition());
             const rot = Vec4.from_buf(char.character.getRotation());
-            e.t.pos = pos.withw(0);
-            e.t.rotation = rot;
+            e.t.set(.{ .pos = pos, .rotation = rot, .scale = e.t.transform.scale });
         }
     }
 };
@@ -662,8 +655,8 @@ pub const Components = struct {
     };
 
     pub const Transform = struct {
-        pos: Vec4 = .{},
-        scale: Vec4 = Vec4.splat3(1.0),
+        pos: Vec3 = .{},
+        scale: Vec3 = Vec3.splat(1.0),
         rotation: Vec4 = Vec4.quat_identity_rot(),
 
         pub fn mat4(self: *const @This()) math.Mat4x4 {
@@ -681,11 +674,11 @@ pub const Components = struct {
             };
         }
 
-        pub inline fn transform_pos(self: *const @This(), pos: Vec4) Vec4 {
+        pub inline fn transform_pos(self: *const @This(), pos: Vec3) Vec3 {
             return self.pos.add(self.rotation.rotate_vector(pos.mul(self.scale)));
         }
 
-        pub inline fn inverse_transform_pos(self: *const @This(), pos: Vec4) Vec4 {
+        pub inline fn inverse_transform_pos(self: *const @This(), pos: Vec3) Vec3 {
             return self.rotation.inverse_rotate_vector(pos.sub(self.pos)).mul(.{
                 .x = 1.0 / self.scale.x,
                 .y = 1.0 / self.scale.y,
@@ -693,7 +686,7 @@ pub const Components = struct {
             });
         }
 
-        pub inline fn transform_direction(self: *const @This(), dir: Vec4) Vec4 {
+        pub inline fn transform_direction(self: *const @This(), dir: Vec3) Vec3 {
             return self.rotation.rotate_vector(dir.scale(self.scale));
         }
 
@@ -708,20 +701,45 @@ pub const Components = struct {
         pub inline fn apply_local(self: *const @This(), transform: @This()) @This() {
             return transform.apply_global(self.*);
         }
+
+        pub fn lerp(self: *const @This(), new: *const @This(), t: f32) Transform {
+            return .{
+                .pos = self.pos.mix(new.pos, t),
+                .rotation = self.rotation.mix(new.rotation, t),
+                .scale = self.scale.mix(new.scale, t),
+            };
+        }
+    };
+
+    pub const LocalTransform = struct {
+        transform: Transform = .{},
+
+        pub fn set(self: *@This(), t: Transform) void {
+            self.transform = t;
+        }
     };
 
     // maybe just put 2 transforms (last and current) inside rigidbody and store the interpolated transform in the
     // Transform component. that way it's easy to just use the interpolated transform for everything else.
     // but maybe it's better to keep it framerate independent?
     pub const LastTransform = struct {
-        t: Transform = .{},
+        transform: Transform = .{},
+    };
 
-        pub fn lerp(self: *const @This(), new: *const Transform, t: f32) Transform {
-            return .{
-                .pos = self.t.pos.mix(new.pos, t),
-                .rotation = self.t.rotation.mix(new.rotation, t),
-                .scale = self.t.scale.mix(new.scale, t),
-            };
+    pub const GlobalTransform = struct {
+        transform: Transform = .{},
+
+        pub fn set(self: *@This(), t: Transform) void {
+            self.transform = t;
+        }
+    };
+
+    pub const Node = struct {
+        parent: ?Entity,
+        children: std.ArrayList(Entity),
+
+        pub fn deinit(self: *@This()) void {
+            self.children.deinit();
         }
     };
 
@@ -753,7 +771,7 @@ pub const Components = struct {
 
     pub const StaticSound = struct {
         audio: ResourceManager.AudioHandle,
-        pos: Vec4,
+        pos: Vec3,
         start_frame: u64,
         volume: f32 = 1.0,
     };
