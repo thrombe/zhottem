@@ -299,7 +299,21 @@ pub const ResourceManager = struct {
         const AudioSamples = std.ArrayList(assets_mod.Wav);
         const Meshes = std.ArrayList(assets_mod.Mesh);
         const Images = std.ArrayList(utils_mod.StbImage.UnormImage);
-        const Gltf = std.ArrayList(assets_mod.Gltf);
+        const Gltf = std.ArrayList(GltfData);
+
+        pub const GltfData = struct {
+            gltf: assets_mod.Gltf,
+            handles: struct {
+                meshes: []MeshHandle,
+                armatures: []ArmatureHandle,
+            },
+
+            fn deinit(self: *@This()) void {
+                defer self.gltf.deinit();
+                defer self.gltf.alloc.free(self.handles.meshes);
+                defer self.gltf.alloc.free(self.handles.armatures);
+            }
+        };
 
         pub fn init() @This() {
             return .{
@@ -359,7 +373,7 @@ pub const ResourceManager = struct {
                 AudioHandle => *assets_mod.Wav,
                 ArmatureHandle => *assets_mod.Armature,
                 MeshHandle => *assets_mod.Mesh,
-                GltfHandle => *assets_mod.Gltf,
+                GltfHandle => *GltfData,
                 ImageHandle => *utils_mod.StbImage.UnormImage,
                 else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
             };
@@ -384,8 +398,9 @@ pub const ResourceManager = struct {
                     return .{ .index = @intCast(handle), .regions = regions };
                 },
                 assets_mod.Gltf => {
+                    const data = try self.add_gltf(asset);
                     const handle = self.gltf.items.len;
-                    try self.gltf.append(asset);
+                    try self.gltf.append(data);
                     return .{ .index = @intCast(handle) };
                 },
                 utils_mod.StbImage.UnormImage => {
@@ -417,6 +432,31 @@ pub const ResourceManager = struct {
                 },
                 else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
             }
+        }
+
+        fn add_gltf(self: *@This(), _gltf: assets_mod.Gltf) !GltfData {
+            var gltf = _gltf;
+            const info = &gltf.info.value;
+
+            var meshes = std.ArrayList(MeshHandle).init(gltf.alloc);
+            for (info.meshes) |*m| {
+                const mesh = try gltf.parse_mesh(m);
+                try meshes.append(try self.add(mesh));
+            }
+
+            var armatures = std.ArrayList(ArmatureHandle).init(gltf.alloc);
+            for (info.skins) |*skin| {
+                const armature = try gltf.parse_armature(skin);
+                try armatures.append(try self.add(armature));
+            }
+
+            return .{
+                .handles = .{
+                    .meshes = try meshes.toOwnedSlice(),
+                    .armatures = try armatures.toOwnedSlice(),
+                },
+                .gltf = gltf,
+            };
         }
 
         fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshHandle.Regions {

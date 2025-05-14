@@ -87,50 +87,34 @@ pub fn load_gltf(
     cpu_resources: *ResourceManager.CpuResources,
     instance_manager: *InstanceManager,
     cmdbuf: *EntityComponentStore.CmdBuf,
-    gltf: *assets_mod.Gltf,
+    gltf_handle: ResourceManager.GltfHandle,
 ) !void {
-    const info = &gltf.info.value;
-    var meshes = Meshes.init(allocator.*);
-    defer meshes.deinit();
-
-    for (info.meshes) |*m| {
-        const mesh = try gltf.parse_mesh(m);
-        try meshes.append(.{
-            .handle = try cpu_resources.add(mesh),
-        });
-    }
-
-    var armatures = Armatures.init(allocator.*);
-    defer armatures.deinit();
-
-    for (info.skins) |*skin| {
-        const armature = try gltf.parse_armature(skin);
-        try armatures.append(.{
-            .handle = try cpu_resources.add(armature),
-            .len = skin.joints.len,
-        });
-    }
+    const gltf = cpu_resources.ref(gltf_handle);
+    const info = &gltf.gltf.info.value;
 
     const scene = &info.scenes[info.scene];
     std.debug.print("spawning {s} scene\n", .{scene.name});
+    const mesh_counts = try allocator.alloc(u32, gltf.handles.meshes.len);
+    defer allocator.free(mesh_counts);
+    @memset(mesh_counts, 0);
     for (scene.nodes) |ni| {
         _ = try spawn_node(
             world,
             cpu_resources,
             cmdbuf,
+            gltf_handle,
             null,
             ni,
             info.nodes,
-            &meshes,
-            &armatures,
+            mesh_counts,
             .{},
         );
     }
 
-    for (meshes.items) |mesh| {
+    for (gltf.handles.meshes, mesh_counts) |mesh, count| {
         try instance_manager.instances.append(.{
-            .mesh = mesh.handle,
-            .instances = try cpu_resources.batch_reserve(mesh.count),
+            .mesh = mesh,
+            .instances = try cpu_resources.batch_reserve(count),
         });
     }
 }
@@ -139,13 +123,14 @@ fn spawn_node(
     world: *world_mod.World,
     cpu_resources: *ResourceManager.CpuResources,
     cmdbuf: *EntityComponentStore.CmdBuf,
+    gltf_handle: ResourceManager.GltfHandle,
     parent: ?Entity,
     node_index: GltfInfo.NodeIndex,
     nodes: []GltfInfo.Node,
-    meshes: *Meshes,
-    armatures: *Armatures,
+    mesh_counts: []u32,
     transform: C.Transform,
 ) !Entity {
+    const gltf = cpu_resources.ref(gltf_handle);
     const node = &nodes[node_index];
     const local = C.Transform.from_asset_transform(node.transform());
     const global = transform.apply_local(local);
@@ -160,11 +145,11 @@ fn spawn_node(
                 world,
                 cpu_resources,
                 cmdbuf,
+                gltf_handle,
                 entity,
                 ci,
                 nodes,
-                meshes,
-                armatures,
+                mesh_counts,
                 global,
             );
             try children.append(child);
@@ -178,24 +163,25 @@ fn spawn_node(
         });
     }
 
-    const meshi = if (node.mesh) |mi| &meshes.items[mi] else null;
-    const armature = if (node.skin) |si| &armatures.items[si] else null;
-    if (meshi) |m| {
-        m.count += 1;
+    if (node.mesh) |m| {
+        mesh_counts[m] += 1;
+        const hmesh = gltf.handles.meshes[m];
 
-        if (armature) |a| {
-            const bones = try allocator.alloc(math.Mat4x4, a.len);
-            const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, a.len);
+        if (node.skin) |si| {
+            const harmature = gltf.handles.armatures[si];
+            const armature = cpu_resources.ref(harmature);
+            const bones = try allocator.alloc(math.Mat4x4, armature.bones.len);
+            const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, armature.bones.len);
             @memset(bones, .{});
             @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
             try cmdbuf.add_component(entity, C.AnimatedRender{
-                .mesh = m.handle,
-                .armature = a.handle,
+                .mesh = hmesh,
+                .armature = harmature,
                 .bones = bones,
                 .indices = indices,
             });
         } else {
-            try cmdbuf.add_component(entity, C.StaticRender{ .mesh = m.handle });
+            try cmdbuf.add_component(entity, C.StaticRender{ .mesh = hmesh });
         }
     }
 
@@ -221,8 +207,9 @@ fn spawn_node(
                             const value: Rigidbody = component.value;
                             const shape: world_mod.Jphysics.ShapeSettings = blk: switch (value.collider_shape) {
                                 .mesh => {
-                                    const m = meshi orelse return error.MissingMesh;
-                                    const mesh = cpu_resources.ref(m.handle);
+                                    const m = node.mesh orelse return error.MissingMesh;
+                                    const hmesh = gltf.handles.meshes[m];
+                                    const mesh = cpu_resources.ref(hmesh);
                                     break :blk .{ .mesh = .{
                                         .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(mesh.faces)),
                                         .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(mesh.vertices)),
