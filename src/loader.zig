@@ -76,8 +76,7 @@ pub fn generate_type_registry() !void {
 }
 
 const Meshes = std.ArrayList(struct {
-    mesh: assets_mod.Mesh,
-    handle: ResourceManager.MeshResourceHandle,
+    handle: ResourceManager.MeshHandle,
     count: u32 = 0,
 });
 
@@ -96,10 +95,8 @@ pub fn load_gltf(
 
     for (info.meshes) |*m| {
         const mesh = try gltf.parse_mesh(m);
-        const mesh_handle = try cpu_resources.add_mesh(&mesh);
         try meshes.append(.{
-            .mesh = mesh,
-            .handle = mesh_handle,
+            .handle = try cpu_resources.add(mesh),
         });
     }
 
@@ -109,7 +106,7 @@ pub fn load_gltf(
     for (info.skins) |*skin| {
         const armature = try gltf.parse_armature(skin);
         try armatures.append(.{
-            .handle = try cpu_resources.add_armature(armature),
+            .handle = try cpu_resources.add(armature),
             .len = skin.joints.len,
         });
     }
@@ -119,6 +116,7 @@ pub fn load_gltf(
     for (scene.nodes) |ni| {
         _ = try spawn_node(
             world,
+            cpu_resources,
             cmdbuf,
             null,
             ni,
@@ -139,6 +137,7 @@ pub fn load_gltf(
 
 fn spawn_node(
     world: *world_mod.World,
+    cpu_resources: *ResourceManager.CpuResources,
     cmdbuf: *EntityComponentStore.CmdBuf,
     parent: ?Entity,
     node_index: GltfInfo.NodeIndex,
@@ -159,6 +158,7 @@ fn spawn_node(
         for (node.children) |ci| {
             const child = try spawn_node(
                 world,
+                cpu_resources,
                 cmdbuf,
                 entity,
                 ci,
@@ -178,9 +178,9 @@ fn spawn_node(
         });
     }
 
-    const mesh = if (node.mesh) |mi| &meshes.items[mi] else null;
+    const meshi = if (node.mesh) |mi| &meshes.items[mi] else null;
     const armature = if (node.skin) |si| &armatures.items[si] else null;
-    if (mesh) |m| {
+    if (meshi) |m| {
         m.count += 1;
 
         if (armature) |a| {
@@ -221,10 +221,11 @@ fn spawn_node(
                             const value: Rigidbody = component.value;
                             const shape: world_mod.Jphysics.ShapeSettings = blk: switch (value.collider_shape) {
                                 .mesh => {
-                                    const m = mesh orelse return error.MissingMesh;
+                                    const m = meshi orelse return error.MissingMesh;
+                                    const mesh = cpu_resources.ref(m.handle);
                                     break :blk .{ .mesh = .{
-                                        .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(m.mesh.faces)),
-                                        .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(m.mesh.vertices)),
+                                        .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(mesh.faces)),
+                                        .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(mesh.vertices)),
                                     } };
                                 },
                                 .sphere => |s| .{ .sphere = .{ .radius = s.radius } },

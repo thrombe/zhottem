@@ -797,11 +797,11 @@ pub const Components = struct {
     };
 
     pub const StaticRender = struct {
-        mesh: ResourceManager.MeshResourceHandle,
+        mesh: ResourceManager.MeshHandle,
     };
 
     pub const AnimatedRender = struct {
-        mesh: ResourceManager.MeshResourceHandle,
+        mesh: ResourceManager.MeshHandle,
         armature: ResourceManager.ArmatureHandle,
 
         // relative to the start of this animation

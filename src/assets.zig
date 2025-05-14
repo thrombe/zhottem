@@ -110,17 +110,18 @@ pub const Mesh = struct {
     // we just upload all bones to the gpu after transforming all bones considering the skeleton hierarchy.
     // pretty common to cap bones per vertex to 4
     bones: [][]VertexBone,
+    alloc: std.mem.Allocator,
 
-    pub fn cube() !@This() {
-        var vertices = std.ArrayList([3]f32).init(allocator.*);
+    pub fn cube(alloc: std.mem.Allocator) !@This() {
+        var vertices = std.ArrayList([3]f32).init(alloc);
         errdefer vertices.deinit();
-        var normals = std.ArrayList([3]f32).init(allocator.*);
+        var normals = std.ArrayList([3]f32).init(alloc);
         errdefer normals.deinit();
-        var uvs = std.ArrayList([2]f32).init(allocator.*);
+        var uvs = std.ArrayList([2]f32).init(alloc);
         errdefer uvs.deinit();
-        var bones = std.ArrayList([]VertexBone).init(allocator.*);
+        var bones = std.ArrayList([]VertexBone).init(alloc);
         errdefer bones.deinit();
-        var faces = std.ArrayList([3]u32).init(allocator.*);
+        var faces = std.ArrayList([3]u32).init(alloc);
         errdefer faces.deinit();
 
         try vertices.appendSlice(&[_][3]f32{
@@ -154,7 +155,7 @@ pub const Mesh = struct {
             .{ 0.0, 0.0 },
         });
         for (0..vertices.items.len) |_| {
-            const vbone = try allocator.alloc(VertexBone, 1);
+            const vbone = try alloc.alloc(VertexBone, 1);
             vbone[0].bone = 0;
             vbone[0].weight = 1;
             try bones.append(vbone);
@@ -175,7 +176,8 @@ pub const Mesh = struct {
         });
 
         return .{
-            .name = try allocator.dupe(u8, "cube"),
+            .alloc = alloc,
+            .name = try alloc.dupe(u8, "cube"),
             .vertices = try vertices.toOwnedSlice(),
             .normals = try normals.toOwnedSlice(),
             .uvs = try uvs.toOwnedSlice(),
@@ -184,16 +186,16 @@ pub const Mesh = struct {
         };
     }
 
-    pub fn plane() !@This() {
-        var vertices = std.ArrayList([3]f32).init(allocator.*);
+    pub fn plane(alloc: std.mem.Allocator) !@This() {
+        var vertices = std.ArrayList([3]f32).init(alloc);
         errdefer vertices.deinit();
-        var normals = std.ArrayList([3]f32).init(allocator.*);
+        var normals = std.ArrayList([3]f32).init(alloc);
         errdefer normals.deinit();
-        var uvs = std.ArrayList([2]f32).init(allocator.*);
+        var uvs = std.ArrayList([2]f32).init(alloc);
         errdefer uvs.deinit();
-        var bones = std.ArrayList([]VertexBone).init(allocator.*);
+        var bones = std.ArrayList([]VertexBone).init(alloc);
         errdefer bones.deinit();
-        var faces = std.ArrayList([3]u32).init(allocator.*);
+        var faces = std.ArrayList([3]u32).init(alloc);
         errdefer faces.deinit();
 
         try vertices.appendSlice(&[_][3]f32{
@@ -215,7 +217,7 @@ pub const Mesh = struct {
             .{ 0.0, 1.0 },
         });
         for (0..vertices.items.len) |_| {
-            const vbone = try allocator.alloc(VertexBone, 1);
+            const vbone = try alloc.alloc(VertexBone, 1);
             vbone[0].bone = 0;
             vbone[0].weight = 1;
             try bones.append(vbone);
@@ -226,7 +228,8 @@ pub const Mesh = struct {
         });
 
         return .{
-            .name = try allocator.dupe(u8, "plane"),
+            .alloc = alloc,
+            .name = try alloc.dupe(u8, "plane"),
             .vertices = try vertices.toOwnedSlice(),
             .normals = try normals.toOwnedSlice(),
             .uvs = try uvs.toOwnedSlice(),
@@ -235,38 +238,39 @@ pub const Mesh = struct {
         };
     }
 
-    pub fn boneless(self: *const @This()) !@This() {
-        const bones = try allocator.dupe([]VertexBone, self.bones);
+    pub fn boneless(self: *const @This(), alloc: std.mem.Allocator) !@This() {
+        const bones = try alloc.dupe([]VertexBone, self.bones);
 
         for (0..self.vertices.len) |i| {
-            const vbone = try allocator.alloc(VertexBone, 1);
+            const vbone = try alloc.alloc(VertexBone, 1);
             vbone[0].bone = 0;
             vbone[0].weight = 1;
             bones[i] = vbone;
         }
 
         const new = @This(){
-            .name = try allocator.dupe(u8, self.name),
+            .alloc = alloc,
+            .name = try alloc.dupe(u8, self.name),
             .bones = bones,
-            .uvs = try allocator.dupe([2]f32, self.uvs),
-            .faces = try allocator.dupe([3]u32, self.faces),
-            .normals = try allocator.dupe([3]f32, self.normals),
-            .vertices = try allocator.dupe([3]f32, self.vertices),
+            .uvs = try alloc.dupe([2]f32, self.uvs),
+            .faces = try alloc.dupe([3]u32, self.faces),
+            .normals = try alloc.dupe([3]f32, self.normals),
+            .vertices = try alloc.dupe([3]f32, self.vertices),
         };
 
         return new;
     }
 
     pub fn deinit(self: *@This()) void {
-        allocator.free(self.name);
-        allocator.free(self.vertices);
-        allocator.free(self.normals);
-        allocator.free(self.faces);
+        self.alloc.free(self.name);
+        self.alloc.free(self.vertices);
+        self.alloc.free(self.normals);
+        self.alloc.free(self.faces);
         for (self.bones) |bone| {
-            allocator.free(bone);
+            self.alloc.free(bone);
         }
-        allocator.free(self.bones);
-        allocator.free(self.uvs);
+        self.alloc.free(self.bones);
+        self.alloc.free(self.uvs);
     }
 };
 
@@ -466,6 +470,7 @@ pub const Gltf = struct {
         }
 
         return .{
+            .alloc = self.alloc,
             .name = try self.alloc.dupe(u8, mesh.name),
             .vertices = try vertices.toOwnedSlice(),
             .normals = try normals.toOwnedSlice(),

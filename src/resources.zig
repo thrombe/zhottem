@@ -2,6 +2,8 @@ const std = @import("std");
 
 const vk = @import("vulkan");
 
+const utils_mod = @import("utils.zig");
+
 const math = @import("math.zig");
 const assets_mod = @import("assets.zig");
 
@@ -147,7 +149,7 @@ pub const InstanceManager = struct {
         self.instances.deinit();
     }
 
-    pub fn reserve_instance(self: *@This(), mesh: ResourceManager.MeshResourceHandle) ?u32 {
+    pub fn reserve_instance(self: *@This(), mesh: ResourceManager.MeshHandle) ?u32 {
         for (self.instances.items) |*item| {
             if (item.maybe_reserve(mesh)) |index| {
                 return index;
@@ -191,7 +193,7 @@ pub const InstanceAllocator = struct {
     // so we have this abstraction that bump allocates instance buffer memory each frame
     // for each type of instance we might want to render.
 
-    mesh: ResourceManager.MeshResourceHandle,
+    mesh: ResourceManager.MeshHandle,
     instances: ResourceManager.BatchedInstanceResourceHandle,
     count: u32 = 0,
 
@@ -204,7 +206,7 @@ pub const InstanceAllocator = struct {
         return self.count + self.instances.first - 1;
     }
 
-    pub fn maybe_reserve(self: *@This(), mesh: ResourceManager.MeshResourceHandle) ?u32 {
+    pub fn maybe_reserve(self: *@This(), mesh: ResourceManager.MeshHandle) ?u32 {
         if (std.meta.eql(self.mesh, mesh)) {
             return self.reserve();
         }
@@ -226,13 +228,13 @@ pub const InstanceAllocator = struct {
             .dynamic_offsets = offsets,
             .vertices = .{
                 .buffer = resources.vertex_buffer.buffer,
-                .count = self.mesh.vertex.count,
-                .first = self.mesh.vertex.first,
+                .count = self.mesh.regions.vertex.count,
+                .first = self.mesh.regions.vertex.first,
             },
             .indices = .{
                 .buffer = resources.index_buffer.buffer,
-                .count = self.mesh.index.count,
-                .first = self.mesh.index.first,
+                .count = self.mesh.regions.index.count,
+                .first = self.mesh.regions.index.first,
             },
             .instances = .{
                 .buffer = resources.instance_buffer.buffer,
@@ -244,10 +246,14 @@ pub const InstanceAllocator = struct {
 };
 
 pub const ResourceManager = struct {
-    pub const MeshResourceHandle = struct {
-        index: Region,
-        vertex: Region,
+    pub const MeshHandle = struct {
+        index: u32,
+        regions: Regions,
 
+        const Regions = struct {
+            index: Region,
+            vertex: Region,
+        };
         const Region = struct {
             first: u32,
             count: u32,
@@ -267,6 +273,12 @@ pub const ResourceManager = struct {
     pub const AudioHandle = struct {
         index: u32,
     };
+    pub const ImageHandle = struct {
+        index: u32,
+    };
+    pub const GltfHandle = struct {
+        index: u32,
+    };
 
     pub const CpuResources = struct {
         vertices: Vertices,
@@ -275,6 +287,9 @@ pub const ResourceManager = struct {
         bones: Bones,
         armatures: Armatures,
         audio: AudioSamples,
+        meshes: Meshes,
+        images: Images,
+        gltf: Gltf,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
@@ -282,6 +297,9 @@ pub const ResourceManager = struct {
         const Bones = std.ArrayList(math.Mat4x4);
         const Armatures = std.ArrayList(assets_mod.Armature);
         const AudioSamples = std.ArrayList(assets_mod.Wav);
+        const Meshes = std.ArrayList(assets_mod.Mesh);
+        const Images = std.ArrayList(utils_mod.StbImage.UnormImage);
+        const Gltf = std.ArrayList(assets_mod.Gltf);
 
         pub fn init() @This() {
             return .{
@@ -291,6 +309,9 @@ pub const ResourceManager = struct {
                 .bones = .init(allocator.*),
                 .armatures = .init(allocator.*),
                 .audio = .init(allocator.*),
+                .meshes = .init(allocator.*),
+                .images = .init(allocator.*),
+                .gltf = .init(allocator.*),
             };
         }
 
@@ -301,28 +322,105 @@ pub const ResourceManager = struct {
             self.bones.deinit();
             self.armatures.deinit();
 
-            for (self.audio.items) |*sample| {
-                sample.deinit();
+            for (self.audio.items) |*t| {
+                t.deinit();
             }
             self.audio.deinit();
+
+            for (self.meshes.items) |*t| {
+                t.deinit();
+            }
+            self.meshes.deinit();
+
+            for (self.images.items) |*t| {
+                t.deinit();
+            }
+            self.images.deinit();
+
+            for (self.gltf.items) |*t| {
+                t.deinit();
+            }
+            self.gltf.deinit();
         }
 
-        pub fn add_audio(self: *@This(), w: assets_mod.Wav) !AudioHandle {
-            const handle = AudioHandle{ .index = @intCast(self.audio.items.len) };
-            try self.audio.append(w);
-            return handle;
+        fn to_handle(typ: type) type {
+            return switch (typ) {
+                assets_mod.Wav => AudioHandle,
+                assets_mod.Armature => ArmatureHandle,
+                assets_mod.Mesh => MeshHandle,
+                assets_mod.Gltf => GltfHandle,
+                utils_mod.StbImage.UnormImage => ImageHandle,
+                else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
+            };
         }
 
-        pub fn add_armature(self: *@This(), a: assets_mod.Armature) !ArmatureHandle {
-            const handle = self.armatures.items.len;
-
-            try self.armatures.append(a);
-
-            return .{ .index = @intCast(handle) };
+        fn to_asset(typ: type) type {
+            return switch (typ) {
+                AudioHandle => *assets_mod.Wav,
+                ArmatureHandle => *assets_mod.Armature,
+                MeshHandle => *assets_mod.Mesh,
+                GltfHandle => *assets_mod.Gltf,
+                ImageHandle => *utils_mod.StbImage.UnormImage,
+                else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
+            };
         }
 
-        pub fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshResourceHandle {
-            const handle = MeshResourceHandle{
+        pub fn add(self: *@This(), asset: anytype) !to_handle(@TypeOf(asset)) {
+            switch (@TypeOf(asset)) {
+                assets_mod.Wav => {
+                    const handle = self.audio.items.len;
+                    try self.audio.append(asset);
+                    return .{ .index = @intCast(handle) };
+                },
+                assets_mod.Armature => {
+                    const handle = self.armatures.items.len;
+                    try self.armatures.append(asset);
+                    return .{ .index = @intCast(handle) };
+                },
+                assets_mod.Mesh => {
+                    const regions = try self.add_mesh(&asset);
+                    const handle = self.meshes.items.len;
+                    try self.meshes.append(asset);
+                    return .{ .index = @intCast(handle), .regions = regions };
+                },
+                assets_mod.Gltf => {
+                    const handle = self.gltf.items.len;
+                    try self.gltf.append(asset);
+                    return .{ .index = @intCast(handle) };
+                },
+                utils_mod.StbImage.UnormImage => {
+                    const handle = self.images.items.len;
+                    try self.images.append(asset);
+                    return .{ .index = @intCast(handle) };
+                },
+                else => @compileError("can't handle type: '" ++ @typeName(asset) ++ "' here"),
+            }
+        }
+
+        pub fn ref(self: *@This(), handle: anytype) to_asset(@TypeOf(handle)) {
+            const typ = @TypeOf(handle);
+            switch (typ) {
+                AudioHandle => {
+                    return &self.audio.items[handle.index];
+                },
+                ArmatureHandle => {
+                    return &self.armatures.items[handle.index];
+                },
+                MeshHandle => {
+                    return &self.meshes.items[handle.index];
+                },
+                ImageHandle => {
+                    return &self.images.items[handle.index];
+                },
+                GltfHandle => {
+                    return &self.gltf.items[handle.index];
+                },
+                else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
+            }
+        }
+
+        fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshHandle.Regions {
+            const handle = MeshHandle.Regions{
                 .index = .{
                     .first = @intCast(self.triangles.items.len * 3),
                     .count = @intCast(m.faces.len * 3),

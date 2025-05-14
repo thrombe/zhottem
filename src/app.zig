@@ -78,49 +78,25 @@ net_ctx: NetworkingContext,
 net_server: ?*NetworkingContext.Server = null,
 net_client: *NetworkingContext.Client,
 
-texture_img: utils.StbImage.UnormImage,
 texture: Image,
 
 handles: Handles,
-assets: Assets,
+entities: Entities,
 
-const Assets = struct {
-    scenes_gltf: assets_mod.Gltf,
-
-    cube: assets_mod.Mesh,
-    plane: assets_mod.Mesh,
-
-    fn init() !@This() {
-        var scenes_glb = try assets_mod.Gltf.parse_glb("assets/exports/scenes.glb");
-        errdefer scenes_glb.deinit();
-
-        var cube = try assets_mod.Mesh.cube();
-        errdefer cube.deinit();
-
-        var plane = try assets_mod.Mesh.plane();
-        errdefer plane.deinit();
-
-        return .{
-            .scenes_gltf = scenes_glb,
-
-            .cube = cube,
-            .plane = plane,
-        };
-    }
-
-    fn deinit(self: *@This()) void {
-        inline for (@typeInfo(@This()).@"struct".fields) |field| {
-            if (comptime @hasDecl(field.type, "deinit")) {
-                @field(self, field.name).deinit();
-            }
-        }
-    }
+const Entities = struct {
+    player: Entity,
 };
 
 const Handles = struct {
-    player: Entity,
+    gltf: struct {
+        library: ResourceManager.GltfHandle,
+    },
     mesh: struct {
-        cube: ResourceManager.MeshResourceHandle,
+        cube: ResourceManager.MeshHandle,
+        plane: ResourceManager.MeshHandle,
+    },
+    image: struct {
+        mandlebulb: ResourceManager.ImageHandle,
     },
     audio: AudioHandles,
 
@@ -135,16 +111,44 @@ const Handles = struct {
 
         fn init(cpu: *ResourceManager.CpuResources) !@This() {
             return .{
-                .boom = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/boom.wav")),
-                .bruh = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/bruh.wav")),
-                .long_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/long-reload.wav")),
-                .short_reload = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/short-reload.wav")),
-                .scream1 = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/scream1.wav")),
-                .scream2 = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/scream2.wav")),
-                .shot = try cpu.add_audio(try assets_mod.Wav.parse_wav("assets/audio/shot.wav")),
+                .boom = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/boom.wav")),
+                .bruh = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/bruh.wav")),
+                .long_reload = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/long-reload.wav")),
+                .short_reload = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/short-reload.wav")),
+                .scream1 = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/scream1.wav")),
+                .scream2 = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/scream2.wav")),
+                .shot = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/shot.wav")),
             };
         }
     };
+
+    fn init(cpu: *ResourceManager.CpuResources) !@This() {
+        var library = try assets_mod.Gltf.parse_glb("assets/exports/library.glb");
+        errdefer library.deinit();
+
+        var image = try utils.StbImage.from_file(.unorm, "assets/images/mandlebulb.png");
+        errdefer image.deinit();
+
+        var cube = try assets_mod.Mesh.cube(allocator.*);
+        errdefer cube.deinit();
+
+        var plane = try assets_mod.Mesh.plane(allocator.*);
+        errdefer plane.deinit();
+
+        return .{
+            .audio = try .init(cpu),
+            .image = .{
+                .mandlebulb = try cpu.add(image),
+            },
+            .gltf = .{
+                .library = try cpu.add(library),
+            },
+            .mesh = .{
+                .cube = try cpu.add(cube),
+                .plane = try cpu.add(plane),
+            },
+        };
+    }
 };
 
 const AudioPlayer = Engine.Audio.Stream(.output, struct {
@@ -370,45 +374,38 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const net_client = try net_ctx.client();
     errdefer net_client.deinit();
 
-    var image = try utils.StbImage.from_file("assets/images/mandlebulb.png", .unorm);
-    errdefer image.deinit();
-    const slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(image.buffer));
+    var cpu = ResourceManager.CpuResources.init();
+    errdefer cpu.deinit();
 
+    const handles = try Handles.init(&cpu);
+
+    const mandlebulb = cpu.ref(handles.image.mandlebulb);
+    const img_slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(mandlebulb.buffer));
     var gpu_img = try Image.new_from_slice(ctx, cmd_pool, .{
-        .extent = .{ .width = @intCast(image.width), .height = @intCast(image.height) },
+        .extent = .{
+            .width = @intCast(mandlebulb.width),
+            .height = @intCast(mandlebulb.height),
+        },
         .bind_desc_type = .combined_image_sampler,
         .layout = .shader_read_only_optimal,
         .usage = .{
             .sampled_bit = true,
         },
-    }, slice);
+    }, img_slice);
     errdefer gpu_img.deinit(device);
-
-    var assets = try Assets.init();
-    errdefer assets.deinit();
-
-    var cpu = ResourceManager.CpuResources.init();
-    errdefer cpu.deinit();
-
-    const audio_handles = try Handles.AudioHandles.init(&cpu);
 
     const bones_handle = try cpu.reserve_bones(1500);
 
     var instance_manager = InstanceManager.init(bones_handle);
     errdefer instance_manager.deinit();
 
-    const cube_instance_handle = try cpu.batch_reserve(1000);
-    const cube_mesh_handle = try cpu.add_mesh(&assets.cube);
     try instance_manager.instances.append(.{
-        .mesh = cube_mesh_handle,
-        .instances = cube_instance_handle,
+        .mesh = handles.mesh.cube,
+        .instances = try cpu.batch_reserve(1000),
     });
-
-    const plane_mesh_handle = try cpu.add_mesh(&assets.plane);
-    const plane_instance_handle = try cpu.batch_reserve(10);
     try instance_manager.instances.append(.{
-        .mesh = plane_mesh_handle,
-        .instances = plane_instance_handle,
+        .mesh = handles.mesh.plane,
+        .instances = try cpu.batch_reserve(10),
     });
 
     var cmdbuf = world.ecs.deferred();
@@ -426,7 +423,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         C.Controller{},
         t,
         C.Shooter{
-            .audio = audio_handles.shot,
+            .audio = handles.audio.shot,
             .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
             .hold = true,
         },
@@ -437,23 +434,23 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    try loader_mod.load_gltf(&world, &cpu, &instance_manager, &cmdbuf, &assets.scenes_gltf);
+    try loader_mod.load_gltf(&world, &cpu, &instance_manager, &cmdbuf, cpu.ref(handles.gltf.library));
 
     t.transform = .{
         .pos = .{ .y = -5.5 },
         .scale = .{ .x = 50, .y = 0.1, .z = 50 },
     };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("floor"),
-    //     t,
-    //     C.StaticRender{ .mesh = plane_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //     }),
-    // });
+    _ = try cmdbuf.insert(.{
+        try C.Name.from("floor"),
+        t,
+        C.StaticRender{ .mesh = handles.mesh.plane },
+        try world.phy.add_body(.{
+            .shape = .{ .box = .{ .size = t.transform.scale } },
+            .motion_type = .static,
+            .friction = 0.4,
+            .rotation = t.transform.rotation,
+        }),
+    });
     // t = .{
     //     .pos = .{ .y = 50, .x = 50 },
     //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
@@ -711,16 +708,11 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .net_server = net_server,
         .net_client = net_client,
 
-        .texture_img = image,
         .texture = gpu_img,
 
-        .assets = assets,
-        .handles = .{
+        .handles = handles,
+        .entities = .{
             .player = player_id,
-            .mesh = .{
-                .cube = cube_mesh_handle,
-            },
-            .audio = audio_handles,
         },
     };
 }
@@ -732,7 +724,6 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
-    defer self.assets.deinit();
     defer self.cpu_resources.deinit();
     defer self.gpu_resources.deinit(device);
     defer self.instance_manager.deinit();
@@ -742,7 +733,6 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.stages.deinit();
     defer self.recorder.deinit() catch |e| utils.dump_error(e);
     defer self.audio.deinit() catch |e| utils.dump_error(e);
-    defer self.texture_img.deinit();
     defer self.texture.deinit(device);
 
     defer self.net_ctx.deinit();
@@ -1098,7 +1088,7 @@ pub const AppState = struct {
 
         var input = window.input();
 
-        var pexp = try app.world.ecs.explorer(app.handles.player);
+        var pexp = try app.world.ecs.explorer(app.entities.player);
         const camera = pexp.get_component(math.Camera).?;
         const pid = pexp.get_component(C.PlayerId).?;
         const player_id = pid.id;
@@ -1625,7 +1615,7 @@ pub const AppState = struct {
 
             playing.samples_buf2.clearRetainingCapacity();
 
-            const player = try app.world.ecs.get(app.handles.player, struct { t: C.GlobalTransform });
+            const player = try app.world.ecs.get(app.entities.player, struct { t: C.GlobalTransform });
             {
                 var it = try app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
                 while (it.next()) |e| {
@@ -1665,7 +1655,7 @@ pub const AppState = struct {
 
         // camera tick
         {
-            const player = try app.world.ecs.get(app.handles.player, struct {
+            const player = try app.world.ecs.get(app.entities.player, struct {
                 camera: math.Camera,
                 controller: C.Controller,
                 lt: C.LastTransform,
@@ -1767,7 +1757,7 @@ pub const GuiState = struct {
     pub fn tick(self: *@This(), app: *App, state: *AppState, lap: u64) !void {
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        const player = try app.world.ecs.get(app.handles.player, struct { controller: C.Controller });
+        const player = try app.world.ecs.get(app.entities.player, struct { controller: C.Controller });
 
         self.frame_times_i += 1;
         self.frame_times_i = @rem(self.frame_times_i, self.frame_times.len);

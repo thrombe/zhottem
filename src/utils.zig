@@ -130,6 +130,14 @@ pub inline fn dump_error(err: anyerror) void {
     }
 }
 
+pub fn deinit_fields(self: anytype) void {
+    inline for (@typeInfo(@This()).@"struct".fields) |field| {
+        if (comptime @hasDecl(field.type, "deinit")) {
+            @field(self, field.name).deinit();
+        }
+    }
+}
+
 pub const fspath = struct {
     inline fn len(comptime parts: anytype) usize {
         comptime {
@@ -613,7 +621,7 @@ pub const StbImage = struct {
     pub const HalfImage = PixelType.half.img_typ();
     pub const UnormImage = PixelType.unorm.img_typ();
 
-    pub fn from_file(_path: []const u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+    pub fn from_file(comptime typ: PixelType, _path: []const u8) !Image(Pixel(typ.typ())) {
         const path = try fspath.cwd_join(allocator.*, _path);
         defer allocator.free(path);
         var file = try std.fs.openFileAbsolute(path, .{});
@@ -622,10 +630,10 @@ pub const StbImage = struct {
         const buf = try file.readToEndAlloc(allocator.*, 50 * 1000 * 1000);
         defer allocator.free(buf);
 
-        return decode_img(buf, typ);
+        return decode_img(typ, buf);
     }
 
-    pub fn decode_img(bytes: []u8, comptime typ: PixelType) !Image(Pixel(typ.typ())) {
+    pub fn decode_img(comptime typ: PixelType, bytes: []u8) !Image(Pixel(typ.typ())) {
         var img_width: i32 = 0;
         var img_height: i32 = 0;
         var channels: i32 = 0;
