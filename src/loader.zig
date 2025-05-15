@@ -106,6 +106,40 @@ pub fn spawn_default_scene(
     }
 }
 
+pub fn spawn_node(
+    world: *world_mod.World,
+    cpu: *ResourceManager.Assets,
+    cmdbuf: *EntityComponentStore.CmdBuf,
+    gltf_handle: ResourceManager.GltfHandle,
+    name: []const u8,
+    transform: C.Transform,
+) !void {
+    const gltf = cpu.ref(gltf_handle);
+    const info = &gltf.gltf.info.value;
+
+    const nodes = info.nodes;
+    var ni: ?usize = null;
+    for (nodes, 0..) |*node, i| {
+        if (std.mem.eql(u8, node.name, name)) {
+            ni = i;
+            break;
+        }
+    }
+
+    const node = if (ni) |i| &nodes[i] else return error.NodeNotFound;
+    std.debug.print("spawning {s} node\n", .{node.name});
+
+    _ = try _spawn_node(
+        world,
+        cpu,
+        cmdbuf,
+        gltf_handle,
+        null,
+        ni.?,
+        transform,
+    );
+}
+
 fn _spawn_node(
     world: *world_mod.World,
     cpu: *ResourceManager.Assets,

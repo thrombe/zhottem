@@ -418,7 +418,14 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    try loader_mod.spawn_default_scene(&world, &assets, &cmdbuf, handles.gltf.library);
+    try loader_mod.spawn_node(
+        &world,
+        &assets,
+        &cmdbuf,
+        handles.gltf.library,
+        "person_ig",
+        .{ .pos = .{ .z = 5, .y = 1 }, .scale = .splat(4) },
+    );
 
     t.transform = .{
         .pos = .{ .y = -5.5 },
