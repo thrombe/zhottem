@@ -982,17 +982,19 @@ pub const Buffer = struct {
     };
 
     pub fn new_initialized(ctx: *Engine.VulkanContext, v: Args, val: anytype, pool: vk.CommandPool) !@This() {
+        const E = @TypeOf(val);
+        const size = v.size * @sizeOf(E);
         const this = try @This().new(
             ctx,
             .{
-                .size = v.size,
+                .size = size,
                 .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
                 .memory_type = v.memory_type,
             },
         );
 
         const staging_buffer = try ctx.device.createBuffer(&.{
-            .size = v.size,
+            .size = size,
             .usage = .{ .transfer_src_bit = true },
             .sharing_mode = .exclusive,
         }, null);
@@ -1009,8 +1011,8 @@ pub const Buffer = struct {
             const data = try ctx.device.mapMemory(staging_memory, 0, vk.WHOLE_SIZE, .{});
             defer ctx.device.unmapMemory(staging_memory);
 
-            const gpu_vertices: [*]@TypeOf(val) = @ptrCast(@alignCast(data));
-            @memset(gpu_vertices[0 .. v.size / @as(u64, @sizeOf(@TypeOf(val)))], val);
+            const gpu_vertices: [*]E = @ptrCast(@alignCast(data));
+            @memset(gpu_vertices[0..v.size], val);
         }
 
         try copyBuffer(ctx, &ctx.device, pool, this.buffer, staging_buffer, v.size);

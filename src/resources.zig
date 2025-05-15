@@ -132,120 +132,362 @@ pub const UniformBinds = enum(u32) {
     }
 };
 
-pub const InstanceManager = struct {
-    instances: std.ArrayList(InstanceAllocator),
-    bones: ResourceManager.BonesResourceHandle,
-    bone_count: u32 = 0,
-    hash: u64 = 0,
+pub const ResourceManager = struct {
+    // static if we load all assets at startup :P
+    assets: Assets,
+    asset_buffers: AssetBuffers,
 
-    pub fn init(bones: ResourceManager.BonesResourceHandle) @This() {
+    // dynamic as instances vary at runtime
+    instances: InstanceResources,
+
+    pub fn init(assets: Assets, engine: *Engine, pool: vk.CommandPool) !@This() {
         return .{
-            .instances = std.ArrayList(InstanceAllocator).init(allocator.*),
-            .bones = bones,
+            .assets = assets,
+            .asset_buffers = try assets.upload(engine, pool),
+            .instances = try .init(engine, pool, .{}),
         };
     }
 
-    pub fn deinit(self: *@This()) void {
-        self.instances.deinit();
+    pub fn deinit(self: *@This(), device: *Device) void {
+        self.assets.deinit();
+        self.asset_buffers.deinit(device);
+        self.instances.deinit(device);
     }
 
-    pub fn reserve_instance(self: *@This(), mesh: ResourceManager.MeshHandle) ?u32 {
-        for (self.instances.items) |*item| {
-            if (item.maybe_reserve(mesh)) |index| {
-                return index;
+    pub const InstanceResources = struct {
+        // we can only instance a contiguous chunk of instances (in gpu memory)
+        // but we might want to delete entities randomly
+        // so we have this abstraction that bump allocates instance buffer memory each frame
+        // for each type of instance we might want to render.
+
+        // the cpu side buffers that are copied to the gpu each frame
+        bones: Bones,
+        batches: Batches,
+
+        // gpu side buffers
+        // (double buffered for reallocation)
+        instance_buffer: DoubleBuffer,
+        bone_buffer: DoubleBuffer,
+
+        hash: u64 = 0,
+
+        const Instances = std.ArrayList(Instance);
+        const Bones = std.ArrayList(math.Mat4x4);
+        const Batch = struct {
+            instances: Instances,
+            first_draw: u32 = 0,
+            can_draw: u32 = 0,
+        };
+        const BufferWithCapacity = struct {
+            buffer: Buffer,
+            capacity: u32,
+        };
+        const DoubleBuffer = struct {
+            current: BufferWithCapacity,
+            count: u32 = 0,
+            back: ?BufferWithCapacity = null,
+            state: enum {
+                enough,
+                out_of_objects,
+                back_allocated,
+            } = .enough,
+        };
+
+        // currently each batch is unique only by it's mesh,
+        // but batches will need to be unique also by it's material somehow.
+        const Batches = std.AutoArrayHashMap(MeshHandle, Batch);
+
+        pub fn init(engine: *Engine, pool: vk.CommandPool, v: struct {
+            instance_cap: u32 = 500,
+            bone_cap: u32 = 1500,
+        }) !@This() {
+            const ctx = &engine.graphics;
+            const device = &ctx.device;
+
+            var instance_buffer = try Buffer.new_initialized(ctx, .{
+                .size = v.instance_cap,
+                .usage = .{ .vertex_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, std.mem.zeroes(Instance), pool);
+            errdefer instance_buffer.deinit(device);
+
+            var bone_buffer = try Buffer.new_initialized(ctx, .{
+                .size = v.bone_cap,
+                .usage = .{ .storage_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, std.mem.zeroes(math.Mat4x4), pool);
+            errdefer bone_buffer.deinit(device);
+
+            return .{
+                .bones = .init(allocator.*),
+                .batches = .init(allocator.*),
+                .instance_buffer = .{ .current = .{
+                    .buffer = instance_buffer,
+                    .capacity = v.instance_cap,
+                } },
+                .bone_buffer = .{ .current = .{
+                    .buffer = bone_buffer,
+                    .capacity = v.bone_cap,
+                } },
+            };
+        }
+
+        pub fn deinit(self: *@This(), device: *Device) void {
+            self.bones.deinit();
+
+            {
+                var batches = self.batches.iterator();
+                while (batches.next()) |batch| {
+                    batch.value_ptr.instances.deinit();
+                }
+                self.batches.deinit();
+            }
+
+            {
+                const buf = &self.instance_buffer;
+                buf.current.buffer.deinit(device);
+                if (buf.back) |*back| back.buffer.deinit(device);
+            }
+
+            {
+                const buf = &self.bone_buffer;
+                buf.current.buffer.deinit(device);
+                if (buf.back) |*back| back.buffer.deinit(device);
             }
         }
 
-        return null;
-    }
+        pub fn reset(self: *@This()) void {
+            var batches = self.batches.iterator();
+            while (batches.next()) |batch| {
+                batch.value_ptr.instances.clearRetainingCapacity();
+                batch.value_ptr.first_draw = 0;
+                batch.value_ptr.can_draw = 0;
+            }
+            self.bones.clearRetainingCapacity();
 
-    // index of first. reserves first..first+num
-    pub fn reserve_bones(self: *@This(), num: u32) ?u32 {
-        if (self.bones.count < self.bone_count + num) {
-            return null;
+            self.instance_buffer.count = 0;
+            self.bone_buffer.count = 0;
         }
 
-        defer self.bone_count += num;
-        return self.bones.first + self.bone_count;
-    }
-
-    pub fn reset(self: *@This()) void {
-        for (self.instances.items) |*item| {
-            item.reset();
+        pub fn did_change(self: *@This()) bool {
+            var hasher = std.hash.Wyhash.init(0);
+            var batches = self.batches.iterator();
+            while (batches.next()) |batch| {
+                hasher.update(std.mem.asBytes(batch.key_ptr));
+                hasher.update(std.mem.asBytes(&batch.value_ptr.first_draw));
+                hasher.update(std.mem.asBytes(&batch.value_ptr.can_draw));
+            }
+            const hash = hasher.final();
+            defer self.hash = hash;
+            return self.hash != hash;
         }
-        self.bone_count = 0;
-    }
 
-    pub fn update(self: *@This()) bool {
-        var hasher = std.hash.Wyhash.init(0);
-        for (self.instances.items) |instance| {
-            hasher.update(std.mem.asBytes(&instance.count));
+        // null means we don't have the resources currently available to render this.
+        // but we will try to allocate necessary resources on next frame
+        pub fn reserve_instance(self: *@This(), mesh: MeshHandle) !?*Instance {
+            const entry = try self.batches.getOrPut(mesh);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = .{
+                    .instances = .init(allocator.*),
+                };
+            }
+            return try entry.value_ptr.instances.addOne();
         }
-        const hash = hasher.final();
-        defer self.hash = hash;
-        return self.hash != hash;
-    }
-};
 
-pub const InstanceAllocator = struct {
-    // we can only instance a contiguous chunk of instances (in gpu memory)
-    // but we might want to delete entities randomly
-    // so we have this abstraction that bump allocates instance buffer memory each frame
-    // for each type of instance we might want to render.
-
-    mesh: ResourceManager.MeshHandle,
-    instances: ResourceManager.BatchedInstanceResourceHandle,
-    count: u32 = 0,
-
-    pub fn reset(self: *@This()) void {
-        self.count = 0;
-    }
-
-    pub fn reserve(self: *@This()) u32 {
-        self.count = @min(self.count + 1, self.instances.count);
-        return self.count + self.instances.first - 1;
-    }
-
-    pub fn maybe_reserve(self: *@This(), mesh: ResourceManager.MeshHandle) ?u32 {
-        if (std.meta.eql(self.mesh, mesh)) {
-            return self.reserve();
+        pub fn reserve_bones(self: *@This(), num: usize) !struct { first: u32, buf: []math.Mat4x4 } {
+            const first = self.bones.items.len;
+            return .{ .first = @intCast(first), .buf = try self.bones.addManyAsSlice(num) };
         }
-        return null;
-    }
 
-    pub fn draw(
-        self: *const @This(),
-        pipeline: *GraphicsPipeline,
-        desc_sets: []const vk.DescriptorSet,
-        offsets: []const u32,
-        cmdbuf: *CmdBuffer,
-        device: *Device,
-        resources: *ResourceManager.GpuResources,
-    ) void {
-        cmdbuf.draw(device, .{
-            .pipeline = pipeline,
-            .desc_sets = desc_sets,
-            .dynamic_offsets = offsets,
-            .vertices = .{
-                .buffer = resources.vertex_buffer.buffer,
-                .count = self.mesh.regions.vertex.count,
-                .first = self.mesh.regions.vertex.first,
-            },
-            .indices = .{
-                .buffer = resources.index_buffer.buffer,
-                .count = self.mesh.regions.index.count,
-                .first = self.mesh.regions.index.first,
-            },
-            .instances = .{
-                .buffer = resources.instance_buffer.buffer,
-                .count = self.count,
-                .first = self.instances.first,
-            },
-        });
-    }
-};
+        // call at the end of the frame
+        pub fn alloc_tick(self: *@This(), engine: *Engine, pool: vk.CommandPool) !void {
+            const ctx = &engine.graphics;
+            const device = &ctx.device;
 
-pub const ResourceManager = struct {
+            {
+                const buf = &self.instance_buffer;
+                switch (buf.state) {
+                    .enough, .back_allocated => {},
+                    .out_of_objects => {
+                        const instance_cap = buf.current.capacity;
+                        const new_instance_cap = instance_cap + instance_cap / 2;
+                        var instance_buffer = try Buffer.new_initialized(ctx, .{
+                            .size = new_instance_cap,
+                            .usage = .{ .vertex_buffer_bit = true },
+                            .memory_type = .{
+                                .device_local_bit = true,
+                                .host_visible_bit = true,
+                                .host_coherent_bit = true,
+                            },
+                        }, std.mem.zeroes(Instance), pool);
+                        errdefer instance_buffer.deinit(device);
+
+                        buf.back = .{
+                            .buffer = instance_buffer,
+                            .capacity = new_instance_cap,
+                        };
+                        buf.state = .back_allocated;
+                    },
+                }
+            }
+
+            {
+                const buf = &self.bone_buffer;
+
+                switch (buf.state) {
+                    .enough, .back_allocated => {},
+                    .out_of_objects => {
+                        const bone_cap = buf.current.capacity;
+                        const new_bone_cap = bone_cap + bone_cap / 2;
+                        var bone_buffer = try Buffer.new_initialized(ctx, .{
+                            .size = new_bone_cap,
+                            .usage = .{ .storage_buffer_bit = true },
+                            .memory_type = .{
+                                .device_local_bit = true,
+                                .host_visible_bit = true,
+                                .host_coherent_bit = true,
+                            },
+                        }, std.mem.zeroes(math.Mat4x4), pool);
+                        errdefer bone_buffer.deinit(device);
+
+                        buf.back = .{
+                            .buffer = bone_buffer,
+                            .capacity = new_bone_cap,
+                        };
+                        buf.state = .back_allocated;
+                    },
+                }
+            }
+        }
+
+        // call at the start of the frame
+        pub fn swap_tick(self: *@This(), device: *Device) void {
+            {
+                const buf = &self.instance_buffer;
+
+                switch (buf.state) {
+                    .enough, .out_of_objects => {},
+                    .back_allocated => {
+                        // this is okay cuz we have an empty queue every frame
+                        buf.current.buffer.deinit(device);
+                        buf.current = buf.back;
+                        buf.back = null;
+                        buf.state = .enough;
+                    },
+                }
+            }
+            {
+                const buf = &self.bone_buffer;
+
+                switch (buf.state) {
+                    .enough, .out_of_objects => {},
+                    .back_allocated => {
+                        // this is okay cuz we have an empty queue every frame
+                        buf.current.buffer.deinit(device);
+                        buf.current = buf.back;
+                        buf.back = null;
+                        buf.state = .enough;
+                    },
+                }
+            }
+        }
+
+        pub fn update(self: *@This(), device: *Device) !void {
+            try self.update_instances(device);
+            try self.update_bones(device);
+        }
+
+        fn update_instances(self: *@This(), device: *Device) !void {
+            const buf = &self.instance_buffer;
+            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(buf.current.buffer.memory);
+
+            const gpu_items: [*]Instance = @ptrCast(@alignCast(data));
+
+            var batches = self.batches.iterator();
+            while (batches.next()) |batch| {
+                const instances = batch.value_ptr.instances.items;
+                const can_alloc = @min(buf.current.capacity - buf.count, instances.len);
+                batch.value_ptr.first_draw = buf.count;
+                batch.value_ptr.can_draw = can_alloc;
+                @memcpy(gpu_items[buf.count..][0..can_alloc], instances[0..can_alloc]);
+                buf.count += can_alloc;
+
+                if (can_alloc < instances.len) {
+                    buf.state = .out_of_objects;
+                }
+            }
+        }
+
+        fn update_bones(self: *@This(), device: *Device) !void {
+            const buf = &self.bone_buffer;
+            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(buf.current.buffer.memory);
+
+            const gpu_items: [*]math.Mat4x4 = @ptrCast(@alignCast(data));
+
+            const bones = self.bones.items;
+            const can_alloc = @min(buf.current.capacity - buf.count, bones.len);
+            @memcpy(gpu_items[buf.count..][0..can_alloc], bones[0..can_alloc]);
+            buf.count = can_alloc;
+
+            if (can_alloc < bones.len) {
+                buf.state = .out_of_objects;
+            }
+        }
+
+        pub fn draw(
+            self: *const @This(),
+            pipeline: *GraphicsPipeline,
+            desc_sets: []const vk.DescriptorSet,
+            offsets: []const u32,
+            cmdbuf: *CmdBuffer,
+            device: *Device,
+            resources: *ResourceManager.AssetBuffers,
+        ) void {
+            var batches = self.batches.iterator();
+            while (batches.next()) |batch| {
+                const regions = batch.key_ptr.regions;
+
+                if (batch.value_ptr.can_draw == 0) {
+                    continue;
+                }
+
+                // these `offsets` are for each dynamic descriptor.
+                // basically - you bind a buffer of objects in the desc set, and just tell
+                // it what offset you want for that data here.
+                cmdbuf.draw(device, .{
+                    .pipeline = pipeline,
+                    .desc_sets = desc_sets,
+                    .dynamic_offsets = offsets,
+                    .vertices = .{
+                        .buffer = resources.vertex_buffer.buffer,
+                        .count = regions.vertex.count,
+                        .first = regions.vertex.first,
+                    },
+                    .indices = .{
+                        .buffer = resources.index_buffer.buffer,
+                        .count = regions.index.count,
+                        .first = regions.index.first,
+                    },
+                    .instances = .{
+                        .buffer = self.instance_buffer.current.buffer.buffer,
+                        .count = batch.value_ptr.can_draw,
+                        .first = batch.value_ptr.first_draw,
+                    },
+                });
+            }
+        }
+    };
+
     pub const MeshHandle = struct {
         index: u32,
         regions: Regions,
@@ -280,11 +522,9 @@ pub const ResourceManager = struct {
         index: u32,
     };
 
-    pub const CpuResources = struct {
+    pub const Assets = struct {
         vertices: Vertices,
         triangles: Triangles,
-        instances: Instances,
-        bones: Bones,
         armatures: Armatures,
         audio: AudioSamples,
         meshes: Meshes,
@@ -293,8 +533,6 @@ pub const ResourceManager = struct {
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
-        const Instances = std.ArrayList(Instance);
-        const Bones = std.ArrayList(math.Mat4x4);
         const Armatures = std.ArrayList(assets_mod.Armature);
         const AudioSamples = std.ArrayList(assets_mod.Wav);
         const Meshes = std.ArrayList(assets_mod.Mesh);
@@ -319,8 +557,6 @@ pub const ResourceManager = struct {
             return .{
                 .vertices = .init(allocator.*),
                 .triangles = .init(allocator.*),
-                .instances = .init(allocator.*),
-                .bones = .init(allocator.*),
                 .armatures = .init(allocator.*),
                 .audio = .init(allocator.*),
                 .meshes = .init(allocator.*),
@@ -332,8 +568,6 @@ pub const ResourceManager = struct {
         pub fn deinit(self: *@This()) void {
             self.vertices.deinit();
             self.triangles.deinit();
-            self.instances.deinit();
-            self.bones.deinit();
             self.armatures.deinit();
 
             for (self.audio.items) |*t| {
@@ -494,60 +728,16 @@ pub const ResourceManager = struct {
             return handle;
         }
 
-        pub fn batch_instances(self: *@This(), instances: []const Instance) !BatchedInstanceResourceHandle {
-            const first = self.instances.items.len;
-            try self.instances.appendSlice(instances);
-
-            return .{
-                .first = @intCast(first),
-                .count = @intCast(instances.len),
-            };
-        }
-
-        pub fn batch_instances_cloned(self: *@This(), instance: Instance, num: usize) !BatchedInstanceResourceHandle {
-            const first = self.instances.items.len;
-            try self.instances.appendNTimes(instance, num);
-
-            return .{
-                .first = @intCast(first),
-                .count = @intCast(num),
-            };
-        }
-
-        pub fn batch_reserve(self: *@This(), num: usize) !BatchedInstanceResourceHandle {
-            const first = self.instances.items.len;
-            try self.instances.appendNTimes(std.mem.zeroes(Instance), num);
-
-            return .{
-                .first = @intCast(first),
-                .count = @intCast(num),
-            };
-        }
-
-        pub fn reserve_bones(self: *@This(), num: usize) !BonesResourceHandle {
-            const first = self.instances.items.len;
-            try self.bones.appendNTimes(std.mem.zeroes(math.Mat4x4), num);
-
-            return .{
-                .first = @intCast(first),
-                .count = @intCast(num),
-            };
-        }
-
-        pub fn upload(self: *@This(), engine: *Engine, pool: vk.CommandPool) !GpuResources {
-            return try GpuResources.init(self, engine, pool);
+        pub fn upload(self: *const @This(), engine: *Engine, pool: vk.CommandPool) !AssetBuffers {
+            return try AssetBuffers.init(self, engine, pool);
         }
     };
 
-    // TODO: overallocate and suddenly we have a dynamic version of this.
-    // maybe pin some memory and have the handles point to it.
-    pub const GpuResources = struct {
+    pub const AssetBuffers = struct {
         vertex_buffer: Buffer,
         index_buffer: Buffer,
-        instance_buffer: Buffer,
-        bone_buffer: Buffer,
 
-        pub fn init(cpu: *CpuResources, engine: *Engine, pool: vk.CommandPool) !@This() {
+        pub fn init(cpu: *const Assets, engine: *Engine, pool: vk.CommandPool) !@This() {
             const ctx = &engine.graphics;
             const device = &ctx.device;
 
@@ -561,55 +751,15 @@ pub const ResourceManager = struct {
             } }, cpu.triangles.items, pool);
             errdefer index_buffer.deinit(device);
 
-            var instance_buffer = try Buffer.new_from_slice(ctx, .{
-                .usage = .{ .vertex_buffer_bit = true },
-                .memory_type = .{
-                    .device_local_bit = true,
-                    .host_visible_bit = true,
-                    .host_coherent_bit = true,
-                },
-            }, cpu.instances.items, pool);
-            errdefer instance_buffer.deinit(device);
-
-            var bone_buffer = try Buffer.new_from_slice(ctx, .{
-                .usage = .{ .storage_buffer_bit = true },
-                .memory_type = .{
-                    .device_local_bit = true,
-                    .host_visible_bit = true,
-                    .host_coherent_bit = true,
-                },
-            }, cpu.bones.items, pool);
-            errdefer bone_buffer.deinit(device);
-
             return .{
                 .vertex_buffer = vertex_buffer,
                 .index_buffer = index_buffer,
-                .instance_buffer = instance_buffer,
-                .bone_buffer = bone_buffer,
             };
-        }
-
-        pub fn update_instances(self: *@This(), device: *Device, instances: []Instance) !void {
-            const data = try device.mapMemory(self.instance_buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(self.instance_buffer.memory);
-
-            const gpu_items: [*]Instance = @ptrCast(@alignCast(data));
-            @memcpy(gpu_items[0..instances.len], instances);
-        }
-
-        pub fn update_bones(self: *@This(), device: *Device, bones: []math.Mat4x4) !void {
-            const data = try device.mapMemory(self.bone_buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(self.bone_buffer.memory);
-
-            const gpu_items: [*]math.Mat4x4 = @ptrCast(@alignCast(data));
-            @memcpy(gpu_items[0..bones.len], bones);
         }
 
         pub fn deinit(self: *@This(), device: *Device) void {
             self.vertex_buffer.deinit(device);
             self.index_buffer.deinit(device);
-            self.instance_buffer.deinit(device);
-            self.bone_buffer.deinit(device);
         }
     };
 };

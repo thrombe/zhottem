@@ -84,8 +84,7 @@ const Armatures = std.ArrayList(struct { handle: ResourceManager.ArmatureHandle,
 
 pub fn spawn_default_scene(
     world: *world_mod.World,
-    cpu: *ResourceManager.CpuResources,
-    instance_manager: *InstanceManager,
+    cpu: *ResourceManager.Assets,
     cmdbuf: *EntityComponentStore.CmdBuf,
     gltf_handle: ResourceManager.GltfHandle,
 ) !void {
@@ -94,9 +93,6 @@ pub fn spawn_default_scene(
 
     const scene = &info.scenes[info.scene];
     std.debug.print("spawning {s} scene\n", .{scene.name});
-    const mesh_counts = try allocator.alloc(u32, gltf.handles.meshes.len);
-    defer allocator.free(mesh_counts);
-    @memset(mesh_counts, 0);
     for (scene.nodes) |ni| {
         _ = try _spawn_node(
             world,
@@ -105,27 +101,18 @@ pub fn spawn_default_scene(
             gltf_handle,
             null,
             ni,
-            mesh_counts,
             .{},
         );
-    }
-
-    for (gltf.handles.meshes, mesh_counts) |mesh, count| {
-        try instance_manager.instances.append(.{
-            .mesh = mesh,
-            .instances = try cpu.batch_reserve(count),
-        });
     }
 }
 
 fn _spawn_node(
     world: *world_mod.World,
-    cpu: *ResourceManager.CpuResources,
+    cpu: *ResourceManager.Assets,
     cmdbuf: *EntityComponentStore.CmdBuf,
     gltf_handle: ResourceManager.GltfHandle,
     parent: ?Entity,
     node_index: GltfInfo.NodeIndex,
-    mesh_counts: []u32,
     transform: C.Transform,
 ) !Entity {
     const gltf = cpu.ref(gltf_handle);
@@ -148,7 +135,6 @@ fn _spawn_node(
                 gltf_handle,
                 entity,
                 ci,
-                mesh_counts,
                 global,
             );
             try children.append(child);
@@ -163,7 +149,6 @@ fn _spawn_node(
     }
 
     if (node.mesh) |m| {
-        mesh_counts[m] += 1;
         const hmesh = gltf.handles.meshes[m];
 
         if (node.skin) |si| {

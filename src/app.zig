@@ -63,9 +63,7 @@ uniforms: UniformBuffer,
 model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
-cpu_resources: ResourceManager.CpuResources,
-gpu_resources: ResourceManager.GpuResources,
-instance_manager: InstanceManager,
+resources: ResourceManager,
 descriptor_pool: DescriptorPool,
 camera_descriptor_set: DescriptorSet,
 model_descriptor_set: DescriptorSet,
@@ -109,7 +107,7 @@ const Handles = struct {
         scream2: ResourceManager.AudioHandle,
         shot: ResourceManager.AudioHandle,
 
-        fn init(cpu: *ResourceManager.CpuResources) !@This() {
+        fn init(cpu: *ResourceManager.Assets) !@This() {
             return .{
                 .boom = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/boom.wav")),
                 .bruh = try cpu.add(try assets_mod.Wav.parse_wav("assets/audio/bruh.wav")),
@@ -122,7 +120,7 @@ const Handles = struct {
         }
     };
 
-    fn init(cpu: *ResourceManager.CpuResources) !@This() {
+    fn init(cpu: *ResourceManager.Assets) !@This() {
         var library = try assets_mod.Gltf.parse_glb("assets/exports/library.glb");
         errdefer library.deinit();
 
@@ -374,12 +372,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const net_client = try net_ctx.client();
     errdefer net_client.deinit();
 
-    var cpu = ResourceManager.CpuResources.init();
-    errdefer cpu.deinit();
+    var assets = ResourceManager.Assets.init();
+    errdefer assets.deinit();
 
-    const handles = try Handles.init(&cpu);
+    const handles = try Handles.init(&assets);
 
-    const mandlebulb = cpu.ref(handles.image.mandlebulb);
+    const mandlebulb = assets.ref(handles.image.mandlebulb);
     const img_slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(mandlebulb.buffer));
     var gpu_img = try Image.new_from_slice(ctx, cmd_pool, .{
         .extent = .{
@@ -393,20 +391,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
     }, img_slice);
     errdefer gpu_img.deinit(device);
-
-    const bones_handle = try cpu.reserve_bones(1500);
-
-    var instance_manager = InstanceManager.init(bones_handle);
-    errdefer instance_manager.deinit();
-
-    try instance_manager.instances.append(.{
-        .mesh = handles.mesh.cube,
-        .instances = try cpu.batch_reserve(1000),
-    });
-    try instance_manager.instances.append(.{
-        .mesh = handles.mesh.plane,
-        .instances = try cpu.batch_reserve(10),
-    });
 
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
@@ -434,7 +418,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    try loader_mod.spawn_default_scene(&world, &cpu, &instance_manager, &cmdbuf, handles.gltf.library);
+    try loader_mod.spawn_default_scene(&world, &assets, &cmdbuf, handles.gltf.library);
 
     t.transform = .{
         .pos = .{ .y = -5.5 },
@@ -615,8 +599,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, &player.t.transform, player.camera, player.controller), ctx);
     errdefer uniforms.deinit(device);
 
-    var gpu = try cpu.upload(engine, cmd_pool);
-    errdefer gpu.deinit(device);
+    var resources = try ResourceManager.init(assets, engine, cmd_pool);
+    errdefer resources.deinit(device);
 
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
@@ -631,7 +615,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     defer model_desc_set_builder.deinit();
     try model_desc_set_builder.add(&model_uniform);
     try model_desc_set_builder.add(&gpu_img);
-    try model_desc_set_builder.add(&gpu.bone_buffer);
+    // TODO: will break when instance buffer reallocates
+    // TODO: also call ResourceManager.InstanceResources.{alloc_tick, swap_tick} to actually resize bones and instances
+    try model_desc_set_builder.add(&resources.instances.bone_buffer.current.buffer);
     var model_desc_set = try model_desc_set_builder.build(device);
     errdefer model_desc_set.deinit(device);
 
@@ -650,7 +636,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     // errdefer audio.deinit() catch |e| utils.dump_error(e);
     // try audio.start();
 
-    var audio = try AudioPlayer.init(try AudioPlayer.Ctx.init(cpu.audio.items), .{});
+    var audio = try AudioPlayer.init(try AudioPlayer.Ctx.init(assets.audio.items), .{});
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
@@ -693,9 +679,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .model_uniforms = model_uniform,
         .screen_image = screen,
         .depth_image = depth,
-        .gpu_resources = gpu,
-        .cpu_resources = cpu,
-        .instance_manager = instance_manager,
+        .resources = resources,
         .descriptor_pool = desc_pool,
         .camera_descriptor_set = camera_desc_set,
         .model_descriptor_set = model_desc_set,
@@ -724,9 +708,7 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
-    defer self.cpu_resources.deinit();
-    defer self.gpu_resources.deinit(device);
-    defer self.instance_manager.deinit();
+    defer self.resources.deinit(device);
     defer self.camera_descriptor_set.deinit(device);
     defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
@@ -757,22 +739,47 @@ pub fn post_reload(self: *@This()) !void {
 pub fn present(
     self: *@This(),
     dynamic_state: *RendererState,
+    app_state: *AppState,
     gui_renderer: *GuiEngine.GuiRenderer,
-    ctx: *Engine.VulkanContext,
+    engine: *Engine,
 ) !Swapchain.PresentState {
-    const cmdbuf = dynamic_state.cmdbuffer.bufs[dynamic_state.swapchain.image_index];
-    const gui_cmdbuf = gui_renderer.cmd_bufs[dynamic_state.swapchain.image_index];
+    const ctx = &engine.graphics;
 
-    const current_si = try dynamic_state.swapchain.present_start(ctx);
+    // multiple framebuffers => multiple descriptor sets => different buffers
+    // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad
+    // so just wait for one frame's queue to be empty before trying to render another frame
+    try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
 
     try self.uniforms.upload(&ctx.device);
-    try self.gpu_resources.update_instances(&ctx.device, self.cpu_resources.instances.items);
-    try self.gpu_resources.update_bones(&ctx.device, self.cpu_resources.bones.items);
+    try self.resources.instances.update(&ctx.device);
 
-    return dynamic_state.swapchain.present_end(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, current_si) catch |err| switch (err) {
-        error.OutOfDateKHR => return .suboptimal,
-        else => |narrow| return narrow,
-    };
+    if (self.resources.instances.did_change()) {
+        _ = app_state.cmdbuf_fuse.fuse();
+    }
+
+    if (self.stages.update()) {
+        _ = app_state.shader_fuse.fuse();
+    }
+
+    if (app_state.shader_fuse.unfuse()) {
+        try dynamic_state.recreate_pipelines(engine, self, app_state);
+    }
+
+    if (app_state.cmdbuf_fuse.unfuse()) {
+        try dynamic_state.recreate_cmdbuf(engine, self);
+    }
+
+    {
+        const cmdbuf = dynamic_state.cmdbuffer.bufs[dynamic_state.swapchain.image_index];
+        const gui_cmdbuf = gui_renderer.cmd_bufs[dynamic_state.swapchain.image_index];
+
+        const current_si = try dynamic_state.swapchain.present_start(ctx);
+
+        return dynamic_state.swapchain.present_end(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, current_si) catch |err| switch (err) {
+            error.OutOfDateKHR => return .suboptimal,
+            else => |narrow| return narrow,
+        };
+    }
 }
 
 pub const RendererState = struct {
@@ -900,22 +907,17 @@ pub const RendererState = struct {
             .extent = engine.window.extent,
         });
 
-        // these offsets are for each dynamic descriptor.
-        // basically - you bind a buffer of objects in the desc set, and just tell
-        // it what offset you want for that data here.
-        for (app.instance_manager.instances.items) |call| {
-            call.draw(
-                &self.pipeline,
-                &[_]vk.DescriptorSet{
-                    app.camera_descriptor_set.set,
-                    app.model_descriptor_set.set,
-                },
-                &[_]u32{0},
-                &cmdbuf,
-                device,
-                &app.gpu_resources,
-            );
-        }
+        app.resources.instances.draw(
+            &self.pipeline,
+            &[_]vk.DescriptorSet{
+                app.camera_descriptor_set.set,
+                app.model_descriptor_set.set,
+            },
+            &[_]u32{0},
+            &cmdbuf,
+            device,
+            &app.resources.asset_buffers,
+        );
 
         cmdbuf.draw(device, .{
             .pipeline = &self.bg_pipeline,
@@ -1083,6 +1085,7 @@ pub const AppState = struct {
     }
 
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
+        const assets = &app.resources.assets;
         const window = engine.window;
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
@@ -1334,9 +1337,9 @@ pub const AppState = struct {
                             // }
 
                             if (player.shooter.try_shoot(mouse.right)) {
-                                // const bones = try allocator.alloc(math.Mat4x4, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                                // const bones = try allocator.alloc(math.Mat4x4, assets.ref(app.handles.model.sphere).bones.len);
                                 // errdefer allocator.free(bones);
-                                // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, app.cpu_resources.models.items[app.handles.model.sphere.index].bones.len);
+                                // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.ref(app.handles.model.sphere).bones.len);
                                 // errdefer allocator.free(indices);
                                 // @memset(bones, .{});
                                 // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
@@ -1361,7 +1364,7 @@ pub const AppState = struct {
                                 });
                                 _ = try self.cmdbuf.insert(.{
                                     C.TimeDespawn{
-                                        .despawn_time = self.time + app.cpu_resources.audio.items[app.handles.audio.shot.index].duration_sec(),
+                                        .despawn_time = self.time + assets.ref(app.handles.audio.shot).duration_sec(),
                                         .state = .alive,
                                     },
                                     C.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.transform.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
@@ -1458,7 +1461,7 @@ pub const AppState = struct {
                     .dying => {
                         var exp = it.current_entity_explorer();
                         if (exp.get_component(C.Sound)) |s| {
-                            if (s.start_frame + app.cpu_resources.audio.items[s.audio.index].data.len <= app.audio.ctx.ctx.frame_count) {
+                            if (s.start_frame + assets.ref(s.audio).data.len <= app.audio.ctx.ctx.frame_count) {
                                 e.ds.state = .dead;
                             }
                         } else {
@@ -1545,7 +1548,7 @@ pub const AppState = struct {
             var it = try app.world.ecs.iterator(struct { m: C.AnimatedRender });
             while (it.next()) |e| {
                 const a: *C.AnimatedRender = e.m;
-                const armature = &app.cpu_resources.armatures.items[a.armature.index];
+                const armature = assets.ref(a.armature);
                 a.time += delta;
 
                 if (!animate(a, armature, a.time)) {
@@ -1555,26 +1558,32 @@ pub const AppState = struct {
             }
         }
 
+        // add missing last transforms
+        {
+            var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
+            while (it.next()) |e| {
+                var ee = it.current_entity_explorer();
+                if (ee.get_component(C.LastTransform) == null) {
+                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .transform = e.t.transform });
+                }
+            }
+        }
+
+        try self.cmdbuf.apply(@ptrCast(&app.world));
+
         // render instance tick
         {
-            app.instance_manager.reset();
-            defer if (app.instance_manager.update()) {
-                _ = self.cmdbuf_fuse.fuse();
-            };
+            const instances = &app.resources.instances;
+            instances.reset();
 
             {
                 var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticRender });
                 while (it.next()) |e| {
-                    const instance = app.instance_manager.reserve_instance(e.m.mesh);
-                    if (instance) |instance_index| {
-                        const first_bone = app.instance_manager.reserve_bones(1);
-
-                        if (first_bone) |bone_index| {
-                            app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
-                            app.cpu_resources.bones.items[bone_index] = self.physics.interpolated(e.ft, e.t).mat4();
-                        } else {
-                            app.cpu_resources.instances.items[instance_index].bone_offset = 0;
-                        }
+                    const instance = try instances.reserve_instance(e.m.mesh);
+                    if (instance) |ptr| {
+                        const bones = try instances.reserve_bones(1);
+                        ptr.bone_offset = bones.first;
+                        bones.buf[0] = self.physics.interpolated(e.ft, e.t).mat4();
                     }
                 }
             }
@@ -1582,18 +1591,14 @@ pub const AppState = struct {
             {
                 var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedRender });
                 while (it.next()) |e| {
-                    const instance = app.instance_manager.reserve_instance(e.m.mesh);
-                    const armature = &app.cpu_resources.armatures.items[e.m.armature.index];
-                    if (instance) |instance_index| {
-                        const first_bone = app.instance_manager.reserve_bones(@intCast(armature.bones.len));
-
-                        if (first_bone) |bone_index| {
-                            app.cpu_resources.instances.items[instance_index].bone_offset = bone_index;
-                            for (0..armature.bones.len) |index| {
-                                app.cpu_resources.bones.items[bone_index + index] = self.physics.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(armature.bones[index].inverse_bind_matrix);
-                            }
-                        } else {
-                            app.cpu_resources.instances.items[instance_index].bone_offset = 0;
+                    const instance = try instances.reserve_instance(e.m.mesh);
+                    const armature = assets.ref(e.m.armature);
+                    if (instance) |ptr| {
+                        const bones = try instances.reserve_bones(@intCast(armature.bones.len));
+                        @memset(bones.buf, .{});
+                        ptr.bone_offset = bones.first;
+                        for (0..armature.bones.len) |index| {
+                            bones.buf[index] = self.physics.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(armature.bones[index].inverse_bind_matrix);
                         }
                     }
                 }
@@ -1639,19 +1644,6 @@ pub const AppState = struct {
                 }
             }
         }
-
-        // add missing last transforms
-        {
-            var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
-            while (it.next()) |e| {
-                var ee = it.current_entity_explorer();
-                if (ee.get_component(C.LastTransform) == null) {
-                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .transform = e.t.transform });
-                }
-            }
-        }
-
-        try self.cmdbuf.apply(@ptrCast(&app.world));
 
         // camera tick
         {

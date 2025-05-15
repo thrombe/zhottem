@@ -385,24 +385,7 @@ const HotApp = struct {
 
         try self.app_state.tick(lap, &self.engine, &self.app);
 
-        // multiple framebuffers => multiple descriptor sets => different buffers
-        // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad
-        // so just wait for one frame's queue to be empty before trying to render another frame
-        try self.engine.graphics.device.queueWaitIdle(self.engine.graphics.graphics_queue.handle);
-
-        if (self.app.stages.update()) {
-            _ = self.app_state.shader_fuse.fuse();
-        }
-
-        if (self.app_state.shader_fuse.unfuse()) {
-            try self.renderer_state.recreate_pipelines(&self.engine, &self.app, &self.app_state);
-        }
-
-        if (self.app_state.cmdbuf_fuse.unfuse()) {
-            try self.renderer_state.recreate_cmdbuf(&self.engine, &self.app);
-        }
-
-        const present = try self.app.present(&self.renderer_state, &self.gui_renderer, &self.engine.graphics);
+        const present = try self.app.present(&self.renderer_state, &self.app_state, &self.gui_renderer, &self.engine);
         // IDK: this never triggers :/
         if (present == .suboptimal) {
             std.debug.print("{any}\n", .{present});
