@@ -82,14 +82,14 @@ const Meshes = std.ArrayList(struct {
 
 const Armatures = std.ArrayList(struct { handle: ResourceManager.ArmatureHandle, len: usize });
 
-pub fn load_gltf(
+pub fn spawn_default_scene(
     world: *world_mod.World,
-    cpu_resources: *ResourceManager.CpuResources,
+    cpu: *ResourceManager.CpuResources,
     instance_manager: *InstanceManager,
     cmdbuf: *EntityComponentStore.CmdBuf,
     gltf_handle: ResourceManager.GltfHandle,
 ) !void {
-    const gltf = cpu_resources.ref(gltf_handle);
+    const gltf = cpu.ref(gltf_handle);
     const info = &gltf.gltf.info.value;
 
     const scene = &info.scenes[info.scene];
@@ -98,14 +98,13 @@ pub fn load_gltf(
     defer allocator.free(mesh_counts);
     @memset(mesh_counts, 0);
     for (scene.nodes) |ni| {
-        _ = try spawn_node(
+        _ = try _spawn_node(
             world,
-            cpu_resources,
+            cpu,
             cmdbuf,
             gltf_handle,
             null,
             ni,
-            info.nodes,
             mesh_counts,
             .{},
         );
@@ -114,23 +113,24 @@ pub fn load_gltf(
     for (gltf.handles.meshes, mesh_counts) |mesh, count| {
         try instance_manager.instances.append(.{
             .mesh = mesh,
-            .instances = try cpu_resources.batch_reserve(count),
+            .instances = try cpu.batch_reserve(count),
         });
     }
 }
 
-fn spawn_node(
+fn _spawn_node(
     world: *world_mod.World,
-    cpu_resources: *ResourceManager.CpuResources,
+    cpu: *ResourceManager.CpuResources,
     cmdbuf: *EntityComponentStore.CmdBuf,
     gltf_handle: ResourceManager.GltfHandle,
     parent: ?Entity,
     node_index: GltfInfo.NodeIndex,
-    nodes: []GltfInfo.Node,
     mesh_counts: []u32,
     transform: C.Transform,
 ) !Entity {
-    const gltf = cpu_resources.ref(gltf_handle);
+    const gltf = cpu.ref(gltf_handle);
+    const info: *assets_mod.Gltf.Info = &gltf.gltf.info.value;
+    const nodes = info.nodes;
     const node = &nodes[node_index];
     const local = C.Transform.from_asset_transform(node.transform());
     const global = transform.apply_local(local);
@@ -141,14 +141,13 @@ fn spawn_node(
         var children = std.ArrayList(Entity).init(allocator.*);
         errdefer children.deinit();
         for (node.children) |ci| {
-            const child = try spawn_node(
+            const child = try _spawn_node(
                 world,
-                cpu_resources,
+                cpu,
                 cmdbuf,
                 gltf_handle,
                 entity,
                 ci,
-                nodes,
                 mesh_counts,
                 global,
             );
@@ -169,7 +168,7 @@ fn spawn_node(
 
         if (node.skin) |si| {
             const harmature = gltf.handles.armatures[si];
-            const armature = cpu_resources.ref(harmature);
+            const armature = cpu.ref(harmature);
             const bones = try allocator.alloc(math.Mat4x4, armature.bones.len);
             const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, armature.bones.len);
             @memset(bones, .{});
@@ -209,7 +208,7 @@ fn spawn_node(
                                 .mesh => {
                                     const m = node.mesh orelse return error.MissingMesh;
                                     const hmesh = gltf.handles.meshes[m];
-                                    const mesh = cpu_resources.ref(hmesh);
+                                    const mesh = cpu.ref(hmesh);
                                     break :blk .{ .mesh = .{
                                         .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(mesh.faces)),
                                         .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(mesh.vertices)),

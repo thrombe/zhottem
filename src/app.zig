@@ -434,7 +434,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    try loader_mod.load_gltf(&world, &cpu, &instance_manager, &cmdbuf, handles.gltf.library);
+    try loader_mod.spawn_default_scene(&world, &cpu, &instance_manager, &cmdbuf, handles.gltf.library);
 
     t.transform = .{
         .pos = .{ .y = -5.5 },
