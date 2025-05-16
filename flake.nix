@@ -103,12 +103,13 @@
 
       env-packages = pkgs:
         (with pkgs; [
-          (python312.withPackages (ps: with ps; [
-            # for dear imgui bindings
-            ply
+          (python312.withPackages (ps:
+            with ps; [
+              # for dear imgui bindings
+              ply
 
-            # python-lsp-server # (lsp)
-          ]))
+              # python-lsp-server # (lsp)
+            ]))
           uv # python package manager, virtualenv (rust)
           # pylyzer # static type analyzer (rust)
           pyright # lsp (js)
@@ -144,7 +145,7 @@
 
           renderdoc
         ])
-        ++ [ ]
+        ++ []
         ++ (custom-commands pkgs);
 
       stdenv = pkgs.clangStdenv;
