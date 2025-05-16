@@ -21,6 +21,21 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    naersk = {
+      url = "github:nmattia/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+    };
+    # a tui debugger (better rust support)
+    nnd = {
+      url = "github:al13n321/nnd/v0.23";
+      flake = false;
+    };
   };
 
   outputs = inputs:
@@ -61,7 +76,16 @@
           };
         };
       };
+      rust-toolchain = pkgs.rust-bin.stable.latest.default.override {
+        extensions = ["cargo" "rustc" "rust-src"];
+        targets = ["x86_64-unknown-linux-musl"];
+      };
+      naersk-lib = inputs.naersk.lib.${system}.override {
+        cargo = rust-toolchain;
+        rustc = rust-toolchain;
+      };
       overlays = [
+        inputs.rust-overlay.overlays.default
         (self: super: rec {
           zig = zigv.bin;
           # zig = zigv.src;
@@ -76,6 +100,11 @@
               zig
             ];
           });
+
+          nnd = naersk-lib.buildPackage {
+            src = inputs.nnd;
+            CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+          };
         })
       ];
 
@@ -138,6 +167,7 @@
 
           zls
           gdb
+          nnd
 
           # - [nixOS usage | Mach: zig game engine & graphics toolkit](https://machengine.org/about/nixos-usage/)
           xorg.libX11
