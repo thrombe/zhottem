@@ -755,17 +755,35 @@ pub fn present(
         try dynamic_state.recreate_cmdbuf(engine, self);
     }
 
-    {
-        const cmdbuf = dynamic_state.cmdbuffer.bufs[dynamic_state.swapchain.image_index];
-        const gui_cmdbuf = gui_renderer.cmd_bufs[dynamic_state.swapchain.image_index];
+    const current_si = try dynamic_state.swapchain.present_start(ctx);
+    const present_state = dynamic_state.swapchain.present_end(
+        &[_]vk.CommandBuffer{
+            dynamic_state.cmdbuffer.bufs[dynamic_state.swapchain.image_index],
+            gui_renderer.cmd_bufs[dynamic_state.swapchain.image_index],
+        },
+        ctx,
+        current_si,
+    ) catch |err| switch (err) {
+        error.OutOfDateKHR => blk: {
+            _ = app_state.resize_fuse.fuse();
+            break :blk .suboptimal;
+        },
+        else => |narrow| return narrow,
+    };
 
-        const current_si = try dynamic_state.swapchain.present_start(ctx);
+    // this has to happen before the next app/gui tick
+    if (engine.window.resize_fuse.unfuse() or app_state.resize_fuse.unfuse()) {
+        // this is not good :/
+        // we have to wait for queue to be idle before creating swapchain again
+        try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
 
-        return dynamic_state.swapchain.present_end(&[_]vk.CommandBuffer{ cmdbuf, gui_cmdbuf }, ctx, current_si) catch |err| switch (err) {
-            error.OutOfDateKHR => return .suboptimal,
-            else => |narrow| return narrow,
-        };
+        try dynamic_state.recreate_swapchain(engine, app_state);
+
+        gui_renderer.deinit(&engine.graphics.device);
+        gui_renderer.* = try GuiEngine.GuiRenderer.init(engine, &dynamic_state.swapchain);
     }
+
+    return present_state;
 }
 
 pub const RendererState = struct {

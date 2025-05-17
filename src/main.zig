@@ -391,16 +391,6 @@ const HotApp = struct {
             std.debug.print("{any}\n", .{present});
         }
 
-        if (self.engine.window.resize_fuse.unfuse() or
-            present == .suboptimal or
-            self.app_state.resize_fuse.unfuse())
-        {
-            try self.renderer_state.recreate_swapchain(&self.engine, &self.app_state);
-
-            self.gui_renderer.deinit(&self.engine.graphics.device);
-            self.gui_renderer = try GuiEngine.GuiRenderer.init(&self.engine, &self.renderer_state.swapchain);
-        }
-
         return true;
     }
 };
