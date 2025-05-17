@@ -37,6 +37,8 @@
 
  const int _bind_camera = 0;
  const int _bind_instanced = 1;
+ const int _bind_bones = 2;
+ const int _bind_texture = 3;
 
  const int _bind_vertex = 0;
  const int _bind_instance = 1;

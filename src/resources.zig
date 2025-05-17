@@ -126,6 +126,8 @@ pub const VertexInputLocations = enum(u32) {
 pub const UniformBinds = enum(u32) {
     camera,
     instanced,
+    bones,
+    texture,
 
     pub fn bind(self: @This()) u32 {
         return @intFromEnum(self);

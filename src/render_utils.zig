@@ -79,11 +79,11 @@ pub const DescriptorSet = struct {
         layout_binding: std.ArrayListUnmanaged(vk.DescriptorSetLayoutBinding) = .{},
         desc_set_update: std.ArrayListUnmanaged(vk.WriteDescriptorSet) = .{},
 
-        pub fn add(self: *@This(), binding: anytype) !void {
-            try self.layout_binding.appendSlice(allocator.*, &binding.layout_binding());
+        pub fn add(self: *@This(), resource: anytype, binding: u32) !void {
+            try self.layout_binding.appendSlice(allocator.*, &resource.layout_binding(binding));
 
             // NOTE: undefined is written to in .build()
-            try self.desc_set_update.appendSlice(allocator.*, &binding.write_desc_set());
+            try self.desc_set_update.appendSlice(allocator.*, &resource.write_desc_set(binding));
         }
 
         pub fn deinit(self: *@This()) void {
@@ -92,14 +92,6 @@ pub const DescriptorSet = struct {
         }
 
         pub fn build(self: *@This(), device: *Device) !DescriptorSet {
-            // overwriting binding index thing
-            for (self.layout_binding.items, 0..) |*lb, i| {
-                lb.*.binding = @intCast(i);
-            }
-            for (self.desc_set_update.items, 0..) |*dsu, i| {
-                dsu.*.dst_binding = @intCast(i);
-            }
-
             const layouts = [_]vk.DescriptorSetLayout{try device.createDescriptorSetLayout(&.{
                 .flags = .{},
                 .binding_count = @intCast(self.layout_binding.items.len),
@@ -756,9 +748,9 @@ pub const Image = struct {
         } };
     }
 
-    pub fn layout_binding(self: *@This()) [1]vk.DescriptorSetLayoutBinding {
+    pub fn layout_binding(self: *@This(), binding: u32) [1]vk.DescriptorSetLayoutBinding {
         return [_]vk.DescriptorSetLayoutBinding{.{
-            .binding = undefined,
+            .binding = binding,
             .descriptor_type = self.bind_desc_type,
             .descriptor_count = 1,
             .stage_flags = .{
@@ -769,10 +761,10 @@ pub const Image = struct {
         }};
     }
 
-    pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+    pub fn write_desc_set(self: *@This(), binding: u32) [1]vk.WriteDescriptorSet {
         return [_]vk.WriteDescriptorSet{.{
             .dst_set = undefined,
-            .dst_binding = undefined,
+            .dst_binding = binding,
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = self.bind_desc_type,
@@ -839,9 +831,9 @@ pub const UniformBuffer = struct {
         @memcpy(@as([*]u8, @ptrCast(mapped)), self.uniform_buffer);
     }
 
-    pub fn layout_binding(_: *@This()) [1]vk.DescriptorSetLayoutBinding {
+    pub fn layout_binding(_: *@This(), binding: u32) [1]vk.DescriptorSetLayoutBinding {
         return [_]vk.DescriptorSetLayoutBinding{.{
-            .binding = undefined,
+            .binding = binding,
             .descriptor_type = .uniform_buffer,
             .descriptor_count = 1,
             .stage_flags = .{
@@ -852,10 +844,10 @@ pub const UniformBuffer = struct {
         }};
     }
 
-    pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+    pub fn write_desc_set(self: *@This(), binding: u32) [1]vk.WriteDescriptorSet {
         return [_]vk.WriteDescriptorSet{.{
             .dst_set = undefined,
-            .dst_binding = undefined,
+            .dst_binding = binding,
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .uniform_buffer,
@@ -939,9 +931,9 @@ pub fn DynamicUniformBuffer(typ: type) type {
             // device.flushMappedMemoryRanges(memory_range_count: u32, p_memory_ranges: [*]const MappedMemoryRange)
         }
 
-        pub fn layout_binding(_: *@This()) [1]vk.DescriptorSetLayoutBinding {
+        pub fn layout_binding(_: *@This(), binding: u32) [1]vk.DescriptorSetLayoutBinding {
             return [_]vk.DescriptorSetLayoutBinding{.{
-                .binding = undefined,
+                .binding = binding,
 
                 .descriptor_type = .uniform_buffer_dynamic,
                 .descriptor_count = 1,
@@ -953,10 +945,10 @@ pub fn DynamicUniformBuffer(typ: type) type {
             }};
         }
 
-        pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+        pub fn write_desc_set(self: *@This(), binding: u32) [1]vk.WriteDescriptorSet {
             return [_]vk.WriteDescriptorSet{.{
                 .dst_set = undefined,
-                .dst_binding = undefined,
+                .dst_binding = binding,
 
                 .dst_array_element = 0,
                 .descriptor_count = 1,
@@ -1095,9 +1087,9 @@ pub const Buffer = struct {
         device.freeMemory(self.memory, null);
     }
 
-    pub fn layout_binding(_: *@This()) [1]vk.DescriptorSetLayoutBinding {
+    pub fn layout_binding(_: *@This(), binding: u32) [1]vk.DescriptorSetLayoutBinding {
         return [_]vk.DescriptorSetLayoutBinding{.{
-            .binding = undefined,
+            .binding = binding,
 
             .descriptor_type = .storage_buffer,
             .descriptor_count = 1,
@@ -1109,10 +1101,10 @@ pub const Buffer = struct {
         }};
     }
 
-    pub fn write_desc_set(self: *@This()) [1]vk.WriteDescriptorSet {
+    pub fn write_desc_set(self: *@This(), binding: u32) [1]vk.WriteDescriptorSet {
         return [_]vk.WriteDescriptorSet{.{
             .dst_set = undefined,
-            .dst_binding = undefined,
+            .dst_binding = binding,
 
             .dst_array_element = 0,
             .descriptor_count = 1,

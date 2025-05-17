@@ -875,15 +875,15 @@ pub const RendererState = struct {
 
         var camera_desc_set_builder = app.descriptor_pool.set_builder();
         defer camera_desc_set_builder.deinit();
-        try camera_desc_set_builder.add(&app.uniforms);
+        try camera_desc_set_builder.add(&app.uniforms, resources_mod.UniformBinds.camera.bind());
         var camera_desc_set = try camera_desc_set_builder.build(device);
         errdefer camera_desc_set.deinit(device);
 
         var model_desc_set_builder = app.descriptor_pool.set_builder();
         defer model_desc_set_builder.deinit();
-        try model_desc_set_builder.add(&app.model_uniforms);
-        try model_desc_set_builder.add(&app.texture);
-        try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer);
+        try model_desc_set_builder.add(&app.model_uniforms, resources_mod.UniformBinds.instanced.bind());
+        try model_desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
+        try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer, resources_mod.UniformBinds.bones.bind());
         var model_desc_set = try model_desc_set_builder.build(device);
         errdefer model_desc_set.deinit(device);
 

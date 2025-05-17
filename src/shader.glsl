@@ -3,7 +3,11 @@
 #include <common.glsl>
 #include <uniforms.glsl>
 
-layout(set = 0, binding = 0) uniform Ubo {
+// TODO: prevent desync of this set
+//   by defining a fixed number of sets that are always bound
+//   even if not used by pipelines.
+//   prob prevents some optimization from vulkan's side, but it should be fine :P
+layout(set = 0, binding = _bind_camera) uniform Ubo {
     Uniforms ubo;
 };
 
@@ -12,10 +16,10 @@ void set_seed(int id) {
 }
 
 #ifdef VERT_PASS
-    layout(set = 1, binding = 0) uniform UboModel {
+    layout(set = 1, binding = _bind_instanced) uniform UboModel {
         mat4 model_mat;
     };
-    layout(set = 1, binding = 2) readonly buffer BoneBuffer {
+    layout(set = 1, binding = _bind_bones) readonly buffer BoneBuffer {
         mat4 bones[];
     };
 
@@ -51,7 +55,7 @@ void set_seed(int id) {
 #endif // VERT_PASS
 
 #ifdef FRAG_PASS
-    layout(set = 1, binding = 1) uniform sampler2D tex;
+    layout(set = 1, binding = _bind_texture) uniform sampler2D tex;
 
     layout(location = 0) in vec3 vpos;
     layout(location = 1) in vec3 vnormal;
