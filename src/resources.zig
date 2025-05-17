@@ -307,9 +307,8 @@ pub const ResourceManager = struct {
             return .{ .first = @intCast(first), .buf = try self.bones.addManyAsSlice(num) };
         }
 
-        // call at the end of the frame
-        pub fn alloc_tick(self: *@This(), engine: *Engine, pool: vk.CommandPool) !void {
-            const ctx = &engine.graphics;
+        // call asap after reserving all instances of a frame
+        fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool) !void {
             const device = &ctx.device;
 
             {
@@ -368,8 +367,9 @@ pub const ResourceManager = struct {
             }
         }
 
-        // call at the start of the frame
-        pub fn swap_tick(self: *@This(), device: *Device) void {
+        // call when the buffers are not in use
+        fn swap_tick(self: *@This(), device: *Device) bool {
+            var did_swap = false;
             {
                 const buf = &self.instance_buffer;
 
@@ -378,9 +378,10 @@ pub const ResourceManager = struct {
                     .back_allocated => {
                         // this is okay cuz we have an empty queue every frame
                         buf.current.buffer.deinit(device);
-                        buf.current = buf.back;
+                        buf.current = buf.back.?;
                         buf.back = null;
                         buf.state = .enough;
+                        did_swap = true;
                     },
                 }
             }
@@ -392,17 +393,27 @@ pub const ResourceManager = struct {
                     .back_allocated => {
                         // this is okay cuz we have an empty queue every frame
                         buf.current.buffer.deinit(device);
-                        buf.current = buf.back;
+                        buf.current = buf.back.?;
                         buf.back = null;
                         buf.state = .enough;
+                        did_swap = true;
                     },
                 }
             }
+            return did_swap;
         }
 
-        pub fn update(self: *@This(), device: *Device) !void {
-            try self.update_instances(device);
-            try self.update_bones(device);
+        pub fn update(self: *@This(), ctx: *Engine.VulkanContext, command_pool: vk.CommandPool) !bool {
+            // try to swap the buffer created in the last frame
+            const did_swap = self.swap_tick(&ctx.device);
+
+            try self.update_instances(&ctx.device);
+            try self.update_bones(&ctx.device);
+
+            // start allocation of new buffer asap after we know current buffer is not enough
+            try self.alloc_tick(ctx, command_pool);
+
+            return did_swap;
         }
 
         fn update_instances(self: *@This(), device: *Device) !void {
@@ -421,7 +432,7 @@ pub const ResourceManager = struct {
                 @memcpy(gpu_items[buf.count..][0..can_alloc], instances[0..can_alloc]);
                 buf.count += can_alloc;
 
-                if (can_alloc < instances.len) {
+                if (can_alloc < instances.len and buf.state == .enough) {
                     buf.state = .out_of_objects;
                 }
             }
@@ -439,7 +450,7 @@ pub const ResourceManager = struct {
             @memcpy(gpu_items[buf.count..][0..can_alloc], bones[0..can_alloc]);
             buf.count = can_alloc;
 
-            if (can_alloc < bones.len) {
+            if (can_alloc < bones.len and buf.state == .enough) {
                 buf.state = .out_of_objects;
             }
         }

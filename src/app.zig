@@ -735,7 +735,9 @@ pub fn present(
     try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
 
     try self.uniforms.upload(&ctx.device);
-    try self.resources.instances.update(&ctx.device);
+    if (try self.resources.instances.update(ctx, self.command_pool)) {
+        _ = app_state.shader_fuse.fuse();
+    }
 
     if (self.resources.instances.did_change()) {
         _ = app_state.cmdbuf_fuse.fuse();
@@ -863,7 +865,6 @@ pub const RendererState = struct {
         defer model_desc_set_builder.deinit();
         try model_desc_set_builder.add(&app.model_uniforms);
         try model_desc_set_builder.add(&app.texture);
-        // TODO: call ResourceManager.InstanceResources.{alloc_tick, swap_tick} to actually resize bones and instances
         try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer);
         var model_desc_set = try model_desc_set_builder.build(device);
         errdefer model_desc_set.deinit(device);
