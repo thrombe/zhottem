@@ -282,7 +282,7 @@ pub const ResourceManager = struct {
             self.bone_buffer.count = 0;
         }
 
-        pub fn did_change(self: *@This()) bool {
+        fn did_change(self: *@This()) bool {
             var hasher = std.hash.Wyhash.init(0);
             var batches = self.batches.iterator();
             while (batches.next()) |batch| {
@@ -408,17 +408,22 @@ pub const ResourceManager = struct {
             return did_swap;
         }
 
-        pub fn update(self: *@This(), ctx: *Engine.VulkanContext, command_pool: vk.CommandPool) !bool {
+        pub fn update(self: *@This(), ctx: *Engine.VulkanContext, command_pool: vk.CommandPool) !struct {
+            buffer_invalid: bool,
+            cmdbuf_invalid: bool,
+        } {
             // try to swap the buffer created in the last frame
-            const did_swap = self.swap_tick(&ctx.device);
+            const swapped = self.swap_tick(&ctx.device);
 
             try self.update_instances(&ctx.device);
             try self.update_bones(&ctx.device);
 
+            const changed = self.did_change();
+
             // start allocation of new buffer asap after we know current buffer is not enough
             try self.alloc_tick(ctx, command_pool);
 
-            return did_swap;
+            return .{ .buffer_invalid = swapped, .cmdbuf_invalid = changed };
         }
 
         fn update_instances(self: *@This(), device: *Device) !void {

@@ -741,11 +741,11 @@ pub fn present(
     try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
 
     try self.uniforms.upload(&ctx.device);
-    if (try self.resources.instances.update(ctx, self.command_pool)) {
+    const updates = try self.resources.instances.update(ctx, self.command_pool);
+    if (updates.buffer_invalid) {
         _ = app_state.shader_fuse.fuse();
     }
-
-    if (self.resources.instances.did_change()) {
+    if (updates.cmdbuf_invalid) {
         _ = app_state.cmdbuf_fuse.fuse();
     }
 
