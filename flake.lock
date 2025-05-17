@@ -55,6 +55,26 @@
         "type": "github"
       }
     },
+    "naersk": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1745925850,
+        "narHash": "sha256-cyAAMal0aPrlb1NgzMxZqeN1mAJ2pJseDhm2m6Um8T0=",
+        "owner": "nmattia",
+        "repo": "naersk",
+        "rev": "38bc60bbc157ae266d4a0c96671c6c742ee17a5f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nmattia",
+        "repo": "naersk",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1743827369,
@@ -71,13 +91,53 @@
         "type": "github"
       }
     },
+    "nnd": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1747417601,
+        "narHash": "sha256-WC3XubN9O1eEgTIbBE38Z+pttu2ZFrMSXMvYPWVRk70=",
+        "owner": "al13n321",
+        "repo": "nnd",
+        "rev": "5ec9ff38b1a61e82d3a1a8a95f6910e2857851ed",
+        "type": "github"
+      },
+      "original": {
+        "owner": "al13n321",
+        "ref": "v0.23",
+        "repo": "nnd",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "naersk": "naersk",
         "nixpkgs": "nixpkgs",
+        "nnd": "nnd",
+        "rust-overlay": "rust-overlay",
         "zig-overlay": "zig-overlay",
         "zig2nix": "zig2nix",
         "zls": "zls"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1747363019,
+        "narHash": "sha256-N4dwkRBmpOosa4gfFkFf/LTD8oOcNkAyvZ07JvRDEf0=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "0e624f2b1972a34be1a9b35290ed18ea4b419b6f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
       }
     },
     "systems": {
