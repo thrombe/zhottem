@@ -65,8 +65,6 @@ screen_image: Image,
 depth_image: Image,
 resources: ResourceManager,
 descriptor_pool: DescriptorPool,
-camera_descriptor_set: DescriptorSet,
-model_descriptor_set: DescriptorSet,
 command_pool: vk.CommandPool,
 stages: ShaderStageManager,
 recorder: AudioRecorder,
@@ -378,7 +376,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     const handles = try Handles.init(&assets);
 
     const mandlebulb = assets.ref(handles.image.mandlebulb);
-    const img_slice = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(mandlebulb.buffer));
     var gpu_img = try Image.new_from_slice(ctx, cmd_pool, .{
         .extent = .{
             .width = @intCast(mandlebulb.width),
@@ -389,7 +386,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .usage = .{
             .sampled_bit = true,
         },
-    }, img_slice);
+    }, std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(mandlebulb.buffer)));
     errdefer gpu_img.deinit(device);
 
     var cmdbuf = world.ecs.deferred();
@@ -612,22 +609,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
 
-    var camera_desc_set_builder = desc_pool.set_builder();
-    defer camera_desc_set_builder.deinit();
-    try camera_desc_set_builder.add(&uniforms);
-    var camera_desc_set = try camera_desc_set_builder.build(device);
-    errdefer camera_desc_set.deinit(device);
-
-    var model_desc_set_builder = desc_pool.set_builder();
-    defer model_desc_set_builder.deinit();
-    try model_desc_set_builder.add(&model_uniform);
-    try model_desc_set_builder.add(&gpu_img);
-    // TODO: will break when instance buffer reallocates
-    // TODO: also call ResourceManager.InstanceResources.{alloc_tick, swap_tick} to actually resize bones and instances
-    try model_desc_set_builder.add(&resources.instances.bone_buffer.current.buffer);
-    var model_desc_set = try model_desc_set_builder.build(device);
-    errdefer model_desc_set.deinit(device);
-
     var stages = try ShaderStageManager.init();
     errdefer stages.deinit();
 
@@ -688,8 +669,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .depth_image = depth,
         .resources = resources,
         .descriptor_pool = desc_pool,
-        .camera_descriptor_set = camera_desc_set,
-        .model_descriptor_set = model_desc_set,
         .command_pool = cmd_pool,
         .stages = stages,
         .recorder = recorder,
@@ -716,8 +695,6 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
     defer self.resources.deinit(device);
-    defer self.camera_descriptor_set.deinit(device);
-    defer self.model_descriptor_set.deinit(device);
     defer self.descriptor_pool.deinit(device);
     defer self.stages.deinit();
     defer self.recorder.deinit() catch |e| utils.dump_error(e);
@@ -792,6 +769,8 @@ pub fn present(
 pub const RendererState = struct {
     swapchain: Swapchain,
     cmdbuffer: CmdBuffer,
+    camera_descriptor_set: DescriptorSet,
+    model_descriptor_set: DescriptorSet,
     pipeline: GraphicsPipeline,
     bg_pipeline: GraphicsPipeline,
 
@@ -809,14 +788,20 @@ pub const RendererState = struct {
         var self: @This() = .{
             .pipeline = undefined,
             .bg_pipeline = undefined,
+            .camera_descriptor_set = undefined,
+            .model_descriptor_set = undefined,
             .swapchain = swapchain,
             .pool = app.command_pool,
             .cmdbuffer = undefined,
         };
 
         const pipelines = try self.create_pipelines(engine, app);
+        self.camera_descriptor_set = pipelines.camera_descriptor_set;
+        self.model_descriptor_set = pipelines.model_descriptor_set;
         self.pipeline = pipelines.pipeline;
         self.bg_pipeline = pipelines.bg_pipeline;
+        errdefer self.camera_descriptor_set.deinit(device);
+        errdefer self.model_descriptor_set.deinit(device);
         errdefer self.pipeline.deinit(device);
         errdefer self.bg_pipeline.deinit(device);
 
@@ -832,8 +817,12 @@ pub const RendererState = struct {
 
         const pipelines = try self.create_pipelines(engine, app);
 
+        self.camera_descriptor_set.deinit(device);
+        self.model_descriptor_set.deinit(device);
         self.pipeline.deinit(device);
         self.bg_pipeline.deinit(device);
+        self.camera_descriptor_set = pipelines.camera_descriptor_set;
+        self.model_descriptor_set = pipelines.model_descriptor_set;
         self.pipeline = pipelines.pipeline;
         self.bg_pipeline = pipelines.bg_pipeline;
 
@@ -854,10 +843,30 @@ pub const RendererState = struct {
         self.cmdbuffer = cmdbuffer;
     }
 
-    pub fn create_pipelines(self: *@This(), engine: *Engine, app: *App) !struct { bg_pipeline: GraphicsPipeline, pipeline: GraphicsPipeline } {
+    pub fn create_pipelines(self: *@This(), engine: *Engine, app: *App) !struct {
+        camera_descriptor_set: DescriptorSet,
+        model_descriptor_set: DescriptorSet,
+        bg_pipeline: GraphicsPipeline,
+        pipeline: GraphicsPipeline,
+    } {
         _ = self;
         const ctx = &engine.graphics;
         const device = &ctx.device;
+
+        var camera_desc_set_builder = app.descriptor_pool.set_builder();
+        defer camera_desc_set_builder.deinit();
+        try camera_desc_set_builder.add(&app.uniforms);
+        var camera_desc_set = try camera_desc_set_builder.build(device);
+        errdefer camera_desc_set.deinit(device);
+
+        var model_desc_set_builder = app.descriptor_pool.set_builder();
+        defer model_desc_set_builder.deinit();
+        try model_desc_set_builder.add(&app.model_uniforms);
+        try model_desc_set_builder.add(&app.texture);
+        // TODO: call ResourceManager.InstanceResources.{alloc_tick, swap_tick} to actually resize bones and instances
+        try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer);
+        var model_desc_set = try model_desc_set_builder.build(device);
+        errdefer model_desc_set.deinit(device);
 
         var pipeline = try GraphicsPipeline.new(device, .{
             .vert = app.stages.shaders.map.get(.vert).code,
@@ -871,8 +880,8 @@ pub const RendererState = struct {
                 .depth_format = app.depth_image.format,
             },
             .desc_set_layouts = &[_]vk.DescriptorSetLayout{
-                app.camera_descriptor_set.layout,
-                app.model_descriptor_set.layout,
+                camera_desc_set.layout,
+                model_desc_set.layout,
             },
         });
         errdefer pipeline.deinit(device);
@@ -889,12 +898,17 @@ pub const RendererState = struct {
                 .depth_format = app.depth_image.format,
             },
             .desc_set_layouts = &[_]vk.DescriptorSetLayout{
-                app.camera_descriptor_set.layout,
+                camera_desc_set.layout,
             },
         });
         errdefer bg_pipeline.deinit(device);
 
-        return .{ .pipeline = pipeline, .bg_pipeline = bg_pipeline };
+        return .{
+            .camera_descriptor_set = camera_desc_set,
+            .model_descriptor_set = model_desc_set,
+            .pipeline = pipeline,
+            .bg_pipeline = bg_pipeline,
+        };
     }
 
     pub fn create_cmdbuf(self: *@This(), engine: *Engine, app: *App) !CmdBuffer {
@@ -917,8 +931,8 @@ pub const RendererState = struct {
         app.resources.instances.draw(
             &self.pipeline,
             &[_]vk.DescriptorSet{
-                app.camera_descriptor_set.set,
-                app.model_descriptor_set.set,
+                self.camera_descriptor_set.set,
+                self.model_descriptor_set.set,
             },
             &[_]u32{0},
             &cmdbuf,
@@ -929,7 +943,7 @@ pub const RendererState = struct {
         cmdbuf.draw(device, .{
             .pipeline = &self.bg_pipeline,
             .desc_sets = &[_]vk.DescriptorSet{
-                app.camera_descriptor_set.set,
+                self.camera_descriptor_set.set,
             },
             .dynamic_offsets = &[_]u32{},
             .vertices = .{
@@ -967,6 +981,9 @@ pub const RendererState = struct {
 
         defer self.swapchain.deinit(device);
         defer self.cmdbuffer.deinit(device);
+
+        defer self.camera_descriptor_set.deinit(device);
+        defer self.model_descriptor_set.deinit(device);
 
         defer self.pipeline.deinit(device);
         defer self.bg_pipeline.deinit(device);
