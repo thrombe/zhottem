@@ -729,6 +729,12 @@ pub fn present(
 ) !Swapchain.PresentState {
     const ctx = &engine.graphics;
 
+    if (engine.window.resize_fuse.unfuse()) {
+        _ = app_state.resize_fuse.fuse();
+    }
+
+    // TODO: might be useful to create some kinda double buffered setup for
+    //  cmdbuffers so that i can queue them before .queueWaitIdle()
     // multiple framebuffers => multiple descriptor sets => different buffers
     // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad
     // so just wait for one frame's queue to be empty before trying to render another frame
@@ -772,7 +778,7 @@ pub fn present(
     };
 
     // this has to happen before the next app/gui tick
-    if (engine.window.resize_fuse.unfuse() or app_state.resize_fuse.unfuse()) {
+    if (app_state.resize_fuse.unfuse()) {
         // this is not good :/
         // we have to wait for queue to be idle before creating swapchain again
         try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);

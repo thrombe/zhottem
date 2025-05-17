@@ -195,6 +195,9 @@ pub const ResourceManager = struct {
             } = .enough,
         };
 
+        // TODO: MAYBE: this can be converted to an array instead of hashmap
+        //    by storing BatchHandle along with MeshHandle.
+        //    but oh well. there's only so much time in the day.
         // currently each batch is unique only by it's mesh,
         // but batches will need to be unique also by it's material somehow.
         const Batches = std.AutoArrayHashMap(MeshHandle, Batch);

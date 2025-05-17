@@ -152,6 +152,9 @@ const HotReloader = struct {
     }
 };
 
+// TODO:
+// set segfault handlers and call app.panic_exit() then ask user if they want to restart
+// use fixed buff allocator to avoid leaks.
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -258,6 +261,28 @@ export fn hot_deinit(_app: *anyopaque) callconv(.c) HotAction {
         },
     }
 }
+
+// this function is here just so that glfw, portaudio, etc are linked directly into the hot bin.
+// we never actually call this function
+// export fn hot_ignore() callconv(.c) void {
+//     switch (options.mode) {
+//         .hotexe => {
+//             const c = @cImport({
+//                 @cInclude("GLFW/glfw3.h");
+//                 @cInclude("portaudio.h");
+//             });
+//             const Extern = struct {
+//                 extern fn SteamAPI_Shutdown() callconv(.c) void;
+//                 extern fn cImGui_ImplGlfw_Shutdown() callconv(.c) void;
+//             };
+//             _ = c.glfwInit();
+//             _ = c.Pa_Initialize();
+//             Extern.SteamAPI_Shutdown();
+//             Extern.cImGui_ImplGlfw_Shutdown();
+//         },
+//         else => {},
+//     }
+// }
 
 const HotApp = struct {
     const vk = @import("vulkan");
