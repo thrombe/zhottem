@@ -30,14 +30,18 @@ void set_seed(int id) {
     layout(set = 1, binding = _bind_bones) readonly restrict buffer BoneBuffer {
         mat4 bones[];
     };
+    layout(set = 1, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuffer {
+        DrawCtx draw_ctxts[];
+    };
 
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
     layout(location = 2) out vec2 ouv;
     layout(location = 3) out float light;
     void main() {
-        Instance inst = instances[gl_InstanceIndex];
-        Vertex v = vertices[indices[gl_VertexIndex]];
+        DrawCtx ctx = draw_ctxts[gl_DrawID];
+        Instance inst = instances[gl_InstanceIndex + ctx.first_instance];
+        Vertex v = vertices[indices[gl_VertexIndex + ctx.first_index] + ctx.first_vertex];
 
         vec4 pos = vec4(v.pos, 1.0);
         mat4 itransform = mat4(0.0);

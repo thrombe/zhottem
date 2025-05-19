@@ -744,6 +744,9 @@ pub const VulkanContext = struct {
                 .p_next = @ptrCast(&vk.PhysicalDeviceVulkan13Features{
                     .dynamic_rendering = vk.TRUE,
                     .synchronization_2 = vk.TRUE,
+                    .p_next = @ptrCast(@constCast(&vk.PhysicalDeviceVulkan11Features{
+                        .shader_draw_parameters = vk.TRUE,
+                    })),
                 }),
                 // .p_next = @ptrCast(&vk.PhysicalDeviceSynchronization2Features{
                 //     .synchronization_2 = vk.TRUE,
@@ -757,6 +760,7 @@ pub const VulkanContext = struct {
                 .pp_enabled_extension_names = @ptrCast(&required_device_extensions),
                 .p_enabled_features = &.{
                     .fill_mode_non_solid = vk.TRUE,
+                    .multi_draw_indirect = vk.TRUE,
                     // .vertex_pipeline_stores_and_atomics = vk.TRUE,
                 },
             }, null);

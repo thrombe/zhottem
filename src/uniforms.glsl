@@ -47,10 +47,18 @@
      uint bone_offset;
  };
 
+ struct DrawCtx {
+     uint first_vertex;
+     uint first_index;
+     uint first_instance;
+     uint _pad;
+ };
+
  const int _bind_camera = 0;
  const int _bind_vertices = 1;
  const int _bind_indices = 2;
  const int _bind_instances = 3;
  const int _bind_bones = 4;
- const int _bind_texture = 5;
+ const int _bind_call_ctxts = 5;
+ const int _bind_texture = 6;
 

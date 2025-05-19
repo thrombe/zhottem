@@ -1025,7 +1025,7 @@ pub const ShaderUtils = struct {
             }
         }
 
-        fn add_struct(self: *@This(), name: []const u8, t: type) !void {
+        pub fn add_struct(self: *@This(), name: []const u8, t: type) !void {
             if (try self.remember(t)) {
                 return;
             }

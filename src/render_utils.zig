@@ -1344,27 +1344,17 @@ pub const CmdBuffer = struct {
         v: struct {
             pipeline: *GraphicsPipeline,
             desc_sets: []const vk.DescriptorSet,
-            indices: struct {
+            calls: struct {
+                buffer: vk.Buffer,
                 count: u32,
-                offset: u32,
-            },
-            vertices: struct {
-                count: u32,
-                offset: u32,
-            },
-            instances: struct {
-                count: u32,
-                offset: u32,
+                stride: u32,
+                offset: u32 = 0,
             },
         },
     ) void {
         for (self.bufs) |cmdbuf| {
             device.cmdBindPipeline(cmdbuf, .graphics, v.pipeline.pipeline);
-            const offsets = [_]u32{
-                v.vertices.offset,
-                v.indices.offset,
-                v.instances.offset,
-            };
+            const offsets = [_]u32{};
             device.cmdBindDescriptorSets(
                 cmdbuf,
                 .graphics,
@@ -1375,17 +1365,20 @@ pub const CmdBuffer = struct {
                 @intCast(offsets.len),
                 &offsets,
             );
-            device.cmdDraw(
+            device.cmdDrawIndirect(
                 cmdbuf,
-                v.indices.count,
-                v.instances.count,
-                0,
-                0,
+                v.calls.buffer,
+                v.calls.offset,
+                v.calls.count,
+                v.calls.stride,
             );
 
-            // very cool
-            // - [Vulkan/examples/indirectdraw/README.md](https://github.com/SaschaWillems/Vulkan/blob/master/examples/indirectdraw/README.md)
-            // device.cmdDrawIndirect(command_buffer: CommandBuffer, buffer: Buffer, offset: DeviceSize, draw_count: u32, stride: u32)
+            // TODO:
+            // - device.cmdDrawIndexedIndirectCount(command_buffer: CommandBuffer, buffer: Buffer, offset: DeviceSize, count_buffer: Buffer, count_buffer_offset: DeviceSize, max_draw_count: u32, stride: u32);
+            // - gpu culling.
+            //    - a buffer to store visibility. a compute shader stores 1 / 0 for visible/invisible instances.
+            //    - compute sum in a compute buffer using technique from eyeface
+            //    - use drawIndexedIndirectCount with 1 buffer, 2 offsets for count and draw call data.
         }
     }
 

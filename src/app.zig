@@ -879,6 +879,7 @@ pub const RendererState = struct {
         try model_desc_set_builder.add(&app.resources.asset_buffers.index_buffer, resources_mod.UniformBinds.indices.bind());
         try model_desc_set_builder.add(&app.resources.instances.instance_buffer.current.buffer, resources_mod.UniformBinds.instances.bind());
         try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer, resources_mod.UniformBinds.bones.bind());
+        try model_desc_set_builder.add(&app.resources.instances.draw_ctx_buffer.current.buffer, resources_mod.UniformBinds.call_ctxts.bind());
         try model_desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
         var model_desc_set = try model_desc_set_builder.build(device);
         errdefer model_desc_set.deinit(device);
@@ -1754,6 +1755,7 @@ pub const AppState = struct {
             try gen.add_uniform(ubo);
             try gen.add_struct("Vertex", resources_mod.Vertex);
             try gen.add_struct("Instance", resources_mod.Instance);
+            try gen.add_struct("DrawCtx", resources_mod.ResourceManager.InstanceResources.DrawCtx);
             try gen.add_bind_enum(resources_mod.UniformBinds);
             try gen.dump_shader("src/uniforms.glsl");
         }

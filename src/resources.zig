@@ -36,6 +36,7 @@ pub const UniformBinds = enum(u32) {
     indices,
     instances,
     bones,
+    call_ctxts,
     texture,
 
     pub fn bind(self: @This()) u32 {
@@ -79,9 +80,18 @@ pub const ResourceManager = struct {
         // (double buffered for reallocation)
         instance_buffer: DoubleBuffer,
         bone_buffer: DoubleBuffer,
+        draw_call_buffer: DoubleBuffer,
+        draw_ctx_buffer: DoubleBuffer,
 
         hash: u64 = 0,
 
+        const DrawCall = vk.DrawIndexedIndirectCommand;
+        pub const DrawCtx = extern struct {
+            first_vertex: u32,
+            first_index: u32,
+            first_instance: u32,
+            _pad: u32 = 0,
+        };
         const Instances = std.ArrayList(Instance);
         const Bones = std.ArrayList(math.Mat4x4);
         const Batch = struct {
@@ -114,6 +124,7 @@ pub const ResourceManager = struct {
         pub fn init(engine: *Engine, pool: vk.CommandPool, v: struct {
             instance_cap: u32 = 500,
             bone_cap: u32 = 1500,
+            call_cap: u32 = 50,
         }) !@This() {
             const ctx = &engine.graphics;
             const device = &ctx.device;
@@ -126,7 +137,6 @@ pub const ResourceManager = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
-                .desc_type = .storage_buffer_dynamic,
             }, std.mem.zeroes(Instance), pool);
             errdefer instance_buffer.deinit(device);
 
@@ -141,6 +151,28 @@ pub const ResourceManager = struct {
             }, std.mem.zeroes(math.Mat4x4), pool);
             errdefer bone_buffer.deinit(device);
 
+            var draw_call_buffer = try Buffer.new_initialized(ctx, .{
+                .size = v.call_cap,
+                .usage = .{ .indirect_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, std.mem.zeroes(DrawCall), pool);
+            errdefer draw_call_buffer.deinit(device);
+
+            var draw_ctx_buffer = try Buffer.new_initialized(ctx, .{
+                .size = v.bone_cap,
+                .usage = .{ .storage_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, std.mem.zeroes(DrawCtx), pool);
+            errdefer draw_ctx_buffer.deinit(device);
+
             return .{
                 .bones = .init(allocator.*),
                 .batches = .init(allocator.*),
@@ -151,6 +183,14 @@ pub const ResourceManager = struct {
                 .bone_buffer = .{ .current = .{
                     .buffer = bone_buffer,
                     .capacity = v.bone_cap,
+                } },
+                .draw_call_buffer = .{ .current = .{
+                    .buffer = draw_call_buffer,
+                    .capacity = v.call_cap,
+                } },
+                .draw_ctx_buffer = .{ .current = .{
+                    .buffer = draw_ctx_buffer,
+                    .capacity = v.call_cap,
                 } },
             };
         }
@@ -177,6 +217,18 @@ pub const ResourceManager = struct {
                 buf.current.buffer.deinit(device);
                 if (buf.back) |*back| back.buffer.deinit(device);
             }
+
+            {
+                const buf = &self.draw_call_buffer;
+                buf.current.buffer.deinit(device);
+                if (buf.back) |*back| back.buffer.deinit(device);
+            }
+
+            {
+                const buf = &self.draw_ctx_buffer;
+                buf.current.buffer.deinit(device);
+                if (buf.back) |*back| back.buffer.deinit(device);
+            }
         }
 
         pub fn reset(self: *@This()) void {
@@ -190,6 +242,8 @@ pub const ResourceManager = struct {
 
             self.instance_buffer.count = 0;
             self.bone_buffer.count = 0;
+            self.draw_call_buffer.count = 0;
+            self.draw_ctx_buffer.count = 0;
         }
 
         fn did_change(self: *@This()) bool {
@@ -197,9 +251,9 @@ pub const ResourceManager = struct {
             var batches = self.batches.iterator();
             while (batches.next()) |batch| {
                 hasher.update(std.mem.asBytes(batch.key_ptr));
-                hasher.update(std.mem.asBytes(&batch.value_ptr.first_draw));
-                hasher.update(std.mem.asBytes(&batch.value_ptr.can_draw));
             }
+            hasher.update(std.mem.asBytes(&self.draw_call_buffer.count));
+            hasher.update(std.mem.asBytes(&self.draw_ctx_buffer.count));
             const hash = hasher.final();
             defer self.hash = hash;
             return self.hash != hash;
@@ -241,7 +295,6 @@ pub const ResourceManager = struct {
                                 .host_visible_bit = true,
                                 .host_coherent_bit = true,
                             },
-                            .desc_type = .storage_buffer_dynamic,
                         }, std.mem.zeroes(Instance), pool);
                         errdefer instance_buffer.deinit(device);
 
@@ -271,6 +324,62 @@ pub const ResourceManager = struct {
                                 .host_coherent_bit = true,
                             },
                         }, std.mem.zeroes(math.Mat4x4), pool);
+                        errdefer bone_buffer.deinit(device);
+
+                        buf.back = .{
+                            .buffer = bone_buffer,
+                            .capacity = new_bone_cap,
+                        };
+                        buf.state = .back_allocated;
+                    },
+                }
+            }
+
+            {
+                const buf = &self.draw_call_buffer;
+
+                switch (buf.state) {
+                    .enough, .back_allocated => {},
+                    .out_of_objects => {
+                        const bone_cap = buf.current.capacity;
+                        const new_bone_cap = bone_cap + bone_cap / 2;
+                        var bone_buffer = try Buffer.new_initialized(ctx, .{
+                            .size = new_bone_cap,
+                            .usage = .{ .indirect_buffer_bit = true },
+                            .memory_type = .{
+                                .device_local_bit = true,
+                                .host_visible_bit = true,
+                                .host_coherent_bit = true,
+                            },
+                        }, std.mem.zeroes(DrawCall), pool);
+                        errdefer bone_buffer.deinit(device);
+
+                        buf.back = .{
+                            .buffer = bone_buffer,
+                            .capacity = new_bone_cap,
+                        };
+                        buf.state = .back_allocated;
+                    },
+                }
+            }
+
+            {
+                const buf = &self.bone_buffer;
+
+                switch (buf.state) {
+                    .enough, .back_allocated => {},
+                    .out_of_objects => {
+                        const bone_cap = buf.current.capacity;
+                        const new_bone_cap = bone_cap + bone_cap / 2;
+                        var bone_buffer = try Buffer.new_initialized(ctx, .{
+                            .size = new_bone_cap,
+                            .usage = .{ .storage_buffer_bit = true },
+                            .memory_type = .{
+                                .device_local_bit = true,
+                                .host_visible_bit = true,
+                                .host_coherent_bit = true,
+                            },
+                        }, std.mem.zeroes(DrawCtx), pool);
                         errdefer bone_buffer.deinit(device);
 
                         buf.back = .{
@@ -316,6 +425,36 @@ pub const ResourceManager = struct {
                     },
                 }
             }
+            {
+                const buf = &self.draw_call_buffer;
+
+                switch (buf.state) {
+                    .enough, .out_of_objects => {},
+                    .back_allocated => {
+                        // this is okay cuz we have an empty queue every frame
+                        buf.current.buffer.deinit(device);
+                        buf.current = buf.back.?;
+                        buf.back = null;
+                        buf.state = .enough;
+                        did_swap = true;
+                    },
+                }
+            }
+            {
+                const buf = &self.draw_ctx_buffer;
+
+                switch (buf.state) {
+                    .enough, .out_of_objects => {},
+                    .back_allocated => {
+                        // this is okay cuz we have an empty queue every frame
+                        buf.current.buffer.deinit(device);
+                        buf.current = buf.back.?;
+                        buf.back = null;
+                        buf.state = .enough;
+                        did_swap = true;
+                    },
+                }
+            }
             return did_swap;
         }
 
@@ -328,6 +467,8 @@ pub const ResourceManager = struct {
 
             try self.update_instances(&ctx.device);
             try self.update_bones(&ctx.device);
+            try self.update_draw_calls(&ctx.device);
+            try self.update_draw_ctxts(&ctx.device);
 
             const changed = self.did_change();
 
@@ -376,6 +517,58 @@ pub const ResourceManager = struct {
             }
         }
 
+        fn update_draw_calls(self: *@This(), device: *Device) !void {
+            const buf = &self.draw_call_buffer;
+            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(buf.current.buffer.memory);
+
+            const gpu_items: [*]DrawCall = @ptrCast(@alignCast(data));
+
+            var batches = self.batches.iterator();
+            while (batches.next()) |batch| {
+                if (buf.count >= buf.current.capacity) {
+                    if (buf.state == .enough) {
+                        buf.state = .out_of_objects;
+                    }
+                    break;
+                }
+
+                gpu_items[buf.count] = .{
+                    .index_count = batch.key_ptr.regions.index.count,
+                    .instance_count = @intCast(batch.value_ptr.instances.items.len),
+                    .first_index = 0,
+                    .vertex_offset = 0,
+                    .first_instance = 0,
+                };
+                buf.count += 1;
+            }
+        }
+
+        fn update_draw_ctxts(self: *@This(), device: *Device) !void {
+            const buf = &self.draw_ctx_buffer;
+            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(buf.current.buffer.memory);
+
+            const gpu_items: [*]DrawCtx = @ptrCast(@alignCast(data));
+
+            var batches = self.batches.iterator();
+            while (batches.next()) |batch| {
+                if (buf.count >= buf.current.capacity) {
+                    if (buf.state == .enough) {
+                        buf.state = .out_of_objects;
+                    }
+                    break;
+                }
+
+                gpu_items[buf.count] = .{
+                    .first_vertex = batch.key_ptr.regions.vertex.first,
+                    .first_index = batch.key_ptr.regions.index.first,
+                    .first_instance = batch.value_ptr.first_draw,
+                };
+                buf.count += 1;
+            }
+        }
+
         pub fn draw(
             self: *const @This(),
             pipeline: *GraphicsPipeline,
@@ -385,34 +578,16 @@ pub const ResourceManager = struct {
             resources: *ResourceManager.AssetBuffers,
         ) void {
             _ = resources;
-            var batches = self.batches.iterator();
-            while (batches.next()) |batch| {
-                const regions = batch.key_ptr.regions;
 
-                if (batch.value_ptr.can_draw == 0) {
-                    continue;
-                }
-
-                // these `offsets` are for each dynamic descriptor.
-                // basically - you bind a buffer of objects in the desc set, and just tell
-                // it what offset you want for that data here.
-                cmdbuf.draw(device, .{
-                    .pipeline = pipeline,
-                    .desc_sets = desc_sets,
-                    .vertices = .{
-                        .count = regions.vertex.count,
-                        .offset = regions.vertex.offset,
-                    },
-                    .indices = .{
-                        .count = regions.index.count,
-                        .offset = regions.index.offset,
-                    },
-                    .instances = .{
-                        .count = batch.value_ptr.can_draw,
-                        .offset = batch.value_ptr.first_draw * @sizeOf(@TypeOf(batch.value_ptr.instances.items[0])),
-                    },
-                });
-            }
+            cmdbuf.draw(device, .{
+                .pipeline = pipeline,
+                .desc_sets = desc_sets,
+                .calls = .{
+                    .buffer = self.draw_call_buffer.current.buffer.buffer,
+                    .count = self.draw_call_buffer.count,
+                    .stride = @sizeOf(DrawCall),
+                },
+            });
         }
     };
 
@@ -425,7 +600,7 @@ pub const ResourceManager = struct {
             vertex: Region,
         };
         const Region = struct {
-            offset: u32,
+            first: u32,
             count: u32,
         };
     };
@@ -453,6 +628,7 @@ pub const ResourceManager = struct {
     pub const Assets = struct {
         vertices: Vertices,
         triangles: Triangles,
+        mesh_info: MeshInfo,
         armatures: Armatures,
         audio: AudioSamples,
         meshes: Meshes,
@@ -461,6 +637,7 @@ pub const ResourceManager = struct {
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
+        const MeshInfo = std.ArrayList(MeshHandle);
         const Armatures = std.ArrayList(assets_mod.Armature);
         const AudioSamples = std.ArrayList(assets_mod.Wav);
         const Meshes = std.ArrayList(assets_mod.Mesh);
@@ -485,6 +662,7 @@ pub const ResourceManager = struct {
             return .{
                 .vertices = .init(allocator.*),
                 .triangles = .init(allocator.*),
+                .mesh_info = .init(allocator.*),
                 .armatures = .init(allocator.*),
                 .audio = .init(allocator.*),
                 .meshes = .init(allocator.*),
@@ -496,6 +674,7 @@ pub const ResourceManager = struct {
         pub fn deinit(self: *@This()) void {
             self.vertices.deinit();
             self.triangles.deinit();
+            self.mesh_info.deinit();
             self.armatures.deinit();
 
             for (self.audio.items) |*t| {
@@ -557,7 +736,9 @@ pub const ResourceManager = struct {
                     const regions = try self.add_mesh(&asset);
                     const handle = self.meshes.items.len;
                     try self.meshes.append(asset);
-                    return .{ .index = @intCast(handle), .regions = regions };
+                    const mesh_handle = MeshHandle{ .index = @intCast(handle), .regions = regions };
+                    try self.mesh_info.append(mesh_handle);
+                    return mesh_handle;
                 },
                 assets_mod.Gltf => {
                     const data = try self.add_gltf(asset);
@@ -624,11 +805,11 @@ pub const ResourceManager = struct {
         fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshHandle.Regions {
             const handle = MeshHandle.Regions{
                 .index = .{
-                    .offset = @intCast(self.triangles.items.len * 3 * @sizeOf(u32)),
+                    .first = @intCast(self.triangles.items.len * 3),
                     .count = @intCast(m.faces.len * 3),
                 },
                 .vertex = .{
-                    .offset = @intCast(self.vertices.items.len * @sizeOf(Vertex)),
+                    .first = @intCast(self.vertices.items.len),
                     .count = @intCast(m.vertices.len),
                 },
             };
@@ -671,12 +852,12 @@ pub const ResourceManager = struct {
 
             var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
                 .storage_buffer_bit = true,
-            }, .desc_type = .storage_buffer_dynamic }, cpu.vertices.items, pool);
+            } }, cpu.vertices.items, pool);
             errdefer vertex_buffer.deinit(device);
 
             var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
                 .storage_buffer_bit = true,
-            }, .desc_type = .storage_buffer_dynamic }, cpu.triangles.items, pool);
+            } }, cpu.triangles.items, pool);
             errdefer index_buffer.deinit(device);
 
             return .{
