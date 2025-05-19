@@ -19,113 +19,22 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 pub const Vertex = extern struct {
-    pub const binding_description = [_]vk.VertexInputBindingDescription{.{
-        .binding = VertexBinds.vertex.bind(),
-        .stride = @sizeOf(Vertex),
-
-        // new data per vertex
-        .input_rate = .vertex,
-    }};
-
-    pub const attribute_description = [_]vk.VertexInputAttributeDescription{
-        .{
-            .binding = VertexBinds.vertex.bind(),
-            .location = VertexInputLocations.vertex_position.bind(),
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "pos"),
-        },
-        .{
-            .binding = VertexBinds.vertex.bind(),
-            .location = VertexInputLocations.normal.bind(),
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "normal"),
-        },
-        .{
-            .binding = VertexBinds.vertex.bind(),
-            .location = VertexInputLocations.uv.bind(),
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "uv"),
-        },
-        .{
-            .binding = VertexBinds.vertex.bind(),
-            .location = VertexInputLocations.bone_ids.bind(),
-            .format = .r32g32b32a32_uint,
-            .offset = @offsetOf(Vertex, "bone_ids"),
-        },
-        .{
-            .binding = VertexBinds.vertex.bind(),
-            .location = VertexInputLocations.bone_weights.bind(),
-            .format = .r32g32b32a32_sfloat,
-            .offset = @offsetOf(Vertex, "bone_weights"),
-        },
-    };
-
-    pos: [4]f32,
-    normal: [4]f32,
-    uv: [4]f32,
+    pos: math.Vec3,
+    normal: math.Vec3,
+    uv: math.Vec4, // vec2
     bone_ids: [4]u32,
     bone_weights: [4]f32,
-
-    pub fn from_slices(vertices: [][3]f32, normals: [][3]f32, uvs: [][2]f32) ![]@This() {
-        const buf = try allocator.alloc(@This(), vertices.len);
-        errdefer allocator.free(buf);
-
-        for (vertices, normals, uvs, 0..) |v, n, uv, i| {
-            buf[i].pos = [4]f32{ v[0], v[1], v[2], 0 };
-            buf[i].normal = [4]f32{ n[0], n[1], n[2], 0 };
-            buf[i].uv = [4]f32{ uv[0], uv[1], 0, 0 };
-        }
-
-        return buf;
-    }
 };
 
 pub const Instance = extern struct {
-    pub const binding_desc = [_]vk.VertexInputBindingDescription{.{
-        .binding = VertexBinds.instance.bind(),
-        .stride = @sizeOf(Instance),
-
-        // new data per instance
-        .input_rate = .instance,
-    }};
-    pub const attribute_desc = [_]vk.VertexInputAttributeDescription{
-        .{
-            .binding = VertexBinds.instance.bind(),
-            .location = VertexInputLocations.instance_bone_offset.bind(),
-            .format = .r32_uint,
-            .offset = @offsetOf(Instance, "bone_offset"),
-        },
-    };
-
     bone_offset: u32,
-};
-
-pub const VertexBinds = enum(u32) {
-    vertex,
-    instance,
-
-    pub fn bind(self: @This()) u32 {
-        return @intFromEnum(self);
-    }
-};
-
-// so input locations are just numbers but you still have to reserve them if you want to store more than 4 floats worth of data? tf?
-pub const VertexInputLocations = enum(u32) {
-    instance_bone_offset,
-    vertex_position,
-    normal,
-    uv,
-    bone_ids,
-    bone_weights,
-
-    pub fn bind(self: @This()) u32 {
-        return @intFromEnum(self);
-    }
 };
 
 pub const UniformBinds = enum(u32) {
     camera,
-    instanced,
+    vertices,
+    indices,
+    instances,
     bones,
     texture,
 
@@ -211,12 +120,13 @@ pub const ResourceManager = struct {
 
             var instance_buffer = try Buffer.new_initialized(ctx, .{
                 .size = v.instance_cap,
-                .usage = .{ .vertex_buffer_bit = true },
+                .usage = .{ .storage_buffer_bit = true },
                 .memory_type = .{
                     .device_local_bit = true,
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
+                .desc_type = .storage_buffer_dynamic,
             }, std.mem.zeroes(Instance), pool);
             errdefer instance_buffer.deinit(device);
 
@@ -325,12 +235,13 @@ pub const ResourceManager = struct {
                         const new_instance_cap = instance_cap + instance_cap / 2;
                         var instance_buffer = try Buffer.new_initialized(ctx, .{
                             .size = new_instance_cap,
-                            .usage = .{ .vertex_buffer_bit = true },
+                            .usage = .{ .storage_buffer_bit = true },
                             .memory_type = .{
                                 .device_local_bit = true,
                                 .host_visible_bit = true,
                                 .host_coherent_bit = true,
                             },
+                            .desc_type = .storage_buffer_dynamic,
                         }, std.mem.zeroes(Instance), pool);
                         errdefer instance_buffer.deinit(device);
 
@@ -469,11 +380,11 @@ pub const ResourceManager = struct {
             self: *const @This(),
             pipeline: *GraphicsPipeline,
             desc_sets: []const vk.DescriptorSet,
-            offsets: []const u32,
             cmdbuf: *CmdBuffer,
             device: *Device,
             resources: *ResourceManager.AssetBuffers,
         ) void {
+            _ = resources;
             var batches = self.batches.iterator();
             while (batches.next()) |batch| {
                 const regions = batch.key_ptr.regions;
@@ -488,21 +399,17 @@ pub const ResourceManager = struct {
                 cmdbuf.draw(device, .{
                     .pipeline = pipeline,
                     .desc_sets = desc_sets,
-                    .dynamic_offsets = offsets,
                     .vertices = .{
-                        .buffer = resources.vertex_buffer.buffer,
                         .count = regions.vertex.count,
-                        .first = regions.vertex.first,
+                        .offset = regions.vertex.offset,
                     },
                     .indices = .{
-                        .buffer = resources.index_buffer.buffer,
                         .count = regions.index.count,
-                        .first = regions.index.first,
+                        .offset = regions.index.offset,
                     },
                     .instances = .{
-                        .buffer = self.instance_buffer.current.buffer.buffer,
                         .count = batch.value_ptr.can_draw,
-                        .first = batch.value_ptr.first_draw,
+                        .offset = batch.value_ptr.first_draw * @sizeOf(@TypeOf(batch.value_ptr.instances.items[0])),
                     },
                 });
             }
@@ -518,7 +425,7 @@ pub const ResourceManager = struct {
             vertex: Region,
         };
         const Region = struct {
-            first: u32,
+            offset: u32,
             count: u32,
         };
     };
@@ -717,20 +624,20 @@ pub const ResourceManager = struct {
         fn add_mesh(self: *@This(), m: *const assets_mod.Mesh) !MeshHandle.Regions {
             const handle = MeshHandle.Regions{
                 .index = .{
-                    .first = @intCast(self.triangles.items.len * 3),
+                    .offset = @intCast(self.triangles.items.len * 3 * @sizeOf(u32)),
                     .count = @intCast(m.faces.len * 3),
                 },
                 .vertex = .{
-                    .first = @intCast(self.vertices.items.len),
+                    .offset = @intCast(self.vertices.items.len * @sizeOf(Vertex)),
                     .count = @intCast(m.vertices.len),
                 },
             };
 
             for (m.vertices, m.normals, m.uvs, 0..) |v, n, uv, j| {
                 var vertex = std.mem.zeroes(Vertex);
-                vertex.pos = [4]f32{ v[0], v[1], v[2], 0 };
-                vertex.normal = [4]f32{ n[0], n[1], n[2], 0 };
-                vertex.uv = [4]f32{ uv[0], uv[1], 0, 0 };
+                vertex.pos = math.Vec3.from_buf(v);
+                vertex.normal = math.Vec3.from_buf(n);
+                vertex.uv = .{ .x = uv[0], .y = uv[1] };
 
                 const zero_bones = [1]assets_mod.VertexBone{
                     .{ .bone = 0, .weight = 1 },
@@ -763,13 +670,13 @@ pub const ResourceManager = struct {
             const device = &ctx.device;
 
             var vertex_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-                .vertex_buffer_bit = true,
-            } }, cpu.vertices.items, pool);
+                .storage_buffer_bit = true,
+            }, .desc_type = .storage_buffer_dynamic }, cpu.vertices.items, pool);
             errdefer vertex_buffer.deinit(device);
 
             var index_buffer = try Buffer.new_from_slice(ctx, .{ .usage = .{
-                .index_buffer_bit = true,
-            } }, cpu.triangles.items, pool);
+                .storage_buffer_bit = true,
+            }, .desc_type = .storage_buffer_dynamic }, cpu.triangles.items, pool);
             errdefer index_buffer.deinit(device);
 
             return .{

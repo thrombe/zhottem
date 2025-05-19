@@ -35,18 +35,22 @@
      int monitor_height;
  };
 
+ struct Vertex {
+     vec3 pos;
+     vec3 normal;
+     vec4 uv;
+     uint bone_ids[4];
+     float bone_weights[4];
+ };
+
+ struct Instance {
+     uint bone_offset;
+ };
+
  const int _bind_camera = 0;
- const int _bind_instanced = 1;
- const int _bind_bones = 2;
- const int _bind_texture = 3;
-
- const int _bind_vertex = 0;
- const int _bind_instance = 1;
-
- const int _bind_instance_bone_offset = 0;
- const int _bind_vertex_position = 1;
- const int _bind_normal = 2;
- const int _bind_uv = 3;
- const int _bind_bone_ids = 4;
- const int _bind_bone_weights = 5;
+ const int _bind_vertices = 1;
+ const int _bind_indices = 2;
+ const int _bind_instances = 3;
+ const int _bind_bones = 4;
+ const int _bind_texture = 5;
 

@@ -60,7 +60,6 @@ pub const App = @This();
 world: World,
 
 uniforms: UniformBuffer,
-model_uniforms: ModelUniformBuffer,
 screen_image: Image,
 depth_image: Image,
 resources: ResourceManager,
@@ -295,9 +294,6 @@ const AudioRecorder = Engine.Audio.Stream(.input, struct {
     }
 });
 
-var matrices = std.mem.zeroes([2]math.Mat4x4);
-const ModelUniformBuffer = DynamicUniformBuffer(math.Mat4x4);
-
 pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var ctx = &engine.graphics;
     const device = &ctx.device;
@@ -309,12 +305,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         },
     }, null);
     errdefer device.destroyCommandPool(cmd_pool, null);
-
-    var model_uniform = try ModelUniformBuffer.new(&matrices, ctx);
-    errdefer model_uniform.deinit(device);
-    model_uniform.uniform_buffer[0] = math.Mat4x4.scaling_mat(math.Vec3.splat(0.3)).mul_mat(math.Mat4x4.translation_mat(.{ .x = 1.5 }));
-    model_uniform.uniform_buffer[1] = math.Mat4x4.scaling_mat(math.Vec3.splat(0.5)).mul_mat(math.Mat4x4.translation_mat(.{ .y = 3 }));
-    try model_uniform.upload(device);
 
     var screen = try Image.new(ctx, cmd_pool, .{
         .img_type = .@"2d",
@@ -664,7 +654,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     return @This(){
         .world = world,
         .uniforms = uniforms,
-        .model_uniforms = model_uniform,
         .screen_image = screen,
         .depth_image = depth,
         .resources = resources,
@@ -691,7 +680,6 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer device.destroyCommandPool(self.command_pool, null);
     defer self.world.deinit();
     defer self.uniforms.deinit(device);
-    defer self.model_uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
     defer self.resources.deinit(device);
@@ -887,19 +875,18 @@ pub const RendererState = struct {
 
         var model_desc_set_builder = app.descriptor_pool.set_builder();
         defer model_desc_set_builder.deinit();
-        try model_desc_set_builder.add(&app.model_uniforms, resources_mod.UniformBinds.instanced.bind());
-        try model_desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
+        try model_desc_set_builder.add(&app.resources.asset_buffers.vertex_buffer, resources_mod.UniformBinds.vertices.bind());
+        try model_desc_set_builder.add(&app.resources.asset_buffers.index_buffer, resources_mod.UniformBinds.indices.bind());
+        try model_desc_set_builder.add(&app.resources.instances.instance_buffer.current.buffer, resources_mod.UniformBinds.instances.bind());
         try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer, resources_mod.UniformBinds.bones.bind());
+        try model_desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
         var model_desc_set = try model_desc_set_builder.build(device);
         errdefer model_desc_set.deinit(device);
 
         var pipeline = try GraphicsPipeline.new(device, .{
             .vert = app.stages.shaders.map.get(.vert).code,
             .frag = app.stages.shaders.map.get(.frag).code,
-            .vertex_info = .{
-                .binding_desc = &(resources_mod.Vertex.binding_description ++ resources_mod.Instance.binding_desc),
-                .attr_desc = &(resources_mod.Vertex.attribute_description ++ resources_mod.Instance.attribute_desc),
-            },
+            .vertex_info = .{},
             .dynamic_info = .{
                 .image_format = app.screen_image.format,
                 .depth_format = app.depth_image.format,
@@ -914,10 +901,7 @@ pub const RendererState = struct {
         var bg_pipeline = try GraphicsPipeline.new(device, .{
             .vert = app.stages.shaders.map.get(.bg_vert).code,
             .frag = app.stages.shaders.map.get(.bg_frag).code,
-            .vertex_info = .{
-                .binding_desc = &[_]vk.VertexInputBindingDescription{},
-                .attr_desc = &[_]vk.VertexInputAttributeDescription{},
-            },
+            .vertex_info = .{},
             .dynamic_info = .{
                 .image_format = app.screen_image.format,
                 .depth_format = app.depth_image.format,
@@ -959,34 +943,29 @@ pub const RendererState = struct {
                 self.camera_descriptor_set.set,
                 self.model_descriptor_set.set,
             },
-            &[_]u32{0},
             &cmdbuf,
             device,
             &app.resources.asset_buffers,
         );
 
-        cmdbuf.draw(device, .{
-            .pipeline = &self.bg_pipeline,
-            .desc_sets = &[_]vk.DescriptorSet{
-                self.camera_descriptor_set.set,
-            },
-            .dynamic_offsets = &[_]u32{},
-            .vertices = .{
-                .buffer = null,
-                .count = 6,
-                .first = 0,
-            },
-            .indices = .{
-                .buffer = null,
-                .count = undefined,
-                .first = undefined,
-            },
-            .instances = .{
-                .buffer = null,
-                .count = 1,
-                .first = 0,
-            },
-        });
+        // cmdbuf.draw(device, .{
+        //     .pipeline = &self.bg_pipeline,
+        //     .desc_sets = &[_]vk.DescriptorSet{
+        //         self.camera_descriptor_set.set,
+        //     },
+        //     .vertices = .{
+        //         .count = 6,
+        //         .offset = 0,
+        //     },
+        //     .indices = .{
+        //         .count = undefined,
+        //         .offset = undefined,
+        //     },
+        //     .instances = .{
+        //         .count = 1,
+        //         .offset = 0,
+        //     },
+        // });
 
         cmdbuf.dynamic_render_end(device);
         cmdbuf.drawIntoSwapchain(device, .{
@@ -1773,9 +1752,9 @@ pub const AppState = struct {
             defer gen.deinit();
 
             try gen.add_uniform(ubo);
+            try gen.add_struct("Vertex", resources_mod.Vertex);
+            try gen.add_struct("Instance", resources_mod.Instance);
             try gen.add_bind_enum(resources_mod.UniformBinds);
-            try gen.add_bind_enum(resources_mod.VertexBinds);
-            try gen.add_bind_enum(resources_mod.VertexInputLocations);
             try gen.dump_shader("src/uniforms.glsl");
         }
 

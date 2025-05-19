@@ -16,31 +16,35 @@ void set_seed(int id) {
 }
 
 #ifdef VERT_PASS
-    layout(set = 1, binding = _bind_instanced) uniform UboModel {
-        mat4 model_mat;
+    // apprently restrict + readonly / writeonly helps shader optimizer.
+    // here it won't do anything here either way (vert shaders can't write)
+    layout(set = 1, binding = _bind_vertices) readonly restrict buffer VertexBuffer {
+        Vertex vertices[];
     };
-    layout(set = 1, binding = _bind_bones) readonly buffer BoneBuffer {
+    layout(set = 1, binding = _bind_indices) readonly restrict buffer IndexBuffer {
+        uint indices[];
+    };
+    layout(set = 1, binding = _bind_instances) readonly restrict buffer InstanceBuffer {
+        Instance instances[];
+    };
+    layout(set = 1, binding = _bind_bones) readonly restrict buffer BoneBuffer {
         mat4 bones[];
     };
-
-    layout(location = _bind_vertex_position) in vec3 vpos;
-    layout(location = _bind_normal) in vec3 vnormal;
-    layout(location = _bind_uv) in vec2 uv;
-    layout(location = _bind_bone_ids) in uvec4 bone_ids;
-    layout(location = _bind_bone_weights) in vec4 bone_weights;
-    layout(location = _bind_instance_bone_offset) in uint bone_offset;
 
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
     layout(location = 2) out vec2 ouv;
     layout(location = 3) out float light;
     void main() {
-        vec4 pos = vec4(vpos, 1.0);
+        Instance inst = instances[gl_InstanceIndex];
+        Vertex v = vertices[indices[gl_VertexIndex]];
+
+        vec4 pos = vec4(v.pos, 1.0);
         mat4 itransform = mat4(0.0);
         for (int i=0;i<4;i++) {
-            itransform += bones[bone_offset + bone_ids[i]] * bone_weights[i];
+            itransform += bones[inst.bone_offset + v.bone_ids[i]] * v.bone_weights[i];
         }
-        vec4 normal = itransform * vec4(vnormal, 0.0);
+        vec4 normal = itransform * vec4(v.normal, 0.0);
         normal = normalize(normal);
         vec4 light_dir = vec4(1.0, 1.0, 1.0, 0.0);
         light_dir = normalize(light_dir);
@@ -48,7 +52,7 @@ void set_seed(int id) {
         pos = ubo.world_to_screen * itransform * pos;
         opos = pos.xyz;
         onormal = normal.xyz;
-        ouv = uv;
+        ouv = v.uv.xy;
         gl_Position = pos;
         light = dot(normal.xyz, light_dir.xyz);
     }

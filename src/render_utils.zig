@@ -180,8 +180,8 @@ pub const GraphicsPipeline = struct {
         vert: []u32,
         frag: []u32,
         vertex_info: struct {
-            binding_desc: []const vk.VertexInputBindingDescription,
-            attr_desc: []const vk.VertexInputAttributeDescription,
+            binding_desc: []const vk.VertexInputBindingDescription = &.{},
+            attr_desc: []const vk.VertexInputAttributeDescription = &.{},
         },
         dynamic_info: ?struct {
             image_format: vk.Format,
@@ -966,11 +966,13 @@ pub const Buffer = struct {
     buffer: vk.Buffer,
     memory: vk.DeviceMemory,
     dbi: vk.DescriptorBufferInfo,
+    desc_type: vk.DescriptorType,
 
     const Args = struct {
         size: u64,
         usage: vk.BufferUsageFlags = .{},
         memory_type: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
+        desc_type: vk.DescriptorType = .storage_buffer,
     };
 
     pub fn new_initialized(ctx: *Engine.VulkanContext, v: Args, val: anytype, pool: vk.CommandPool) !@This() {
@@ -982,6 +984,7 @@ pub const Buffer = struct {
                 .size = size,
                 .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
                 .memory_type = v.memory_type,
+                .desc_type = v.desc_type,
             },
         );
 
@@ -1015,6 +1018,7 @@ pub const Buffer = struct {
     pub fn new_from_slice(ctx: *Engine.VulkanContext, v: struct {
         usage: vk.BufferUsageFlags = .{},
         memory_type: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
+        desc_type: vk.DescriptorType = .storage_buffer,
     }, slice: anytype, pool: vk.CommandPool) !@This() {
         const S = @TypeOf(slice);
         const E = std.meta.Elem(S);
@@ -1026,6 +1030,7 @@ pub const Buffer = struct {
                 .size = @intCast(size),
                 .usage = v.usage.merge(.{ .transfer_dst_bit = true }),
                 .memory_type = v.memory_type,
+                .desc_type = v.desc_type,
             },
         );
 
@@ -1079,6 +1084,7 @@ pub const Buffer = struct {
                 .offset = 0,
                 .range = vk.WHOLE_SIZE,
             },
+            .desc_type = v.desc_type,
         };
     }
 
@@ -1087,11 +1093,11 @@ pub const Buffer = struct {
         device.freeMemory(self.memory, null);
     }
 
-    pub fn layout_binding(_: *@This(), binding: u32) [1]vk.DescriptorSetLayoutBinding {
+    pub fn layout_binding(self: *@This(), binding: u32) [1]vk.DescriptorSetLayoutBinding {
         return [_]vk.DescriptorSetLayoutBinding{.{
             .binding = binding,
 
-            .descriptor_type = .storage_buffer,
+            .descriptor_type = self.desc_type,
             .descriptor_count = 1,
             .stage_flags = .{
                 .vertex_bit = true,
@@ -1108,7 +1114,7 @@ pub const Buffer = struct {
 
             .dst_array_element = 0,
             .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
+            .descriptor_type = self.desc_type,
             .p_buffer_info = @ptrCast(&self.dbi),
             // OOF: ??
             .p_image_info = undefined,
@@ -1338,26 +1344,27 @@ pub const CmdBuffer = struct {
         v: struct {
             pipeline: *GraphicsPipeline,
             desc_sets: []const vk.DescriptorSet,
-            dynamic_offsets: []const u32,
             indices: struct {
-                buffer: ?vk.Buffer,
                 count: u32,
-                first: u32,
+                offset: u32,
             },
             vertices: struct {
-                buffer: ?vk.Buffer,
                 count: u32,
-                first: u32,
+                offset: u32,
             },
             instances: struct {
-                buffer: ?vk.Buffer,
                 count: u32,
-                first: u32,
+                offset: u32,
             },
         },
     ) void {
         for (self.bufs) |cmdbuf| {
             device.cmdBindPipeline(cmdbuf, .graphics, v.pipeline.pipeline);
+            const offsets = [_]u32{
+                v.vertices.offset,
+                v.indices.offset,
+                v.instances.offset,
+            };
             device.cmdBindDescriptorSets(
                 cmdbuf,
                 .graphics,
@@ -1365,40 +1372,16 @@ pub const CmdBuffer = struct {
                 0,
                 @intCast(v.desc_sets.len),
                 v.desc_sets.ptr,
-                @intCast(v.dynamic_offsets.len),
-                v.dynamic_offsets.ptr,
+                @intCast(offsets.len),
+                &offsets,
             );
-            if (v.vertices.buffer) |*vb| {
-                device.cmdBindVertexBuffers(
-                    cmdbuf,
-                    0,
-                    1,
-                    @ptrCast(vb),
-                    &[_]vk.DeviceSize{0},
-                );
-            }
-            if (v.instances.buffer) |*ib| {
-                device.cmdBindVertexBuffers(
-                    cmdbuf,
-                    1,
-                    1,
-                    @ptrCast(ib),
-                    &[_]vk.DeviceSize{0},
-                );
-            }
-            if (v.indices.buffer) |ib| {
-                device.cmdBindIndexBuffer(cmdbuf, ib, 0, .uint32);
-                device.cmdDrawIndexed(
-                    cmdbuf,
-                    v.indices.count,
-                    v.instances.count,
-                    v.indices.first,
-                    @intCast(v.vertices.first),
-                    v.instances.first,
-                );
-            } else {
-                device.cmdDraw(cmdbuf, v.vertices.count, v.instances.count, v.vertices.first, 0);
-            }
+            device.cmdDraw(
+                cmdbuf,
+                v.indices.count,
+                v.instances.count,
+                0,
+                0,
+            );
 
             // very cool
             // - [Vulkan/examples/indirectdraw/README.md](https://github.com/SaschaWillems/Vulkan/blob/master/examples/indirectdraw/README.md)
