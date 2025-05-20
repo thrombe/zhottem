@@ -2186,7 +2186,10 @@ pub fn dump_image_to_file(
 
     const path = try utils.fspath.cwd_join(allocator.*, _path);
     defer allocator.free(path);
-    try std.fs.makeDirAbsolute(path);
+    std.fs.makeDirAbsolute(path) catch |e| switch (e) {
+        error.PathAlreadyExists => {},
+        else => return e,
+    };
 
     const joined_path = try std.fs.path.join(allocator.*, &[_][]const u8{ path, filename });
     defer allocator.free(joined_path);
