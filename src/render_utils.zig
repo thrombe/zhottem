@@ -182,7 +182,7 @@ pub const GraphicsPipeline = struct {
         vertex_info: struct {
             binding_desc: []const vk.VertexInputBindingDescription = &.{},
             attr_desc: []const vk.VertexInputAttributeDescription = &.{},
-        },
+        } = .{},
         dynamic_info: ?struct {
             image_format: vk.Format,
             depth_format: vk.Format,
@@ -1338,7 +1338,7 @@ pub const CmdBuffer = struct {
         }
     }
 
-    pub fn draw(
+    pub fn draw_indirect(
         self: *@This(),
         device: *Device,
         v: struct {
@@ -1392,7 +1392,7 @@ pub const CmdBuffer = struct {
         }
     }
 
-    pub fn transitionImg(self: *@This(), device: *Device, v: struct {
+    pub fn transition_img(self: *@This(), device: *Device, v: struct {
         image: vk.Image,
         layout: vk.ImageLayout,
         new_layout: vk.ImageLayout,
@@ -1404,7 +1404,7 @@ pub const CmdBuffer = struct {
         }
     }
 
-    pub fn transitionSwapchain(self: *@This(), device: *Device, v: struct {
+    pub fn transition_swapchain(self: *@This(), device: *Device, v: struct {
         layout: vk.ImageLayout,
         new_layout: vk.ImageLayout,
         queue_family_index: u32,
@@ -1415,7 +1415,7 @@ pub const CmdBuffer = struct {
         }
     }
 
-    pub fn blitIntoImage(self: *@This(), device: *Device, v: struct {
+    pub fn blit_into_image(self: *@This(), device: *Device, v: struct {
         typ: vk.ImageAspectFlags = .{ .color_bit = true },
         image: vk.Image,
         size: vk.Extent2D,
@@ -1460,7 +1460,7 @@ pub const CmdBuffer = struct {
         }
     }
 
-    pub fn blitIntoSwapchain(self: *@This(), device: *Device, v: struct {
+    pub fn blit_into_swapchain(self: *@This(), device: *Device, v: struct {
         typ: vk.ImageAspectFlags = .{ .color_bit = true },
         image: vk.Image,
         size: vk.Extent2D,
@@ -1503,7 +1503,7 @@ pub const CmdBuffer = struct {
         }
     }
 
-    pub fn drawIntoSwapchain(self: *@This(), device: *Device, v: struct {
+    pub fn draw_into_swapchain(self: *@This(), device: *Device, v: struct {
         typ: vk.ImageAspectFlags = .{ .color_bit = true },
         image: vk.Image,
         image_layout: vk.ImageLayout,
@@ -1511,7 +1511,7 @@ pub const CmdBuffer = struct {
         swapchain: *const Swapchain,
         queue_family: u32,
     }) void {
-        self.transitionImg(device, .{
+        self.transition_img(device, .{
             .image = v.image,
             .layout = v.image_layout,
             .new_layout = .transfer_src_optimal,
@@ -1519,26 +1519,26 @@ pub const CmdBuffer = struct {
             .aspect_mask = v.typ,
         });
 
-        self.transitionSwapchain(device, .{
+        self.transition_swapchain(device, .{
             .layout = .undefined,
             .new_layout = .transfer_dst_optimal,
             .queue_family_index = v.queue_family,
             .swapchain = v.swapchain,
         });
-        self.blitIntoSwapchain(device, .{
+        self.blit_into_swapchain(device, .{
             .typ = v.typ,
             .image = v.image,
             .size = v.swapchain.extent,
             .swapchain = v.swapchain,
         });
-        self.transitionSwapchain(device, .{
+        self.transition_swapchain(device, .{
             .layout = .transfer_dst_optimal,
             .new_layout = .color_attachment_optimal,
             .queue_family_index = v.queue_family,
             .swapchain = v.swapchain,
         });
 
-        self.transitionImg(device, .{
+        self.transition_img(device, .{
             .image = v.image,
             .layout = .transfer_src_optimal,
             .new_layout = v.image_layout,
@@ -1547,7 +1547,7 @@ pub const CmdBuffer = struct {
         });
     }
 
-    pub fn drawIntoImage(self: *@This(), device: *Device, v: struct {
+    pub fn draw_into_image(self: *@This(), device: *Device, v: struct {
         typ: vk.ImageAspectFlags = .{ .color_bit = true },
         image: vk.Image,
         image_layout: vk.ImageLayout,
@@ -1557,34 +1557,34 @@ pub const CmdBuffer = struct {
         target_size: vk.Extent2D,
         queue_family: u32,
     }) void {
-        self.transitionImg(device, .{
+        self.transition_img(device, .{
             .image = v.image,
             .layout = v.image_layout,
             .new_layout = .transfer_src_optimal,
             .queue_family_index = v.queue_family,
         });
 
-        self.transitionImg(device, .{
+        self.transition_img(device, .{
             .image = v.target_image,
             .layout = v.target_image_layout,
             .new_layout = .transfer_dst_optimal,
             .queue_family_index = v.queue_family,
         });
-        self.blitIntoImage(device, .{
+        self.blit_into_image(device, .{
             .typ = v.typ,
             .image = v.image,
             .size = v.size,
             .target_image = v.target_image,
             .target_size = v.target_size,
         });
-        self.transitionImg(device, .{
+        self.transition_img(device, .{
             .image = v.target_image,
             .layout = .transfer_dst_optimal,
             .new_layout = v.target_image_layout,
             .queue_family_index = v.queue_family,
         });
 
-        self.transitionImg(device, .{
+        self.transition_img(device, .{
             .image = v.image,
             .layout = .transfer_src_optimal,
             .new_layout = v.image_layout,

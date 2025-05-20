@@ -579,7 +579,7 @@ pub const ResourceManager = struct {
         ) void {
             _ = resources;
 
-            cmdbuf.draw(device, .{
+            cmdbuf.draw_indirect(device, .{
                 .pipeline = pipeline,
                 .desc_sets = desc_sets,
                 .calls = .{

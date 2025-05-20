@@ -887,7 +887,6 @@ pub const RendererState = struct {
         var pipeline = try GraphicsPipeline.new(device, .{
             .vert = app.stages.shaders.map.get(.vert).code,
             .frag = app.stages.shaders.map.get(.frag).code,
-            .vertex_info = .{},
             .dynamic_info = .{
                 .image_format = app.screen_image.format,
                 .depth_format = app.depth_image.format,
@@ -902,7 +901,6 @@ pub const RendererState = struct {
         var bg_pipeline = try GraphicsPipeline.new(device, .{
             .vert = app.stages.shaders.map.get(.bg_vert).code,
             .frag = app.stages.shaders.map.get(.bg_frag).code,
-            .vertex_info = .{},
             .dynamic_info = .{
                 .image_format = app.screen_image.format,
                 .depth_format = app.depth_image.format,
@@ -969,7 +967,7 @@ pub const RendererState = struct {
         // });
 
         cmdbuf.dynamic_render_end(device);
-        cmdbuf.drawIntoSwapchain(device, .{
+        cmdbuf.draw_into_swapchain(device, .{
             .image = app.screen_image.image,
             .image_layout = .color_attachment_optimal,
             .size = self.swapchain.extent,
