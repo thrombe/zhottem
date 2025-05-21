@@ -1099,239 +1099,263 @@ pub const ShaderUtils = struct {
     };
 };
 
-pub fn ShaderCompiler(meta: type, stages: type) type {
-    return struct {
-        pub const StageMap = std.EnumArray(stages, Compiled);
-        pub const StageSet = std.EnumSet(stages);
+pub const ShaderCompiler = struct {
+    pub const StageMap = std.StringArrayHashMap(Compiled);
+    pub const StageSet = std.StringArrayHashMap(bool);
 
-        pub const Stages = struct {
-            map: StageMap,
+    pub const Stages = struct {
+        map: StageMap,
 
-            pub fn init(compiler: *Compiler) !@This() {
-                var shaders = StageMap.initUndefined();
-                var set = StageSet.initEmpty();
-                errdefer {
-                    var it = set.iterator();
-                    while (it.next()) |key| {
-                        shaders.get(key).deinit();
-                    }
+        pub fn init(compiler: *Compiler, stages: []const ShaderInfo) !@This() {
+            var set = StageSet.init(allocator.*);
+            defer set.deinit();
+            for (stages) |stage| try set.put(stage.name, false);
+
+            var shaders = StageMap.init(allocator.*);
+            errdefer {
+                var it = shaders.iterator();
+                while (it.next()) |shader| {
+                    shader.value_ptr.deinit();
                 }
-
-                const set_full = StageSet.initFull();
-                while (!set.eql(set_full)) {
-                    while (compiler.ctx.compiled.try_recv()) |shader| {
-                        if (set.contains(shader.typ)) {
-                            shaders.get(shader.typ).deinit();
-                        }
-                        shaders.set(shader.typ, shader);
-                        set.insert(shader.typ);
-                    }
-
-                    while (compiler.ctx.err_chan.try_recv()) |msg_| {
-                        if (msg_) |msg| {
-                            defer allocator.free(msg);
-                            std.debug.print("{s}\n", .{msg});
-                        }
-                    }
-                }
-                return .{ .map = shaders };
+                shaders.deinit();
             }
 
-            pub fn update(self: *@This(), comp: *Compiler) bool {
-                const can_recv = comp.has_updates();
-
-                while (comp.ctx.compiled.try_recv()) |shader| {
-                    self.map.get(shader.typ).deinit();
-
-                    self.map.set(shader.typ, shader);
+            outer: while (true) {
+                while (compiler.ctx.compiled.try_recv()) |shader| {
+                    if (shaders.fetchSwapRemove(shader.name)) |kv| {
+                        kv.value.deinit();
+                    }
+                    try shaders.put(shader.name, shader);
+                    set.getEntry(shader.name).?.value_ptr.* = true;
                 }
 
-                while (comp.ctx.err_chan.try_recv()) |msg_| {
+                while (compiler.ctx.err_chan.try_recv()) |msg_| {
                     if (msg_) |msg| {
                         defer allocator.free(msg);
-                        std.debug.print("shader error: {s}\n", .{msg});
-                    } else {
-                        std.debug.print("no shader errors lesgo :)\n", .{});
+                        std.debug.print("{s}\n", .{msg});
                     }
                 }
 
-                return can_recv;
+                var set_it = set.iterator();
+                while (set_it.next()) |b| if (!b.value_ptr.*) continue :outer;
+                break;
             }
 
-            pub fn deinit(self: *@This()) void {
-                for (self.map.values) |shader| {
-                    shader.deinit();
+            return .{ .map = shaders };
+        }
+
+        pub fn update(self: *@This(), comp: *Compiler) bool {
+            const can_recv = comp.has_updates();
+
+            while (comp.ctx.compiled.try_recv()) |shader| {
+                const entry = self.map.getEntry(shader.name).?;
+                entry.value_ptr.deinit();
+                entry.key_ptr.* = shader.name;
+                entry.value_ptr.* = shader;
+            }
+
+            while (comp.ctx.err_chan.try_recv()) |msg_| {
+                if (msg_) |msg| {
+                    defer allocator.free(msg);
+                    std.debug.print("shader error: {s}\n", .{msg});
+                } else {
+                    std.debug.print("no shader errors lesgo :)\n", .{});
                 }
             }
-        };
 
-        pub const ShaderInfo = struct {
-            typ: stages,
-            stage: Glslc.Compiler.Stage,
-            path: []const u8,
-            include: []const []const u8,
-            define: []const []const u8,
+            return can_recv;
+        }
 
-            fn compile(self: *const @This(), ctx: *Compiler.Ctx) ![]u32 {
-                const shader: Glslc.Compiler.Code = .{ .path = .{
-                    .main = self.path,
-                    .include = self.include,
-                    .definitions = self.define,
-                } };
-                if (ctx.dump_assembly) blk: {
-                    // TODO: print this on screen instead of console
-                    const res = ctx.comp.dump_assembly(allocator.*, &shader, self.stage) catch {
-                        break :blk;
-                    };
-                    switch (res) {
-                        .Err => |err| {
-                            try ctx.err_chan.send(err.msg);
-                            return err.err;
-                        },
-                        .Ok => {
-                            try ctx.err_chan.send(null);
-                        },
-                    }
-                }
-                const frag_bytes = blk: {
-                    const res = try ctx.comp.compile(
-                        allocator.*,
-                        &shader,
-                        .spirv,
-                        self.stage,
-                    );
-                    switch (res) {
-                        .Err => |err| {
-                            try ctx.err_chan.send(err.msg);
-                            return err.err;
-                        },
-                        .Ok => |ok| {
-                            errdefer allocator.free(ok);
-                            try ctx.err_chan.send(null);
-                            break :blk ok;
-                        },
-                    }
+        pub fn deinit(self: *@This()) void {
+            var it = self.map.iterator();
+            while (it.next()) |shader| {
+                // shader.key_ptr; // owned by shader.value
+                shader.value_ptr.deinit();
+            }
+            self.map.deinit();
+        }
+    };
+
+    pub const ShaderInfo = struct {
+        name: []const u8,
+        stage: Glslc.Compiler.Stage,
+        path: []const u8,
+        include: []const []const u8,
+        define: []const []const u8,
+
+        fn compile(self: *const @This(), ctx: *Compiler.Ctx) ![]u32 {
+            const shader: Glslc.Compiler.Code = .{ .path = .{
+                .main = self.path,
+                .include = self.include,
+                .definitions = self.define,
+            } };
+            if (ctx.dump_assembly) blk: {
+                // TODO: print this on screen instead of console
+                const res = ctx.comp.dump_assembly(allocator.*, &shader, self.stage) catch {
+                    break :blk;
                 };
-                return frag_bytes;
-            }
-        };
-        pub const Compiled = struct {
-            typ: stages,
-            code: []u32,
-            metadata: meta,
-
-            fn deinit(self: *const @This()) void {
-                allocator.free(self.code);
-            }
-        };
-        pub const Compiler = struct {
-            const EventChan = Channel(Compiled);
-            const Ctx = struct {
-                comp: Glslc.Compiler,
-                err_chan: Channel(?[]const u8),
-                compiled: Channel(Compiled),
-                shader_fuse: FsFuse,
-                shaders: []ShaderInfo,
-                dump_assembly: bool = false,
-                has_updates: Fuse = .{},
-
-                exit: Fuse = .{},
-
-                fn update(self: *@This()) !void {
-                    var has_updates_ = false;
-                    defer if (has_updates_) {
-                        _ = self.has_updates.fuse();
-                    };
-
-                    while (self.shader_fuse.try_recv()) |ev| {
-                        defer ev.deinit();
-
-                        var found_any = false;
-                        for (self.shaders) |s| {
-                            if (std.mem.eql(u8, s.path, ev.real)) {
-                                found_any = true;
-                                const res = try s.compile(self);
-                                try self.compiled.send(.{
-                                    .typ = s.typ,
-                                    .code = res,
-                                    .metadata = try meta.get_metadata(s),
-                                });
-                            }
-                        }
-                        has_updates_ = has_updates_ or found_any;
-
-                        if (!found_any) {
-                            std.debug.print("Unknown file update: {s}\n", .{ev.file});
-                        }
-                    }
+                switch (res) {
+                    .Err => |err| {
+                        try ctx.err_chan.send(err.msg);
+                        return err.err;
+                    },
+                    .Ok => {
+                        try ctx.err_chan.send(null);
+                    },
                 }
-
-                fn deinit(self: *@This()) void {
-                    while (self.err_chan.try_recv()) |err| {
-                        if (err) |er| {
-                            allocator.free(er);
-                        }
-                    }
-                    self.err_chan.deinit();
-
-                    while (self.compiled.try_recv()) |shader| {
-                        shader.deinit();
-                    }
-                    self.compiled.deinit();
-                    self.shader_fuse.deinit();
-
-                    for (self.shaders) |s| {
-                        allocator.free(s.path);
-                        for (s.define) |def| {
-                            allocator.free(def);
-                        }
-                        allocator.free(s.define);
-                        for (s.include) |inc| {
-                            allocator.free(inc);
-                        }
-                        allocator.free(s.include);
-                    }
-                    allocator.free(self.shaders);
+            }
+            const frag_bytes = blk: {
+                const res = try ctx.comp.compile(
+                    allocator.*,
+                    &shader,
+                    .spirv,
+                    self.stage,
+                );
+                switch (res) {
+                    .Err => |err| {
+                        try ctx.err_chan.send(err.msg);
+                        return err.err;
+                    },
+                    .Ok => |ok| {
+                        errdefer allocator.free(ok);
+                        try ctx.err_chan.send(null);
+                        break :blk ok;
+                    },
                 }
             };
-            ctx: *Ctx,
-            thread: std.Thread,
+            return frag_bytes;
+        }
+    };
+    pub const Compiled = struct {
+        name: []const u8,
+        code: []u32,
 
-            pub fn init(comp: Glslc.Compiler, shader_info: []const ShaderInfo) !@This() {
-                const shader_fuse = try FsFuse.init("src");
-                errdefer shader_fuse.deinit();
+        fn deinit(self: *const @This()) void {
+            allocator.free(self.code);
+            allocator.free(self.name);
+        }
+    };
+    pub const Compiler = struct {
+        const EventChan = Channel(Compiled);
+        const Ctx = struct {
+            comp: Glslc.Compiler,
+            err_chan: Channel(?[]const u8),
+            compiled: Channel(Compiled),
+            shader_fuse: FsFuse,
+            shaders: []ShaderInfo,
+            dump_assembly: bool = false,
+            has_updates: Fuse = .{},
 
-                const shaders = try allocator.dupe(ShaderInfo, shader_info);
-                // OOF: not getting free-d if anything errors but meh
-                for (shaders) |*s| {
-                    var buf: [std.fs.max_path_bytes:0]u8 = undefined;
-                    const cwd = try std.posix.getcwd(&buf);
-                    s.path = try std.fs.path.join(allocator.*, &.{ cwd, s.path });
+            exit: Fuse = .{},
 
-                    const define = try allocator.alloc([]const u8, s.define.len);
-                    for (s.define, 0..) |def, i| {
-                        define[i] = try allocator.dupe(u8, def);
-                    }
-                    s.define = define;
-
-                    const include = try allocator.alloc([]const u8, s.include.len);
-                    for (s.include, 0..) |inc, i| {
-                        include[i] = try std.fs.path.join(allocator.*, &.{ cwd, inc });
-                    }
-                    s.include = include;
-                }
-
-                const ctxt = try allocator.create(Ctx);
-                errdefer allocator.destroy(ctxt);
-                ctxt.* = .{
-                    .comp = comp,
-                    .shaders = shaders,
-                    .shader_fuse = shader_fuse,
-                    .err_chan = try Channel(?[]const u8).init(allocator.*),
-                    .compiled = try Channel(Compiled).init(allocator.*),
+            fn update(self: *@This()) !void {
+                var has_updates_ = false;
+                defer if (has_updates_) {
+                    _ = self.has_updates.fuse();
                 };
-                errdefer ctxt.deinit();
 
+                while (self.shader_fuse.try_recv()) |ev| {
+                    defer ev.deinit();
+
+                    var found_any = false;
+                    for (self.shaders) |s| {
+                        if (std.mem.eql(u8, s.path, ev.real)) {
+                            found_any = true;
+                            const res = try s.compile(self);
+                            try self.compiled.send(.{
+                                .name = try allocator.dupe(u8, s.name),
+                                .code = res,
+                            });
+                        }
+                    }
+                    has_updates_ = has_updates_ or found_any;
+
+                    if (!found_any) {
+                        std.debug.print("Unknown file update: {s}\n", .{ev.file});
+                    }
+                }
+            }
+
+            fn deinit(self: *@This()) void {
+                while (self.err_chan.try_recv()) |err| {
+                    if (err) |er| {
+                        allocator.free(er);
+                    }
+                }
+                self.err_chan.deinit();
+
+                while (self.compiled.try_recv()) |shader| {
+                    shader.deinit();
+                }
+                self.compiled.deinit();
+                self.shader_fuse.deinit();
+
+                for (self.shaders) |s| {
+                    allocator.free(s.name);
+                    allocator.free(s.path);
+                    for (s.define) |def| {
+                        allocator.free(def);
+                    }
+                    allocator.free(s.define);
+                    for (s.include) |inc| {
+                        allocator.free(inc);
+                    }
+                    allocator.free(s.include);
+                }
+                allocator.free(self.shaders);
+            }
+        };
+        ctx: *Ctx,
+        thread: std.Thread,
+
+        pub fn init(comp: Glslc.Compiler, shader_info: []const ShaderInfo) !@This() {
+            const shader_fuse = try FsFuse.init("src");
+            errdefer shader_fuse.deinit();
+
+            const shaders = try allocator.dupe(ShaderInfo, shader_info);
+            // OOF: not getting free-d if anything errors but meh
+            for (shaders) |*s| {
+                s.name = try allocator.dupe(u8, s.name);
+                var buf: [std.fs.max_path_bytes:0]u8 = undefined;
+                const cwd = try std.posix.getcwd(&buf);
+                s.path = try std.fs.path.join(allocator.*, &.{ cwd, s.path });
+
+                const define = try allocator.alloc([]const u8, s.define.len);
+                for (s.define, 0..) |def, i| {
+                    define[i] = try allocator.dupe(u8, def);
+                }
+                s.define = define;
+
+                const include = try allocator.alloc([]const u8, s.include.len);
+                for (s.include, 0..) |inc, i| {
+                    include[i] = try std.fs.path.join(allocator.*, &.{ cwd, inc });
+                }
+                s.include = include;
+            }
+
+            const ctxt = try allocator.create(Ctx);
+            errdefer allocator.destroy(ctxt);
+            ctxt.* = .{
+                .comp = comp,
+                .shaders = shaders,
+                .shader_fuse = shader_fuse,
+                .err_chan = try Channel(?[]const u8).init(allocator.*),
+                .compiled = try Channel(Compiled).init(allocator.*),
+            };
+            errdefer ctxt.deinit();
+
+            {
+                var set = std.StringHashMap(void).init(allocator.*);
+                defer set.deinit();
+                for (shaders) |s| {
+                    if (set.contains(s.name)) {
+                        return error.DuplicateShaderName;
+                    }
+                    try set.put(s.name, {});
+                }
+            }
+
+            {
                 var set = std.StringHashMap(void).init(allocator.*);
                 defer set.deinit();
                 for (shaders) |s| {
@@ -1349,43 +1373,43 @@ pub fn ShaderCompiler(meta: type, stages: type) type {
                         .real = real,
                     });
                 }
+            }
 
-                const Callbacks = struct {
-                    fn spawn(ctx: *Ctx) void {
-                        while (true) {
-                            if (ctx.exit.unfuse()) {
-                                break;
-                            }
-                            ctx.update() catch |e| {
-                                const err = std.fmt.allocPrint(allocator.*, "{any}", .{e}) catch continue;
-                                ctx.err_chan.send(err) catch continue;
-                            };
-
-                            std.time.sleep(std.time.ns_per_ms * 100);
+            const Callbacks = struct {
+                fn spawn(ctx: *Ctx) void {
+                    while (true) {
+                        if (ctx.exit.unfuse()) {
+                            break;
                         }
+                        ctx.update() catch |e| {
+                            const err = std.fmt.allocPrint(allocator.*, "{any}", .{e}) catch continue;
+                            ctx.err_chan.send(err) catch continue;
+                        };
+
+                        std.time.sleep(std.time.ns_per_ms * 100);
                     }
-                };
-                const thread = try std.Thread.spawn(.{ .allocator = allocator.* }, Callbacks.spawn, .{ctxt});
+                }
+            };
+            const thread = try std.Thread.spawn(.{ .allocator = allocator.* }, Callbacks.spawn, .{ctxt});
 
-                return .{
-                    .ctx = ctxt,
-                    .thread = thread,
-                };
-            }
+            return .{
+                .ctx = ctxt,
+                .thread = thread,
+            };
+        }
 
-            pub fn deinit(self: *@This()) void {
-                _ = self.ctx.exit.fuse();
-                self.thread.join();
-                self.ctx.deinit();
-                allocator.destroy(self.ctx);
-            }
+        pub fn deinit(self: *@This()) void {
+            _ = self.ctx.exit.fuse();
+            self.thread.join();
+            self.ctx.deinit();
+            allocator.destroy(self.ctx);
+        }
 
-            pub fn has_updates(self: *@This()) bool {
-                return self.ctx.has_updates.unfuse();
-            }
-        };
+        pub fn has_updates(self: *@This()) bool {
+            return self.ctx.has_updates.unfuse();
+        }
     };
-}
+};
 
 pub const Glslc = struct {
     pub const Compiler = struct {

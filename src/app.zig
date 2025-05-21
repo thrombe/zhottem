@@ -599,7 +599,37 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
 
-    var stages = try ShaderStageManager.init();
+    const shader_stages = &[_]utils.ShaderCompiler.ShaderInfo{
+        .{
+            .name = "bg_vert",
+            .stage = .vertex,
+            .path = "src/shader.glsl",
+            .define = &[_][]const u8{"BG_VERT_PASS"},
+            .include = &[_][]const u8{"src"},
+        },
+        .{
+            .name = "bg_frag",
+            .stage = .fragment,
+            .path = "src/shader.glsl",
+            .define = &[_][]const u8{"BG_FRAG_PASS"},
+            .include = &[_][]const u8{"src"},
+        },
+        .{
+            .name = "vert",
+            .stage = .vertex,
+            .path = "src/shader.glsl",
+            .define = &[_][]const u8{"VERT_PASS"},
+            .include = &[_][]const u8{"src"},
+        },
+        .{
+            .name = "frag",
+            .stage = .fragment,
+            .path = "src/shader.glsl",
+            .define = &[_][]const u8{"FRAG_PASS"},
+            .include = &[_][]const u8{"src"},
+        },
+    };
+    var stages = try ShaderStageManager.init(shader_stages);
     errdefer stages.deinit();
 
     var recorder = try AudioRecorder.init(.{
@@ -885,8 +915,8 @@ pub const RendererState = struct {
         errdefer model_desc_set.deinit(device);
 
         var pipeline = try GraphicsPipeline.new(device, .{
-            .vert = app.stages.shaders.map.get(.vert).code,
-            .frag = app.stages.shaders.map.get(.frag).code,
+            .vert = app.stages.shaders.map.get("vert").?.code,
+            .frag = app.stages.shaders.map.get("frag").?.code,
             .dynamic_info = .{
                 .image_format = app.screen_image.format,
                 .depth_format = app.depth_image.format,
@@ -899,8 +929,8 @@ pub const RendererState = struct {
         errdefer pipeline.deinit(device);
 
         var bg_pipeline = try GraphicsPipeline.new(device, .{
-            .vert = app.stages.shaders.map.get(.bg_vert).code,
-            .frag = app.stages.shaders.map.get(.bg_frag).code,
+            .vert = app.stages.shaders.map.get("bg_vert").?.code,
+            .frag = app.stages.shaders.map.get("bg_frag").?.code,
             .dynamic_info = .{
                 .image_format = app.screen_image.format,
                 .depth_format = app.depth_image.format,
@@ -994,56 +1024,15 @@ pub const RendererState = struct {
 };
 
 const ShaderStageManager = struct {
-    shaders: CompilerUtils.Stages,
-    compiler: CompilerUtils.Compiler,
+    shaders: utils.ShaderCompiler.Stages,
+    compiler: utils.ShaderCompiler.Compiler,
 
-    const ShaderStage = enum {
-        bg_vert,
-        bg_frag,
-        vert,
-        frag,
-    };
-    const CompilerUtils = utils.ShaderCompiler(struct {
-        pub fn get_metadata(_: CompilerUtils.ShaderInfo) !@This() {
-            return .{};
-        }
-    }, ShaderStage);
-
-    pub fn init() !@This() {
-        var comp = try CompilerUtils.Compiler.init(.{ .opt = .fast, .env = .vulkan1_3 }, &[_]CompilerUtils.ShaderInfo{
-            .{
-                .typ = .bg_vert,
-                .stage = .vertex,
-                .path = "src/shader.glsl",
-                .define = &[_][]const u8{"BG_VERT_PASS"},
-                .include = &[_][]const u8{"src"},
-            },
-            .{
-                .typ = .bg_frag,
-                .stage = .fragment,
-                .path = "src/shader.glsl",
-                .define = &[_][]const u8{"BG_FRAG_PASS"},
-                .include = &[_][]const u8{"src"},
-            },
-            .{
-                .typ = .vert,
-                .stage = .vertex,
-                .path = "src/shader.glsl",
-                .define = &[_][]const u8{"VERT_PASS"},
-                .include = &[_][]const u8{"src"},
-            },
-            .{
-                .typ = .frag,
-                .stage = .fragment,
-                .path = "src/shader.glsl",
-                .define = &[_][]const u8{"FRAG_PASS"},
-                .include = &[_][]const u8{"src"},
-            },
-        });
+    pub fn init(stages: []const utils.ShaderCompiler.ShaderInfo) !@This() {
+        var comp = try utils.ShaderCompiler.Compiler.init(.{ .opt = .fast, .env = .vulkan1_3 }, stages);
         errdefer comp.deinit();
 
         return .{
-            .shaders = try CompilerUtils.Stages.init(&comp),
+            .shaders = try utils.ShaderCompiler.Stages.init(&comp, stages),
             .compiler = comp,
         };
     }
