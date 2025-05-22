@@ -65,7 +65,6 @@ depth_image: Image,
 resources: ResourceManager,
 descriptor_pool: DescriptorPool,
 command_pool: vk.CommandPool,
-stages: ShaderStageManager,
 recorder: AudioRecorder,
 audio: AudioPlayer,
 
@@ -83,6 +82,10 @@ const Entities = struct {
 };
 
 const Handles = struct {
+    material: struct {
+        background: ResourceManager.MaterialHandle,
+        models: ResourceManager.MaterialHandle,
+    },
     gltf: struct {
         library: ResourceManager.GltfHandle,
     },
@@ -130,8 +133,24 @@ const Handles = struct {
         var plane = try assets_mod.Mesh.plane(allocator.*);
         errdefer plane.deinit();
 
+        const Material = ResourceManager.Assets.Material;
+
         return .{
             .audio = try .init(cpu),
+            .material = .{
+                .background = try cpu.add(Material{
+                    .name = "BG",
+                    .vert = "bg_vert",
+                    .frag = "bg_frag",
+                    .src = "src/shader.glsl",
+                }),
+                .models = try cpu.add(Material{
+                    .name = "MODEL",
+                    .vert = "vert",
+                    .frag = "frag",
+                    .src = "src/shader.glsl",
+                }),
+            },
             .image = .{
                 .mandlebulb = try cpu.add(image),
             },
@@ -412,6 +431,16 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         handles.gltf.library,
         "person_ig",
         .{ .pos = .{ .z = 5, .y = 1 }, .scale = .splat(4) },
+        handles.material.models,
+    );
+    try loader_mod.spawn_node(
+        &world,
+        &assets,
+        &cmdbuf,
+        handles.gltf.library,
+        "background_quad",
+        .{},
+        handles.material.background,
     );
 
     t.transform = .{
@@ -421,7 +450,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     _ = try cmdbuf.insert(.{
         try C.Name.from("floor"),
         t,
-        C.StaticRender{ .mesh = handles.mesh.plane },
+        C.StaticMesh{ .mesh = handles.mesh.plane, .material = handles.material.models },
+        C.BatchedRender{},
         try world.phy.add_body(.{
             .shape = .{ .box = .{ .size = t.transform.scale } },
             .motion_type = .static,
@@ -599,39 +629,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
 
-    const shader_stages = &[_]utils.ShaderCompiler.ShaderInfo{
-        .{
-            .name = "bg_vert",
-            .stage = .vertex,
-            .path = "src/shader.glsl",
-            .define = &[_][]const u8{"BG_VERT_PASS"},
-            .include = &[_][]const u8{"src"},
-        },
-        .{
-            .name = "bg_frag",
-            .stage = .fragment,
-            .path = "src/shader.glsl",
-            .define = &[_][]const u8{"BG_FRAG_PASS"},
-            .include = &[_][]const u8{"src"},
-        },
-        .{
-            .name = "vert",
-            .stage = .vertex,
-            .path = "src/shader.glsl",
-            .define = &[_][]const u8{"VERT_PASS"},
-            .include = &[_][]const u8{"src"},
-        },
-        .{
-            .name = "frag",
-            .stage = .fragment,
-            .path = "src/shader.glsl",
-            .define = &[_][]const u8{"FRAG_PASS"},
-            .include = &[_][]const u8{"src"},
-        },
-    };
-    var stages = try ShaderStageManager.init(shader_stages);
-    errdefer stages.deinit();
-
     var recorder = try AudioRecorder.init(.{
         .recorded = try utils.Channel([256]f32).init(allocator.*),
     }, .{});
@@ -689,7 +686,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .resources = resources,
         .descriptor_pool = desc_pool,
         .command_pool = cmd_pool,
-        .stages = stages,
         .recorder = recorder,
         .audio = audio,
 
@@ -714,7 +710,6 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.depth_image.deinit(device);
     defer self.resources.deinit(device);
     defer self.descriptor_pool.deinit(device);
-    defer self.stages.deinit();
     defer self.recorder.deinit() catch |e| utils.dump_error(e);
     defer self.audio.deinit() catch |e| utils.dump_error(e);
     defer self.texture.deinit(device);
@@ -767,7 +762,7 @@ pub fn present(
         _ = app_state.cmdbuf_fuse.fuse();
     }
 
-    if (self.stages.update()) {
+    if (dynamic_state.stages.update()) {
         _ = app_state.shader_fuse.fuse();
     }
 
@@ -815,23 +810,61 @@ pub const RendererState = struct {
     cmdbuffer: CmdBuffer,
     camera_descriptor_set: DescriptorSet,
     model_descriptor_set: DescriptorSet,
-    pipeline: GraphicsPipeline,
-    bg_pipeline: GraphicsPipeline,
+
+    stages: ShaderStageManager,
+    pipelines: Pipelines,
 
     // not owned
     pool: vk.CommandPool,
+
+    const Pipelines = std.AutoArrayHashMap(ResourceManager.MaterialHandle, GraphicsPipeline);
 
     pub fn init(app: *App, engine: *Engine, app_state: *AppState) !@This() {
         _ = app_state;
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
+        var arena = std.heap.ArenaAllocator.init(allocator.*);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+
+        var shader_stages = std.ArrayList(utils.ShaderCompiler.ShaderInfo).init(alloc);
+        for (app.resources.assets.materials.items) |material| {
+            const frag = try std.fmt.allocPrint(alloc, "{s}_FRAG_PASS", .{material.name});
+            const vert = try std.fmt.allocPrint(alloc, "{s}_VERT_PASS", .{material.name});
+            try shader_stages.append(.{
+                .name = material.frag,
+                .stage = .fragment,
+                .path = material.src,
+                .include = try alloc.dupe([]const u8, &[_][]const u8{"src"}),
+                .define = try alloc.dupe([]const u8, &[_][]const u8{frag}),
+            });
+            try shader_stages.append(.{
+                .name = material.vert,
+                .stage = .vertex,
+                .path = material.src,
+                .include = try alloc.dupe([]const u8, &[_][]const u8{"src"}),
+                .define = try alloc.dupe([]const u8, &[_][]const u8{vert}),
+            });
+        }
+
+        var stages = try ShaderStageManager.init(shader_stages.items);
+        errdefer stages.deinit();
+
         var swapchain = try Swapchain.init(ctx, engine.window.extent, .{});
         errdefer swapchain.deinit(device);
 
+        var pipelines = Pipelines.init(allocator.*);
+        errdefer pipelines.deinit();
+
+        for (app.resources.assets.materials.items, 0..) |_, i| {
+            const handle = ResourceManager.MaterialHandle{ .index = @intCast(i) };
+            try pipelines.put(handle, undefined);
+        }
+
         var self: @This() = .{
-            .pipeline = undefined,
-            .bg_pipeline = undefined,
+            .stages = stages,
+            .pipelines = pipelines,
             .camera_descriptor_set = undefined,
             .model_descriptor_set = undefined,
             .swapchain = swapchain,
@@ -839,15 +872,15 @@ pub const RendererState = struct {
             .cmdbuffer = undefined,
         };
 
-        const pipelines = try self.create_pipelines(engine, app);
-        self.camera_descriptor_set = pipelines.camera_descriptor_set;
-        self.model_descriptor_set = pipelines.model_descriptor_set;
-        self.pipeline = pipelines.pipeline;
-        self.bg_pipeline = pipelines.bg_pipeline;
+        try self.create_pipelines(engine, app, false);
         errdefer self.camera_descriptor_set.deinit(device);
         errdefer self.model_descriptor_set.deinit(device);
-        errdefer self.pipeline.deinit(device);
-        errdefer self.bg_pipeline.deinit(device);
+        errdefer {
+            var it = self.pipelines.iterator();
+            while (it.next()) |p| {
+                p.value_ptr.deinit(device);
+            }
+        }
 
         self.cmdbuffer = try self.create_cmdbuf(engine, app);
         errdefer self.cmdbuffer.deinit(device);
@@ -856,20 +889,7 @@ pub const RendererState = struct {
     }
 
     pub fn recreate_pipelines(self: *@This(), engine: *Engine, app: *App, app_state: *AppState) !void {
-        const ctx = &engine.graphics;
-        const device = &ctx.device;
-
-        const pipelines = try self.create_pipelines(engine, app);
-
-        self.camera_descriptor_set.deinit(device);
-        self.model_descriptor_set.deinit(device);
-        self.pipeline.deinit(device);
-        self.bg_pipeline.deinit(device);
-        self.camera_descriptor_set = pipelines.camera_descriptor_set;
-        self.model_descriptor_set = pipelines.model_descriptor_set;
-        self.pipeline = pipelines.pipeline;
-        self.bg_pipeline = pipelines.bg_pipeline;
-
+        try self.create_pipelines(engine, app, true);
         _ = app_state.cmdbuf_fuse.fuse();
     }
 
@@ -887,13 +907,7 @@ pub const RendererState = struct {
         self.cmdbuffer = cmdbuffer;
     }
 
-    pub fn create_pipelines(self: *@This(), engine: *Engine, app: *App) !struct {
-        camera_descriptor_set: DescriptorSet,
-        model_descriptor_set: DescriptorSet,
-        bg_pipeline: GraphicsPipeline,
-        pipeline: GraphicsPipeline,
-    } {
-        _ = self;
+    fn create_pipelines(self: *@This(), engine: *Engine, app: *App, initialized: bool) !void {
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
@@ -914,39 +928,39 @@ pub const RendererState = struct {
         var model_desc_set = try model_desc_set_builder.build(device);
         errdefer model_desc_set.deinit(device);
 
-        var pipeline = try GraphicsPipeline.new(device, .{
-            .vert = app.stages.shaders.map.get("vert").?.code,
-            .frag = app.stages.shaders.map.get("frag").?.code,
-            .dynamic_info = .{
-                .image_format = app.screen_image.format,
-                .depth_format = app.depth_image.format,
-            },
-            .desc_set_layouts = &[_]vk.DescriptorSetLayout{
-                camera_desc_set.layout,
-                model_desc_set.layout,
-            },
-        });
-        errdefer pipeline.deinit(device);
+        var it = self.pipelines.iterator();
+        while (it.next()) |pipeline| {
+            if (initialized) pipeline.value_ptr.deinit(device);
 
-        var bg_pipeline = try GraphicsPipeline.new(device, .{
-            .vert = app.stages.shaders.map.get("bg_vert").?.code,
-            .frag = app.stages.shaders.map.get("bg_frag").?.code,
-            .dynamic_info = .{
-                .image_format = app.screen_image.format,
-                .depth_format = app.depth_image.format,
-            },
-            .desc_set_layouts = &[_]vk.DescriptorSetLayout{
-                camera_desc_set.layout,
-            },
-        });
-        errdefer bg_pipeline.deinit(device);
+            const material = app.resources.assets.ref(pipeline.key_ptr.*);
+            pipeline.value_ptr.* = try GraphicsPipeline.new(device, .{
+                .vert = self.stages.shaders.map.get(material.vert).?.code,
+                .frag = self.stages.shaders.map.get(material.frag).?.code,
+                .dynamic_info = .{
+                    .image_format = app.screen_image.format,
+                    .depth_format = app.depth_image.format,
+                },
+                .desc_set_layouts = &.{
+                    camera_desc_set.layout,
+                    model_desc_set.layout,
+                },
+                .push_constant_ranges = &[_]vk.PushConstantRange{.{
+                    .stage_flags = .{
+                        .vertex_bit = true,
+                        .fragment_bit = true,
+                    },
+                    .offset = 0,
+                    .size = @sizeOf(resources_mod.PushConstants),
+                }},
+            });
+        }
 
-        return .{
-            .camera_descriptor_set = camera_desc_set,
-            .model_descriptor_set = model_desc_set,
-            .pipeline = pipeline,
-            .bg_pipeline = bg_pipeline,
-        };
+        if (initialized) {
+            self.camera_descriptor_set.deinit(device);
+            self.model_descriptor_set.deinit(device);
+        }
+        self.camera_descriptor_set = camera_desc_set;
+        self.model_descriptor_set = model_desc_set;
     }
 
     pub fn create_cmdbuf(self: *@This(), engine: *Engine, app: *App) !CmdBuffer {
@@ -967,34 +981,14 @@ pub const RendererState = struct {
         });
 
         app.resources.instances.draw(
-            &self.pipeline,
+            device,
+            &cmdbuf,
             &[_]vk.DescriptorSet{
                 self.camera_descriptor_set.set,
                 self.model_descriptor_set.set,
             },
-            &cmdbuf,
-            device,
-            &app.resources.asset_buffers,
+            &self.pipelines,
         );
-
-        // cmdbuf.draw(device, .{
-        //     .pipeline = &self.bg_pipeline,
-        //     .desc_sets = &[_]vk.DescriptorSet{
-        //         self.camera_descriptor_set.set,
-        //     },
-        //     .vertices = .{
-        //         .count = 6,
-        //         .offset = 0,
-        //     },
-        //     .indices = .{
-        //         .count = undefined,
-        //         .offset = undefined,
-        //     },
-        //     .instances = .{
-        //         .count = 1,
-        //         .offset = 0,
-        //     },
-        // });
 
         cmdbuf.dynamic_render_end(device);
         cmdbuf.draw_into_swapchain(device, .{
@@ -1018,8 +1012,14 @@ pub const RendererState = struct {
         defer self.camera_descriptor_set.deinit(device);
         defer self.model_descriptor_set.deinit(device);
 
-        defer self.pipeline.deinit(device);
-        defer self.bg_pipeline.deinit(device);
+        defer self.stages.deinit();
+        defer {
+            var it = self.pipelines.iterator();
+            while (it.next()) |p| {
+                p.value_ptr.deinit(device);
+            }
+            self.pipelines.deinit();
+        }
     }
 };
 
@@ -1243,7 +1243,8 @@ pub const AppState = struct {
                             try C.Name.from("player"),
                             t,
                             C.Controller{},
-                            C.StaticRender{ .mesh = app.handles.mesh.cube },
+                            C.StaticMesh{ .mesh = app.handles.mesh.cube, .material = app.handles.material.models },
+                            C.BatchedRender{},
                             C.PlayerId{ .id = id.id, .conn = e.conn },
                             C.Shooter{
                                 .audio = app.handles.audio.shot,
@@ -1367,7 +1368,8 @@ pub const AppState = struct {
                                     t,
                                     // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
                                     // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                                    C.StaticRender{ .mesh = app.handles.mesh.cube },
+                                    C.StaticMesh{ .mesh = app.handles.mesh.cube, .material = app.handles.material.models },
+                                    C.BatchedRender{},
                                     C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive },
                                     try app.world.phy.add_body(.{
                                         .shape = .{ .box = .{ .size = t.transform.scale } },
@@ -1494,7 +1496,7 @@ pub const AppState = struct {
         // animation tick
         {
             const animate = struct {
-                fn animate(ar: *C.AnimatedRender, armature: *assets_mod.Armature, time: f32) bool {
+                fn animate(ar: *C.AnimatedMesh, armature: *assets_mod.Armature, time: f32) bool {
                     const animation = &armature.animations[4];
 
                     for (ar.bones) |*t| {
@@ -1553,7 +1555,7 @@ pub const AppState = struct {
                     return true;
                 }
 
-                fn apply(ar: *C.AnimatedRender, ids: []const assets_mod.BoneId, bones: []assets_mod.Bone, t: math.Mat4x4) void {
+                fn apply(ar: *C.AnimatedMesh, ids: []const assets_mod.BoneId, bones: []assets_mod.Bone, t: math.Mat4x4) void {
                     for (ids) |bone_id| {
                         ar.bones[bone_id] = t.mul_mat(ar.bones[bone_id]);
                         apply(ar, bones[bone_id].children, bones, ar.bones[bone_id]);
@@ -1561,15 +1563,15 @@ pub const AppState = struct {
                 }
             }.animate;
 
-            var it = try app.world.ecs.iterator(struct { m: C.AnimatedRender });
+            var it = try app.world.ecs.iterator(struct { m: C.AnimatedMesh });
             while (it.next()) |e| {
-                const a: *C.AnimatedRender = e.m;
+                const a: *C.AnimatedMesh = e.m;
                 const armature = assets.ref(a.armature);
                 a.time += delta;
 
                 if (!animate(a, armature, a.time)) {
                     a.time = 0;
-                    @memset(a.indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
+                    @memset(a.indices, std.mem.zeroes(C.AnimatedMesh.AnimationIndices));
                 }
             }
         }
@@ -1593,9 +1595,12 @@ pub const AppState = struct {
             instances.reset();
 
             {
-                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticRender });
+                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticMesh, b: C.BatchedRender });
                 while (it.next()) |e| {
-                    const instance = try instances.reserve_instance(e.m.mesh);
+                    if (e.b.batch == null) {
+                        e.b.batch = try instances.get_batch(e.m.mesh, e.m.material);
+                    }
+                    const instance = try instances.reserve_instance(e.b.batch.?);
                     if (instance) |ptr| {
                         const bones = try instances.reserve_bones(1);
                         ptr.bone_offset = bones.first;
@@ -1605,9 +1610,12 @@ pub const AppState = struct {
             }
 
             {
-                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedRender });
+                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedMesh, b: C.BatchedRender });
                 while (it.next()) |e| {
-                    const instance = try instances.reserve_instance(e.m.mesh);
+                    if (e.b.batch == null) {
+                        e.b.batch = try instances.get_batch(e.m.mesh, e.m.material);
+                    }
+                    const instance = try instances.reserve_instance(e.b.batch.?);
                     const armature = assets.ref(e.m.armature);
                     if (instance) |ptr| {
                         const bones = try instances.reserve_bones(@intCast(armature.bones.len));
@@ -1743,6 +1751,7 @@ pub const AppState = struct {
             try gen.add_struct("Vertex", resources_mod.Vertex);
             try gen.add_struct("Instance", resources_mod.Instance);
             try gen.add_struct("DrawCtx", resources_mod.ResourceManager.InstanceResources.DrawCtx);
+            try gen.add_struct("PushConstants", resources_mod.PushConstants);
             try gen.add_bind_enum(resources_mod.UniformBinds);
             try gen.dump_shader("src/uniforms.glsl");
         }

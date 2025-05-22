@@ -133,7 +133,6 @@ pub const ComputePipeline = struct {
 
     pub fn new(device: *Device, v: Args) !@This() {
         const layout = try device.createPipelineLayout(&.{
-            // .flags: PipelineLayoutCreateFlags = .{},
             .set_layout_count = @intCast(v.desc_set_layouts.len),
             .p_set_layouts = v.desc_set_layouts.ptr,
         }, null);
@@ -189,6 +188,7 @@ pub const GraphicsPipeline = struct {
         },
         pass: ?vk.RenderPass = null,
         desc_set_layouts: []const vk.DescriptorSetLayout,
+        push_constant_ranges: []const vk.PushConstantRange,
     };
 
     pub fn new(device: *Device, v: Args) !@This() {
@@ -196,8 +196,8 @@ pub const GraphicsPipeline = struct {
             .flags = .{},
             .set_layout_count = @intCast(v.desc_set_layouts.len),
             .p_set_layouts = v.desc_set_layouts.ptr,
-            .push_constant_range_count = 0,
-            .p_push_constant_ranges = undefined,
+            .push_constant_range_count = @intCast(v.push_constant_ranges.len),
+            .p_push_constant_ranges = v.push_constant_ranges.ptr,
         }, null);
         errdefer device.destroyPipelineLayout(layout, null);
 
@@ -1342,19 +1342,20 @@ pub const CmdBuffer = struct {
         self: *@This(),
         device: *Device,
         v: struct {
-            pipeline: *GraphicsPipeline,
+            pipeline: *const GraphicsPipeline,
             desc_sets: []const vk.DescriptorSet,
+            offsets: []const u32,
             calls: struct {
                 buffer: vk.Buffer,
                 count: u32,
                 stride: u32,
                 offset: u32 = 0,
             },
+            push_constants: []const u8,
         },
     ) void {
         for (self.bufs) |cmdbuf| {
             device.cmdBindPipeline(cmdbuf, .graphics, v.pipeline.pipeline);
-            const offsets = [_]u32{};
             device.cmdBindDescriptorSets(
                 cmdbuf,
                 .graphics,
@@ -1362,8 +1363,16 @@ pub const CmdBuffer = struct {
                 0,
                 @intCast(v.desc_sets.len),
                 v.desc_sets.ptr,
-                @intCast(offsets.len),
-                &offsets,
+                @intCast(v.offsets.len),
+                v.offsets.ptr,
+            );
+            device.cmdPushConstants(
+                cmdbuf,
+                v.pipeline.layout,
+                .{ .vertex_bit = true, .fragment_bit = true },
+                0,
+                @intCast(v.push_constants.len),
+                @ptrCast(v.push_constants.ptr),
             );
             device.cmdDrawIndirect(
                 cmdbuf,

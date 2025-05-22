@@ -18,6 +18,10 @@ const CmdBuffer = render_utils.CmdBuffer;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+pub const PushConstants = extern struct {
+    first_draw_ctx: u32,
+};
+
 pub const Vertex = extern struct {
     pos: math.Vec3,
     normal: math.Vec3,
@@ -66,6 +70,10 @@ pub const ResourceManager = struct {
         self.instances.deinit(device);
     }
 
+    pub const BatchHandle = struct {
+        index: u32,
+    };
+
     pub const InstanceResources = struct {
         // we can only instance a contiguous chunk of instances (in gpu memory)
         // but we might want to delete entities randomly
@@ -75,6 +83,9 @@ pub const ResourceManager = struct {
         // the cpu side buffers that are copied to the gpu each frame
         bones: Bones,
         batches: Batches,
+        // different pipelines have to have different draw calls even when we have drawIndirect
+        // so this is needed to make sure that all batches in the same draw call are contiguous in memory
+        material_batches: MaterialBatches,
 
         // gpu side buffers
         // (double buffered for reallocation)
@@ -85,7 +96,7 @@ pub const ResourceManager = struct {
 
         hash: u64 = 0,
 
-        const DrawCall = vk.DrawIndexedIndirectCommand;
+        pub const DrawCall = vk.DrawIndexedIndirectCommand;
         pub const DrawCtx = extern struct {
             first_vertex: u32,
             first_index: u32,
@@ -95,10 +106,20 @@ pub const ResourceManager = struct {
         const Instances = std.ArrayList(Instance);
         const Bones = std.ArrayList(math.Mat4x4);
         const Batch = struct {
+            mesh: MeshHandle,
+            material: MaterialHandle,
             instances: Instances,
             first_draw: u32 = 0,
             can_draw: u32 = 0,
         };
+        const Batches = std.ArrayList(Batch);
+        const MaterialBatches = std.AutoArrayHashMap(MaterialHandle, struct {
+            batch: std.ArrayList(BatchHandle),
+
+            // as far as i an tell - push contents don't need to live after the call to cmdPushConstants
+            // but for some reason i can't get a bugfree result unless i make it live longer
+            push: PushConstants,
+        });
         const BufferWithCapacity = struct {
             buffer: Buffer,
             capacity: u32,
@@ -113,13 +134,6 @@ pub const ResourceManager = struct {
                 back_allocated,
             } = .enough,
         };
-
-        // TODO: MAYBE: this can be converted to an array instead of hashmap
-        //    by storing BatchHandle along with MeshHandle.
-        //    but oh well. there's only so much time in the day.
-        // currently each batch is unique only by it's mesh,
-        // but batches will need to be unique also by it's material somehow.
-        const Batches = std.AutoArrayHashMap(MeshHandle, Batch);
 
         pub fn init(engine: *Engine, pool: vk.CommandPool, v: struct {
             instance_cap: u32 = 500,
@@ -173,9 +187,10 @@ pub const ResourceManager = struct {
             }, std.mem.zeroes(DrawCtx), pool);
             errdefer draw_ctx_buffer.deinit(device);
 
-            return .{
+            return @This(){
                 .bones = .init(allocator.*),
                 .batches = .init(allocator.*),
+                .material_batches = .init(allocator.*),
                 .instance_buffer = .{ .current = .{
                     .buffer = instance_buffer,
                     .capacity = v.instance_cap,
@@ -199,9 +214,16 @@ pub const ResourceManager = struct {
             self.bones.deinit();
 
             {
-                var batches = self.batches.iterator();
-                while (batches.next()) |batch| {
-                    batch.value_ptr.instances.deinit();
+                var it = self.material_batches.iterator();
+                while (it.next()) |batch| {
+                    batch.value_ptr.batch.deinit();
+                }
+                self.material_batches.deinit();
+            }
+
+            {
+                for (self.batches.items) |*batch| {
+                    batch.instances.deinit();
                 }
                 self.batches.deinit();
             }
@@ -232,11 +254,10 @@ pub const ResourceManager = struct {
         }
 
         pub fn reset(self: *@This()) void {
-            var batches = self.batches.iterator();
-            while (batches.next()) |batch| {
-                batch.value_ptr.instances.clearRetainingCapacity();
-                batch.value_ptr.first_draw = 0;
-                batch.value_ptr.can_draw = 0;
+            for (self.batches.items) |*batch| {
+                batch.instances.clearRetainingCapacity();
+                batch.first_draw = 0;
+                batch.can_draw = 0;
             }
             self.bones.clearRetainingCapacity();
 
@@ -248,9 +269,9 @@ pub const ResourceManager = struct {
 
         fn did_change(self: *@This()) bool {
             var hasher = std.hash.Wyhash.init(0);
-            var batches = self.batches.iterator();
-            while (batches.next()) |batch| {
-                hasher.update(std.mem.asBytes(batch.key_ptr));
+            for (self.batches.items) |batch| {
+                hasher.update(std.mem.asBytes(&batch.mesh));
+                hasher.update(std.mem.asBytes(&batch.material));
             }
             hasher.update(std.mem.asBytes(&self.draw_call_buffer.count));
             hasher.update(std.mem.asBytes(&self.draw_ctx_buffer.count));
@@ -259,16 +280,35 @@ pub const ResourceManager = struct {
             return self.hash != hash;
         }
 
+        pub fn get_batch(self: *@This(), mesh: MeshHandle, material: MaterialHandle) !BatchHandle {
+            for (self.batches.items, 0..) |batch, i| {
+                if (std.meta.eql(batch.mesh, mesh) and std.meta.eql(batch.material, material)) {
+                    return .{ .index = @intCast(i) };
+                }
+            }
+
+            const handle: BatchHandle = .{ .index = @intCast(self.batches.items.len) };
+            try self.batches.append(.{
+                .material = material,
+                .mesh = mesh,
+                .instances = .init(allocator.*),
+            });
+
+            const batch = try self.material_batches.getOrPut(material);
+            if (!batch.found_existing) {
+                batch.value_ptr.batch = .init(allocator.*);
+                batch.value_ptr.push = std.mem.zeroes(@TypeOf(batch.value_ptr.push));
+            }
+            try batch.value_ptr.batch.append(handle);
+
+            return handle;
+        }
+
         // null means we don't have the resources currently available to render this.
         // but we will try to allocate necessary resources on next frame
-        pub fn reserve_instance(self: *@This(), mesh: MeshHandle) !?*Instance {
-            const entry = try self.batches.getOrPut(mesh);
-            if (!entry.found_existing) {
-                entry.value_ptr.* = .{
-                    .instances = .init(allocator.*),
-                };
-            }
-            return try entry.value_ptr.instances.addOne();
+        pub fn reserve_instance(self: *@This(), handle: BatchHandle) !?*Instance {
+            const batch = &self.batches.items[handle.index];
+            return try batch.instances.addOne();
         }
 
         pub fn reserve_bones(self: *@This(), num: usize) !struct { first: u32, buf: []math.Mat4x4 } {
@@ -364,7 +404,7 @@ pub const ResourceManager = struct {
             }
 
             {
-                const buf = &self.bone_buffer;
+                const buf = &self.draw_ctx_buffer;
 
                 switch (buf.state) {
                     .enough, .back_allocated => {},
@@ -485,12 +525,11 @@ pub const ResourceManager = struct {
 
             const gpu_items: [*]Instance = @ptrCast(@alignCast(data));
 
-            var batches = self.batches.iterator();
-            while (batches.next()) |batch| {
-                const instances = batch.value_ptr.instances.items;
+            for (self.batches.items) |*batch| {
+                const instances = batch.instances.items;
                 const can_alloc = @min(buf.current.capacity - buf.count, instances.len);
-                batch.value_ptr.first_draw = buf.count;
-                batch.value_ptr.can_draw = can_alloc;
+                batch.first_draw = buf.count;
+                batch.can_draw = can_alloc;
                 @memcpy(gpu_items[buf.count..][0..can_alloc], instances[0..can_alloc]);
                 buf.count += can_alloc;
 
@@ -524,8 +563,7 @@ pub const ResourceManager = struct {
 
             const gpu_items: [*]DrawCall = @ptrCast(@alignCast(data));
 
-            var batches = self.batches.iterator();
-            while (batches.next()) |batch| {
+            for (self.batches.items) |batch| {
                 if (buf.count >= buf.current.capacity) {
                     if (buf.state == .enough) {
                         buf.state = .out_of_objects;
@@ -534,8 +572,8 @@ pub const ResourceManager = struct {
                 }
 
                 gpu_items[buf.count] = .{
-                    .index_count = batch.key_ptr.regions.index.count,
-                    .instance_count = @intCast(batch.value_ptr.instances.items.len),
+                    .index_count = batch.mesh.regions.index.count,
+                    .instance_count = @intCast(batch.instances.items.len),
                     .first_index = 0,
                     .vertex_offset = 0,
                     .first_instance = 0,
@@ -551,8 +589,7 @@ pub const ResourceManager = struct {
 
             const gpu_items: [*]DrawCtx = @ptrCast(@alignCast(data));
 
-            var batches = self.batches.iterator();
-            while (batches.next()) |batch| {
+            for (self.batches.items) |*batch| {
                 if (buf.count >= buf.current.capacity) {
                     if (buf.state == .enough) {
                         buf.state = .out_of_objects;
@@ -561,33 +598,42 @@ pub const ResourceManager = struct {
                 }
 
                 gpu_items[buf.count] = .{
-                    .first_vertex = batch.key_ptr.regions.vertex.first,
-                    .first_index = batch.key_ptr.regions.index.first,
-                    .first_instance = batch.value_ptr.first_draw,
+                    .first_vertex = batch.mesh.regions.vertex.first,
+                    .first_index = batch.mesh.regions.index.first,
+                    .first_instance = batch.first_draw,
                 };
                 buf.count += 1;
             }
         }
 
         pub fn draw(
-            self: *const @This(),
-            pipeline: *GraphicsPipeline,
-            desc_sets: []const vk.DescriptorSet,
-            cmdbuf: *CmdBuffer,
+            self: *@This(),
             device: *Device,
-            resources: *ResourceManager.AssetBuffers,
+            cmdbuf: *CmdBuffer,
+            desc_sets: []const vk.DescriptorSet,
+            pipelines: *std.AutoArrayHashMap(MaterialHandle, GraphicsPipeline),
         ) void {
-            _ = resources;
+            var count: usize = 0;
+            var it = self.material_batches.iterator();
+            while (it.next()) |batch| {
+                const push = &batch.value_ptr.push;
+                push.* = .{ .first_draw_ctx = @intCast(count) };
 
-            cmdbuf.draw_indirect(device, .{
-                .pipeline = pipeline,
-                .desc_sets = desc_sets,
-                .calls = .{
-                    .buffer = self.draw_call_buffer.current.buffer.buffer,
-                    .count = self.draw_call_buffer.count,
-                    .stride = @sizeOf(DrawCall),
-                },
-            });
+                cmdbuf.draw_indirect(device, .{
+                    .pipeline = &pipelines.get(batch.key_ptr.*).?,
+                    .desc_sets = desc_sets,
+                    .offsets = &[_]u32{},
+                    .calls = .{
+                        .buffer = self.draw_call_buffer.current.buffer.buffer,
+                        .count = self.draw_call_buffer.count,
+                        .stride = @sizeOf(DrawCall),
+                        .offset = @intCast(@sizeOf(DrawCall) * count),
+                    },
+                    .push_constants = std.mem.asBytes(push),
+                });
+
+                count += batch.value_ptr.batch.items.len;
+            }
         }
     };
 
@@ -604,14 +650,6 @@ pub const ResourceManager = struct {
             count: u32,
         };
     };
-    pub const BatchedInstanceResourceHandle = struct {
-        first: u32,
-        count: u32,
-    };
-    pub const BonesResourceHandle = struct {
-        first: u32,
-        count: u32,
-    };
     pub const ArmatureHandle = struct {
         index: u32,
     };
@@ -624,6 +662,9 @@ pub const ResourceManager = struct {
     pub const GltfHandle = struct {
         index: u32,
     };
+    pub const MaterialHandle = struct {
+        index: u32,
+    };
 
     pub const Assets = struct {
         vertices: Vertices,
@@ -633,7 +674,8 @@ pub const ResourceManager = struct {
         audio: AudioSamples,
         meshes: Meshes,
         images: Images,
-        gltf: Gltf,
+        gltfs: Gltfs,
+        materials: Materials,
 
         const Vertices = std.ArrayList(Vertex);
         const Triangles = std.ArrayList([3]u32);
@@ -642,7 +684,15 @@ pub const ResourceManager = struct {
         const AudioSamples = std.ArrayList(assets_mod.Wav);
         const Meshes = std.ArrayList(assets_mod.Mesh);
         const Images = std.ArrayList(utils_mod.StbImage.UnormImage);
-        const Gltf = std.ArrayList(GltfData);
+        const Gltfs = std.ArrayList(GltfData);
+        const Materials = std.ArrayList(Material);
+
+        pub const Material = struct {
+            name: []const u8,
+            frag: []const u8,
+            vert: []const u8,
+            src: []const u8,
+        };
 
         pub const GltfData = struct {
             gltf: assets_mod.Gltf,
@@ -667,7 +717,8 @@ pub const ResourceManager = struct {
                 .audio = .init(allocator.*),
                 .meshes = .init(allocator.*),
                 .images = .init(allocator.*),
-                .gltf = .init(allocator.*),
+                .gltfs = .init(allocator.*),
+                .materials = .init(allocator.*),
             };
         }
 
@@ -676,6 +727,7 @@ pub const ResourceManager = struct {
             self.triangles.deinit();
             self.mesh_info.deinit();
             self.armatures.deinit();
+            self.materials.deinit();
 
             for (self.audio.items) |*t| {
                 t.deinit();
@@ -692,10 +744,10 @@ pub const ResourceManager = struct {
             }
             self.images.deinit();
 
-            for (self.gltf.items) |*t| {
+            for (self.gltfs.items) |*t| {
                 t.deinit();
             }
-            self.gltf.deinit();
+            self.gltfs.deinit();
         }
 
         fn to_handle(typ: type) type {
@@ -705,6 +757,7 @@ pub const ResourceManager = struct {
                 assets_mod.Mesh => MeshHandle,
                 assets_mod.Gltf => GltfHandle,
                 utils_mod.StbImage.UnormImage => ImageHandle,
+                Material => MaterialHandle,
                 else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
             };
         }
@@ -716,6 +769,7 @@ pub const ResourceManager = struct {
                 MeshHandle => *assets_mod.Mesh,
                 GltfHandle => *GltfData,
                 ImageHandle => *utils_mod.StbImage.UnormImage,
+                MaterialHandle => *Material,
                 else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
             };
         }
@@ -742,13 +796,18 @@ pub const ResourceManager = struct {
                 },
                 assets_mod.Gltf => {
                     const data = try self.add_gltf(asset);
-                    const handle = self.gltf.items.len;
-                    try self.gltf.append(data);
+                    const handle = self.gltfs.items.len;
+                    try self.gltfs.append(data);
                     return .{ .index = @intCast(handle) };
                 },
                 utils_mod.StbImage.UnormImage => {
                     const handle = self.images.items.len;
                     try self.images.append(asset);
+                    return .{ .index = @intCast(handle) };
+                },
+                Material => {
+                    const handle = self.materials.items.len;
+                    try self.materials.append(asset);
                     return .{ .index = @intCast(handle) };
                 },
                 else => @compileError("can't handle type: '" ++ @typeName(asset) ++ "' here"),
@@ -757,24 +816,15 @@ pub const ResourceManager = struct {
 
         pub fn ref(self: *@This(), handle: anytype) to_asset(@TypeOf(handle)) {
             const typ = @TypeOf(handle);
-            switch (typ) {
-                AudioHandle => {
-                    return &self.audio.items[handle.index];
-                },
-                ArmatureHandle => {
-                    return &self.armatures.items[handle.index];
-                },
-                MeshHandle => {
-                    return &self.meshes.items[handle.index];
-                },
-                ImageHandle => {
-                    return &self.images.items[handle.index];
-                },
-                GltfHandle => {
-                    return &self.gltf.items[handle.index];
-                },
+            return switch (typ) {
+                AudioHandle => &self.audio.items[handle.index],
+                ArmatureHandle => &self.armatures.items[handle.index],
+                MeshHandle => &self.meshes.items[handle.index],
+                ImageHandle => &self.images.items[handle.index],
+                GltfHandle => &self.gltfs.items[handle.index],
+                MaterialHandle => &self.materials.items[handle.index],
                 else => @compileError("can't handle type: '" ++ @typeName(typ) ++ "' here"),
-            }
+            };
         }
 
         fn add_gltf(self: *@This(), _gltf: assets_mod.Gltf) !GltfData {

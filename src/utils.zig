@@ -1318,7 +1318,8 @@ pub const ShaderCompiler = struct {
                 s.name = try allocator.dupe(u8, s.name);
                 var buf: [std.fs.max_path_bytes:0]u8 = undefined;
                 const cwd = try std.posix.getcwd(&buf);
-                s.path = try std.fs.path.join(allocator.*, &.{ cwd, s.path });
+                // s.path = try std.fs.path.join(allocator.*, &.{ cwd, s.path });
+                s.path = try allocator.dupe(u8, s.path);
 
                 const define = try allocator.alloc([]const u8, s.define.len);
                 for (s.define, 0..) |def, i| {
@@ -1344,6 +1345,7 @@ pub const ShaderCompiler = struct {
             };
             errdefer ctxt.deinit();
 
+            // no duplicates!
             {
                 var set = std.StringHashMap(void).init(allocator.*);
                 defer set.deinit();
@@ -1355,6 +1357,7 @@ pub const ShaderCompiler = struct {
                 }
             }
 
+            // send an event for each file
             {
                 var set = std.StringHashMap(void).init(allocator.*);
                 defer set.deinit();

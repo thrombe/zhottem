@@ -603,8 +603,9 @@ pub const World = struct {
         _ = try self.ecs.register(Components.LastTransform);
         _ = try self.ecs.register(Components.TimeDespawn);
         _ = try self.ecs.register(Components.PlayerId);
-        _ = try self.ecs.register(Components.StaticRender);
-        _ = try self.ecs.register(Components.AnimatedRender);
+        _ = try self.ecs.register(Components.StaticMesh);
+        _ = try self.ecs.register(Components.AnimatedMesh);
+        _ = try self.ecs.register(Components.BatchedRender);
         _ = try self.ecs.register(Jphysics.BodyId);
         _ = try self.ecs.register(Jphysics.CharacterBody);
 
@@ -796,12 +797,14 @@ pub const Components = struct {
         conn: u32,
     };
 
-    pub const StaticRender = struct {
+    pub const StaticMesh = struct {
         mesh: ResourceManager.MeshHandle,
+        material: ResourceManager.MaterialHandle,
     };
 
-    pub const AnimatedRender = struct {
+    pub const AnimatedMesh = struct {
         mesh: ResourceManager.MeshHandle,
+        material: ResourceManager.MaterialHandle,
         armature: ResourceManager.ArmatureHandle,
 
         // relative to the start of this animation
@@ -822,5 +825,9 @@ pub const Components = struct {
             allocator.free(self.bones);
             allocator.free(self.indices);
         }
+    };
+
+    pub const BatchedRender = struct {
+        batch: ?ResourceManager.BatchHandle = null,
     };
 };

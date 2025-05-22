@@ -113,6 +113,7 @@ pub fn spawn_node(
     gltf_handle: ResourceManager.GltfHandle,
     name: []const u8,
     transform: C.Transform,
+    material: ResourceManager.MaterialHandle,
 ) !void {
     const gltf = cpu.ref(gltf_handle);
     const info = &gltf.gltf.info.value;
@@ -137,6 +138,7 @@ pub fn spawn_node(
         null,
         ni.?,
         transform,
+        material,
     );
 }
 
@@ -148,6 +150,7 @@ fn _spawn_node(
     parent: ?Entity,
     node_index: GltfInfo.NodeIndex,
     transform: C.Transform,
+    material: ResourceManager.MaterialHandle,
 ) !Entity {
     const gltf = cpu.ref(gltf_handle);
     const info: *assets_mod.Gltf.Info = &gltf.gltf.info.value;
@@ -170,6 +173,7 @@ fn _spawn_node(
                 entity,
                 ci,
                 global,
+                material,
             );
             try children.append(child);
         }
@@ -189,18 +193,21 @@ fn _spawn_node(
             const harmature = gltf.handles.armatures[si];
             const armature = cpu.ref(harmature);
             const bones = try allocator.alloc(math.Mat4x4, armature.bones.len);
-            const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, armature.bones.len);
+            const indices = try allocator.alloc(C.AnimatedMesh.AnimationIndices, armature.bones.len);
             @memset(bones, .{});
-            @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
-            try cmdbuf.add_component(entity, C.AnimatedRender{
+            @memset(indices, std.mem.zeroes(C.AnimatedMesh.AnimationIndices));
+            try cmdbuf.add_component(entity, C.AnimatedMesh{
                 .mesh = hmesh,
+                .material = material,
                 .armature = harmature,
                 .bones = bones,
                 .indices = indices,
             });
         } else {
-            try cmdbuf.add_component(entity, C.StaticRender{ .mesh = hmesh });
+            try cmdbuf.add_component(entity, C.StaticMesh{ .mesh = hmesh, .material = material });
         }
+
+        try cmdbuf.add_component(entity, C.BatchedRender{});
     }
 
     if (node.extras) |extras| {

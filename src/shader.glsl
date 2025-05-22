@@ -15,31 +15,35 @@ void set_seed(int id) {
     seed = int(ubo.frame) ^ id ^ floatBitsToInt(ubo.time);
 }
 
-#ifdef VERT_PASS
-    // apprently restrict + readonly / writeonly helps shader optimizer.
-    // here it won't do anything here either way (vert shaders can't write)
-    layout(set = 1, binding = _bind_vertices) readonly restrict buffer VertexBuffer {
-        Vertex vertices[];
-    };
-    layout(set = 1, binding = _bind_indices) readonly restrict buffer IndexBuffer {
-        uint indices[];
-    };
-    layout(set = 1, binding = _bind_instances) readonly restrict buffer InstanceBuffer {
-        Instance instances[];
-    };
-    layout(set = 1, binding = _bind_bones) readonly restrict buffer BoneBuffer {
-        mat4 bones[];
-    };
-    layout(set = 1, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuffer {
-        DrawCtx draw_ctxts[];
-    };
+layout(push_constant) uniform PushConstantsUniform {
+    PushConstants push;
+};
 
+// apprently restrict + readonly / writeonly helps shader optimizer.
+// here it won't do anything here either way (vert shaders can't write)
+layout(set = 1, binding = _bind_vertices) readonly restrict buffer VertexBuffer {
+    Vertex vertices[];
+};
+layout(set = 1, binding = _bind_indices) readonly restrict buffer IndexBuffer {
+    uint indices[];
+};
+layout(set = 1, binding = _bind_instances) readonly restrict buffer InstanceBuffer {
+    Instance instances[];
+};
+layout(set = 1, binding = _bind_bones) readonly restrict buffer BoneBuffer {
+    mat4 bones[];
+};
+layout(set = 1, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuffer {
+    DrawCtx draw_ctxts[];
+};
+
+#ifdef MODEL_VERT_PASS
     layout(location = 0) out vec3 opos;
     layout(location = 1) out vec3 onormal;
     layout(location = 2) out vec2 ouv;
     layout(location = 3) out float light;
     void main() {
-        DrawCtx ctx = draw_ctxts[gl_DrawID];
+        DrawCtx ctx = draw_ctxts[gl_DrawID + push.first_draw_ctx];
         Instance inst = instances[gl_InstanceIndex + ctx.first_instance];
         Vertex v = vertices[indices[gl_VertexIndex + ctx.first_index] + ctx.first_vertex];
 
@@ -60,9 +64,9 @@ void set_seed(int id) {
         gl_Position = pos;
         light = dot(normal.xyz, light_dir.xyz);
     }
-#endif // VERT_PASS
+#endif // MODEL_VERT_PASS
 
-#ifdef FRAG_PASS
+#ifdef MODEL_FRAG_PASS
     layout(set = 1, binding = _bind_texture) uniform sampler2D tex;
 
     layout(location = 0) in vec3 vpos;
@@ -81,7 +85,7 @@ void set_seed(int id) {
         float cursor = 1.0 - max(center.x, center.y);
         fcolor = vec4(mix(color, vec3(0.0, 1.0, 1.0), cursor), 1.0);
     }
-#endif // FRAG_PASS
+#endif // MODEL_FRAG_PASS
 
 #ifdef BG_VERT_PASS
     void main() {

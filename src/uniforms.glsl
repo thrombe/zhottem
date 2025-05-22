@@ -54,6 +54,10 @@
      uint _pad;
  };
 
+ struct PushConstants {
+     uint first_draw_ctx;
+ };
+
  const int _bind_camera = 0;
  const int _bind_vertices = 1;
  const int _bind_indices = 2;
