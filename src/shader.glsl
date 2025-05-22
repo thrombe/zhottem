@@ -89,19 +89,14 @@ layout(set = 0, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuff
 
 #ifdef BG_VERT_PASS
     void main() {
-        float z = 1.0 - 0.000001;
-        vec3 positions[6] = vec3[6](
-            vec3(1.0, 1.0, z),
-            vec3(-1.0, 1.0, z),
-            vec3(1.0, -1.0, z),
-            vec3(1.0, -1.0, z),
-            vec3(-1.0, 1.0, z),
-            vec3(-1.0, -1.0, z)
-        );
+        DrawCtx ctx = draw_ctxts[gl_DrawID + push.first_draw_ctx];
+        Instance inst = instances[gl_InstanceIndex + ctx.first_instance];
+        Vertex v = vertices[indices[gl_VertexIndex + ctx.first_index] + ctx.first_vertex];
 
-        vec3 pos = positions[gl_VertexIndex];
+        vec4 pos = vec4(v.pos, 1.0);
+        pos.z = 1.0 - 0.000001;
 
-        gl_Position = vec4(pos, 1.0);
+        gl_Position = pos;
     }
 #endif // BG_VERT_PASS
 
