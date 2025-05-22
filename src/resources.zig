@@ -283,12 +283,20 @@ pub const ResourceManager = struct {
 
         fn did_change(self: *@This()) bool {
             var hasher = std.hash.Wyhash.init(0);
+
             for (self.batches.items) |batch| {
                 hasher.update(std.mem.asBytes(&batch.mesh));
                 hasher.update(std.mem.asBytes(&batch.material));
             }
+
             hasher.update(std.mem.asBytes(&self.draw_call_buffer.count));
             hasher.update(std.mem.asBytes(&self.draw_ctx_buffer.count));
+
+            var it = self.material_batches.iterator();
+            while (it.next()) |batch| {
+                hasher.update(std.mem.asBytes(&batch.value_ptr.batch.items.len));
+            }
+
             const hash = hasher.final();
             defer self.hash = hash;
             return self.hash != hash;
@@ -639,7 +647,7 @@ pub const ResourceManager = struct {
                     .offsets = &[_]u32{},
                     .calls = .{
                         .buffer = self.draw_call_buffer.current.buffer.buffer,
-                        .count = self.draw_call_buffer.count,
+                        .count = @intCast(batch.value_ptr.batch.items.len),
                         .stride = @sizeOf(DrawCall),
                         .offset = @intCast(@sizeOf(DrawCall) * count),
                     },
