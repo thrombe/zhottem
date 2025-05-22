@@ -70,6 +70,20 @@ pub const ResourceManager = struct {
         self.instances.deinit(device);
     }
 
+    pub fn add_binds(self: *@This(), builder: *render_utils.DescriptorSet.Builder) !void {
+        const add_to_set = struct {
+            fn func(set_builder: @TypeOf(builder), buf: *Buffer, bind: UniformBinds) !void {
+                try set_builder.add(buf, bind.bind());
+            }
+        }.func;
+
+        try add_to_set(builder, &self.asset_buffers.vertex_buffer, .vertices);
+        try add_to_set(builder, &self.asset_buffers.index_buffer, .indices);
+        try add_to_set(builder, &self.instances.instance_buffer.current.buffer, .instances);
+        try add_to_set(builder, &self.instances.bone_buffer.current.buffer, .bones);
+        try add_to_set(builder, &self.instances.draw_ctx_buffer.current.buffer, .call_ctxts);
+    }
+
     pub const BatchHandle = struct {
         index: u32,
     };

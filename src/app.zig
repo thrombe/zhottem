@@ -911,12 +911,8 @@ pub const RendererState = struct {
         var desc_set_builder = app.descriptor_pool.set_builder();
         defer desc_set_builder.deinit();
         try desc_set_builder.add(&app.uniforms, resources_mod.UniformBinds.camera.bind());
-        try desc_set_builder.add(&app.resources.asset_buffers.vertex_buffer, resources_mod.UniformBinds.vertices.bind());
-        try desc_set_builder.add(&app.resources.asset_buffers.index_buffer, resources_mod.UniformBinds.indices.bind());
-        try desc_set_builder.add(&app.resources.instances.instance_buffer.current.buffer, resources_mod.UniformBinds.instances.bind());
-        try desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer, resources_mod.UniformBinds.bones.bind());
-        try desc_set_builder.add(&app.resources.instances.draw_ctx_buffer.current.buffer, resources_mod.UniformBinds.call_ctxts.bind());
         try desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
+        try app.resources.add_binds(&desc_set_builder);
         var desc_set = try desc_set_builder.build(device);
         errdefer desc_set.deinit(device);
 
