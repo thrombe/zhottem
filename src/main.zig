@@ -377,6 +377,7 @@ const HotApp = struct {
     }
 
     fn pre_reload(self: *@This()) !void {
+        try self.app_state.pre_reload();
         try self.app.pre_reload();
         try self.engine.pre_reload();
     }
@@ -385,6 +386,7 @@ const HotApp = struct {
         allocator.* = self.gpa.allocator();
         try self.engine.post_reload();
         try self.app.post_reload();
+        try self.app_state.post_reload();
     }
 
     fn tick(self: *@This()) !bool {

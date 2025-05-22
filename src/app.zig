@@ -459,163 +459,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
             .rotation = t.transform.rotation,
         }),
     });
-    // t = .{
-    //     .pos = .{ .y = 50, .x = 50 },
-    //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .z = 1 }),
-    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    // };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("wall"),
-    //     t,
-    //     C.StaticRender{ .mesh = plane_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
-    // t = .{
-    //     .pos = .{ .y = 50, .x = -50 },
-    //     .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .z = 1 }),
-    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    // };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("wall"),
-    //     t,
-    //     C.StaticRender{ .mesh = plane_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
-    // t = .{
-    //     .pos = .{ .y = 50, .z = 50 },
-    //     .rotation = Vec4.quat_angle_axis(-std.math.pi / 2.0, .{ .x = 1 }),
-    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    // };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("wall"),
-    //     t,
-    //     C.StaticRender{ .mesh = plane_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
-    // t = .{
-    //     .pos = .{ .y = 50, .z = -50 },
-    //     .rotation = Vec4.quat_angle_axis(std.math.pi / 2.0, .{ .x = 1 }),
-    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    // };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("wall"),
-    //     t,
-    //     C.StaticRender{ .mesh = plane_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
-
-    // const object_mesh_handle = try cpu.add_mesh(&object);
-    // const object_instance_handle = try cpu.batch_reserve(1);
-    // try drawcalls.append(.{ .mesh = object_mesh_handle, .instances = object_instance_handle });
-    // try world.entities.append(.{
-    //     .name = "object",
-    //     .typ = .{ .object = true },
-    //     .transform = .{
-    //         .pos = .{ .y = 2 },
-    //         .scale = Vec4.splat3(0.2),
-    //     },
-    //     .mesh = object_mesh_handle,
-    // });
-
-    // for (sphere_instance_handle.first..(sphere_instance_handle.first + sphere_instance_handle.count), 0..) |_, i| {
-    //     if (i > 2) break;
-    //     _ = try world.ecs.insert(.{
-    //         try C.Name.from("persistent balls"),
-    //         C.Transform{ .pos = .{ .x = @floatFromInt(i * 3), .y = 5 } },
-    //         C.Rigidbody{},
-    //         C.AnimatedRender{ .model = sphere_model_handle },
-    //     });
-    // }
-
-    // t = C.Transform{ .pos = .{ .x = 4, .y = 2 }, .scale = Vec4.splat3(2) };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("block"),
-    //     t,
-    //     C.StaticRender{ .mesh = cube_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
-
-    // t = C.Transform{ .pos = .{ .x = -4, .y = 2 }, .scale = Vec4.splat3(1.5) };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("block"),
-    //     t,
-    //     C.StaticRender{ .mesh = cube_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.scale.xyz() } },
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
-
-    // const bones = try allocator.alloc(math.Mat4x4, assets.bunny.bones.len);
-    // // errdefer allocator.free(bones);
-    // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.bunny.bones.len);
-    // // errdefer allocator.free(indices);
-    // @memset(bones, .{});
-    // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
-    // t = C.Transform{ .pos = .{ .x = 20, .y = 5 } };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("dance"),
-    //     t,
-    //     // C.StaticRender{ .mesh = static_bunny_mesh_handle },
-    //     C.AnimatedRender{ .model = bunny_model_handle, .bones = bones, .indices = indices },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .mesh = .{
-    //             .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.bunny.mesh.faces)),
-    //             .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.bunny.mesh.vertices)),
-    //         } },
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //         .motion_type = .static,
-    //     }),
-    // });
-
-    // t = C.Transform{ .pos = .{ .z = 4, .y = 50 } };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("ball"),
-    //     t,
-    //     C.StaticRender{ .mesh = sphere_mesh_handle },
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .mesh = .{
-    //             .index_buffer = std.mem.bytesAsSlice(u32, std.mem.sliceAsBytes(assets.sphere.mesh.faces)),
-    //             .vertex_buffer = std.mem.bytesAsSlice(f32, std.mem.sliceAsBytes(assets.sphere.mesh.vertices)),
-    //         } },
-    //         .friction = 0.4,
-    //         .rotation = t.rotation,
-    //         .pos = t.pos.xyz(),
-    //     }),
-    // });
 
     try cmdbuf.apply(@ptrCast(&world));
 
@@ -1081,6 +924,16 @@ pub const AppState = struct {
     pub fn deinit(self: *@This()) void {
         allocator.free(self.uniform_buffer);
         self.cmdbuf.deinit();
+    }
+
+    pub fn pre_reload(self: *@This()) !void {
+        _ = self;
+    }
+
+    pub fn post_reload(self: *@This()) !void {
+        _ = self.resize_fuse.fuse();
+        _ = self.shader_fuse.fuse();
+        _ = self.cmdbuf_fuse.fuse();
     }
 
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
