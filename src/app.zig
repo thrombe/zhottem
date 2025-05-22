@@ -808,8 +808,7 @@ pub fn present(
 pub const RendererState = struct {
     swapchain: Swapchain,
     cmdbuffer: CmdBuffer,
-    camera_descriptor_set: DescriptorSet,
-    model_descriptor_set: DescriptorSet,
+    descriptor_set: DescriptorSet,
 
     stages: ShaderStageManager,
     pipelines: Pipelines,
@@ -865,16 +864,14 @@ pub const RendererState = struct {
         var self: @This() = .{
             .stages = stages,
             .pipelines = pipelines,
-            .camera_descriptor_set = undefined,
-            .model_descriptor_set = undefined,
+            .descriptor_set = undefined,
             .swapchain = swapchain,
             .pool = app.command_pool,
             .cmdbuffer = undefined,
         };
 
         try self.create_pipelines(engine, app, false);
-        errdefer self.camera_descriptor_set.deinit(device);
-        errdefer self.model_descriptor_set.deinit(device);
+        errdefer self.descriptor_set.deinit(device);
         errdefer {
             var it = self.pipelines.iterator();
             while (it.next()) |p| {
@@ -911,22 +908,17 @@ pub const RendererState = struct {
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
-        var camera_desc_set_builder = app.descriptor_pool.set_builder();
-        defer camera_desc_set_builder.deinit();
-        try camera_desc_set_builder.add(&app.uniforms, resources_mod.UniformBinds.camera.bind());
-        var camera_desc_set = try camera_desc_set_builder.build(device);
-        errdefer camera_desc_set.deinit(device);
-
-        var model_desc_set_builder = app.descriptor_pool.set_builder();
-        defer model_desc_set_builder.deinit();
-        try model_desc_set_builder.add(&app.resources.asset_buffers.vertex_buffer, resources_mod.UniformBinds.vertices.bind());
-        try model_desc_set_builder.add(&app.resources.asset_buffers.index_buffer, resources_mod.UniformBinds.indices.bind());
-        try model_desc_set_builder.add(&app.resources.instances.instance_buffer.current.buffer, resources_mod.UniformBinds.instances.bind());
-        try model_desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer, resources_mod.UniformBinds.bones.bind());
-        try model_desc_set_builder.add(&app.resources.instances.draw_ctx_buffer.current.buffer, resources_mod.UniformBinds.call_ctxts.bind());
-        try model_desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
-        var model_desc_set = try model_desc_set_builder.build(device);
-        errdefer model_desc_set.deinit(device);
+        var desc_set_builder = app.descriptor_pool.set_builder();
+        defer desc_set_builder.deinit();
+        try desc_set_builder.add(&app.uniforms, resources_mod.UniformBinds.camera.bind());
+        try desc_set_builder.add(&app.resources.asset_buffers.vertex_buffer, resources_mod.UniformBinds.vertices.bind());
+        try desc_set_builder.add(&app.resources.asset_buffers.index_buffer, resources_mod.UniformBinds.indices.bind());
+        try desc_set_builder.add(&app.resources.instances.instance_buffer.current.buffer, resources_mod.UniformBinds.instances.bind());
+        try desc_set_builder.add(&app.resources.instances.bone_buffer.current.buffer, resources_mod.UniformBinds.bones.bind());
+        try desc_set_builder.add(&app.resources.instances.draw_ctx_buffer.current.buffer, resources_mod.UniformBinds.call_ctxts.bind());
+        try desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
+        var desc_set = try desc_set_builder.build(device);
+        errdefer desc_set.deinit(device);
 
         var it = self.pipelines.iterator();
         while (it.next()) |pipeline| {
@@ -941,8 +933,7 @@ pub const RendererState = struct {
                     .depth_format = app.depth_image.format,
                 },
                 .desc_set_layouts = &.{
-                    camera_desc_set.layout,
-                    model_desc_set.layout,
+                    desc_set.layout,
                 },
                 .push_constant_ranges = &[_]vk.PushConstantRange{.{
                     .stage_flags = .{
@@ -956,11 +947,9 @@ pub const RendererState = struct {
         }
 
         if (initialized) {
-            self.camera_descriptor_set.deinit(device);
-            self.model_descriptor_set.deinit(device);
+            self.descriptor_set.deinit(device);
         }
-        self.camera_descriptor_set = camera_desc_set;
-        self.model_descriptor_set = model_desc_set;
+        self.descriptor_set = desc_set;
     }
 
     pub fn create_cmdbuf(self: *@This(), engine: *Engine, app: *App) !CmdBuffer {
@@ -984,8 +973,7 @@ pub const RendererState = struct {
             device,
             &cmdbuf,
             &[_]vk.DescriptorSet{
-                self.camera_descriptor_set.set,
-                self.model_descriptor_set.set,
+                self.descriptor_set.set,
             },
             &self.pipelines,
         );
@@ -1009,8 +997,7 @@ pub const RendererState = struct {
         defer self.swapchain.deinit(device);
         defer self.cmdbuffer.deinit(device);
 
-        defer self.camera_descriptor_set.deinit(device);
-        defer self.model_descriptor_set.deinit(device);
+        defer self.descriptor_set.deinit(device);
 
         defer self.stages.deinit();
         defer {

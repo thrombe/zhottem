@@ -21,19 +21,19 @@ layout(push_constant) uniform PushConstantsUniform {
 
 // apprently restrict + readonly / writeonly helps shader optimizer.
 // here it won't do anything here either way (vert shaders can't write)
-layout(set = 1, binding = _bind_vertices) readonly restrict buffer VertexBuffer {
+layout(set = 0, binding = _bind_vertices) readonly restrict buffer VertexBuffer {
     Vertex vertices[];
 };
-layout(set = 1, binding = _bind_indices) readonly restrict buffer IndexBuffer {
+layout(set = 0, binding = _bind_indices) readonly restrict buffer IndexBuffer {
     uint indices[];
 };
-layout(set = 1, binding = _bind_instances) readonly restrict buffer InstanceBuffer {
+layout(set = 0, binding = _bind_instances) readonly restrict buffer InstanceBuffer {
     Instance instances[];
 };
-layout(set = 1, binding = _bind_bones) readonly restrict buffer BoneBuffer {
+layout(set = 0, binding = _bind_bones) readonly restrict buffer BoneBuffer {
     mat4 bones[];
 };
-layout(set = 1, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuffer {
+layout(set = 0, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuffer {
     DrawCtx draw_ctxts[];
 };
 
@@ -67,7 +67,7 @@ layout(set = 1, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuff
 #endif // MODEL_VERT_PASS
 
 #ifdef MODEL_FRAG_PASS
-    layout(set = 1, binding = _bind_texture) uniform sampler2D tex;
+    layout(set = 0, binding = _bind_texture) uniform sampler2D tex;
 
     layout(location = 0) in vec3 vpos;
     layout(location = 1) in vec3 vnormal;
