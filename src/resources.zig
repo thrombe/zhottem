@@ -585,13 +585,16 @@ pub const ResourceManager = struct {
 
             const gpu_items: [*]DrawCall = @ptrCast(@alignCast(data));
 
-            for (self.batches.items) |batch| {
+            var it = self.material_batches.iterator();
+            while (it.next()) |mbatch| for (mbatch.value_ptr.batch.items) |hbatch| {
                 if (buf.count >= buf.current.capacity) {
                     if (buf.state == .enough) {
                         buf.state = .out_of_objects;
                     }
                     break;
                 }
+
+                const batch = &self.batches.items[hbatch.index];
 
                 gpu_items[buf.count] = .{
                     .index_count = batch.mesh.regions.index.count,
@@ -601,7 +604,7 @@ pub const ResourceManager = struct {
                     .first_instance = 0,
                 };
                 buf.count += 1;
-            }
+            };
         }
 
         fn update_draw_ctxts(self: *@This(), device: *Device) !void {
@@ -611,7 +614,8 @@ pub const ResourceManager = struct {
 
             const gpu_items: [*]DrawCtx = @ptrCast(@alignCast(data));
 
-            for (self.batches.items) |*batch| {
+            var it = self.material_batches.iterator();
+            while (it.next()) |mbatch| for (mbatch.value_ptr.batch.items) |hbatch| {
                 if (buf.count >= buf.current.capacity) {
                     if (buf.state == .enough) {
                         buf.state = .out_of_objects;
@@ -619,13 +623,15 @@ pub const ResourceManager = struct {
                     break;
                 }
 
+                const batch = &self.batches.items[hbatch.index];
+
                 gpu_items[buf.count] = .{
                     .first_vertex = batch.mesh.regions.vertex.first,
                     .first_index = batch.mesh.regions.index.first,
                     .first_instance = batch.first_draw,
                 };
                 buf.count += 1;
-            }
+            };
         }
 
         pub fn draw(
