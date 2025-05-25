@@ -401,9 +401,10 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var cmdbuf = world.ecs.deferred();
     defer cmdbuf.deinit();
 
-    var t: C.GlobalTransform = .{ .transform = .{
+    var t: C.GlobalTransform = .{};
+    t.transform = .{
         .pos = .{ .y = 5 },
-    } };
+    };
     const player_id = try cmdbuf.insert(.{
         try C.Name.from("player"),
         math.Camera.init(
@@ -424,16 +425,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         }),
     });
 
-    try loader_mod.spawn_node(
-        &world,
-        &assets,
-        &cmdbuf,
-        handles.gltf.library,
-        "person_ig",
-        .{ .pos = .{ .z = 5, .y = 1 }, .scale = .splat(4) },
-        handles.material.models,
-    );
-    try loader_mod.spawn_node(
+    _ = try loader_mod.spawn_node(
         &world,
         &assets,
         &cmdbuf,
@@ -442,23 +434,59 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .{},
         handles.material.background,
     );
+    _ = try loader_mod.spawn_node(
+        &world,
+        &assets,
+        &cmdbuf,
+        handles.gltf.library,
+        "ground",
+        .{},
+        handles.material.models,
+    );
+    _ = try loader_mod.spawn_node(
+        &world,
+        &assets,
+        &cmdbuf,
+        handles.gltf.library,
+        "wall",
+        .{},
+        handles.material.models,
+    );
+    _ = try loader_mod.spawn_node(
+        &world,
+        &assets,
+        &cmdbuf,
+        handles.gltf.library,
+        "castle",
+        .{},
+        handles.material.models,
+    );
+    _ = try loader_mod.spawn_node(
+        &world,
+        &assets,
+        &cmdbuf,
+        handles.gltf.library,
+        "person_ig",
+        .{ .pos = .{ .z = 5, .y = 1 }, .scale = .splat(4) },
+        handles.material.models,
+    );
 
-    t.transform = .{
-        .pos = .{ .y = -5.5 },
-        .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    };
-    _ = try cmdbuf.insert(.{
-        try C.Name.from("floor"),
-        t,
-        C.StaticMesh{ .mesh = handles.mesh.plane, .material = handles.material.models },
-        C.BatchedRender{},
-        try world.phy.add_body(.{
-            .shape = .{ .box = .{ .size = t.transform.scale } },
-            .motion_type = .static,
-            .friction = 0.4,
-            .rotation = t.transform.rotation,
-        }),
-    });
+    // t.transform = .{
+    //     .pos = .{ .y = -5.5 },
+    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+    // };
+    // _ = try cmdbuf.insert(.{
+    //     try C.Name.from("floor"),
+    //     t,
+    //     C.StaticMesh{ .mesh = handles.mesh.plane, .material = handles.material.models },
+    //     C.BatchedRender{},
+    //     try world.phy.add_body(.{
+    //         .shape = .{ .box = .{ .size = t.transform.scale } },
+    //         .motion_type = .static,
+    //         .friction = 0.4,
+    //         .rotation = t.transform.rotation,
+    //     }),
+    // });
 
     try cmdbuf.apply(@ptrCast(&world));
 

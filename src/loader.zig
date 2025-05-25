@@ -114,7 +114,7 @@ pub fn spawn_node(
     name: []const u8,
     transform: C.Transform,
     material: ResourceManager.MaterialHandle,
-) !void {
+) !Entity {
     const gltf = cpu.ref(gltf_handle);
     const info = &gltf.gltf.info.value;
 
@@ -130,7 +130,7 @@ pub fn spawn_node(
     const node = if (ni) |i| &nodes[i] else return error.NodeNotFound;
     std.debug.print("spawning {s} node\n", .{node.name});
 
-    _ = try _spawn_node(
+    const entity = try _spawn_node(
         world,
         cpu,
         cmdbuf,
@@ -140,6 +140,8 @@ pub fn spawn_node(
         transform,
         material,
     );
+
+    return entity;
 }
 
 fn _spawn_node(
