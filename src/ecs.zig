@@ -486,7 +486,8 @@ pub const EntityComponentStore = struct {
                 try archetype.components[i].appendSlice(std.mem.asBytes(&component));
             } else {
                 defer j += 1;
-                try archetype.components[i].appendSlice(curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size]);
+                const comp_mem = curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size];
+                try archetype.components[i].appendSlice(comp_mem);
             }
         }
     }
@@ -525,13 +526,25 @@ pub const EntityComponentStore = struct {
         while (curr_archetype.components.len > j) : (j += 1) {
             const curr_compid = it.next().?;
 
+            const comp_mem = curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size];
             if (std.meta.eql(compid, curr_compid)) {
-                self.vtables.items[compid.id].maybe_deinit(@ptrCast(curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size].ptr), ctx);
+                self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
             } else {
                 defer i += 1;
-                try archetype.components[i].appendSlice(curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size]);
+                try archetype.components[i].appendSlice(comp_mem);
             }
         }
+    }
+
+    pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
+        const compid = try self.get_component_id(@TypeOf(component));
+        const ae = self.entities.getEntry(entity) orelse return error.EntityNotFound;
+        const archetype = &self.archetypes.items[ae.value_ptr.archetype];
+
+        const ci = archetype.typ.index(compid).?;
+        const comp_mem = archetype.components[ci].items[ae.value_ptr.entity_index * compid.size ..][0..compid.size];
+        self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
+        @memcpy(comp_mem, std.mem.asBytes(&component));
     }
 
     pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(typ) {
@@ -698,6 +711,7 @@ pub const EntityComponentStore = struct {
             inserted: Inserted = .{},
             deleted: Deleted = .{},
             added_components: Added = .{},
+            overwritten_components: Overwritten = .{},
             removed_components: Removed = .{},
         } = .{},
 
@@ -711,6 +725,11 @@ pub const EntityComponentStore = struct {
             entity: Entity,
             component: *anyopaque,
             addfn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
+        });
+        const Overwritten = std.ArrayListUnmanaged(struct {
+            entity: Entity,
+            component: *anyopaque,
+            overwritefn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
         });
         const Removed = std.ArrayListUnmanaged(struct {
             entity: Entity,
@@ -742,6 +761,10 @@ pub const EntityComponentStore = struct {
 
             for (self.impl.added_components.items) |*t| {
                 try t.addfn(self.ecs, t.entity, t.component, ctx);
+            }
+
+            for (self.impl.overwritten_components.items) |*t| {
+                try t.overwritefn(self.ecs, t.entity, t.component, ctx);
             }
 
             for (self.impl.removed_components.items) |*t| {
@@ -797,6 +820,19 @@ pub const EntityComponentStore = struct {
                         try ecs.add_component(e, comp.*, ctx);
                     }
                 }).add_component),
+            });
+        }
+
+        pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype) !void {
+            const alloc = self.alloc.allocator();
+            try self.impl.overwritten_components.append(alloc, .{
+                .entity = entity,
+                .component = @ptrCast(try self.allocated(component)),
+                .overwritefn = @ptrCast(&(struct {
+                    fn overwrite_component(ecs: *EntityComponentStore, e: Entity, comp: *@TypeOf(component), ctx: *anyopaque) !void {
+                        try ecs.overwrite_component(e, comp.*, ctx);
+                    }
+                }).overwrite_component),
             });
         }
 
