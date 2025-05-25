@@ -694,10 +694,12 @@ pub const EntityComponentStore = struct {
         ecs: *EntityComponentStore,
         alloc: std.heap.ArenaAllocator,
 
-        inserted: Inserted = .{},
-        deleted: Deleted = .{},
-        added_components: Added = .{},
-        removed_components: Removed = .{},
+        impl: struct {
+            inserted: Inserted = .{},
+            deleted: Deleted = .{},
+            added_components: Added = .{},
+            removed_components: Removed = .{},
+        } = .{},
 
         const Inserted = std.ArrayListUnmanaged(struct {
             entity: Entity,
@@ -728,28 +730,25 @@ pub const EntityComponentStore = struct {
 
         fn reset(self: *@This()) void {
             _ = self.alloc.reset(.retain_capacity);
-            self.inserted = .{};
-            self.deleted = .{};
-            self.added_components = .{};
-            self.removed_components = .{};
+            self.impl = .{};
         }
 
         pub fn apply(self: *@This(), ctx: *anyopaque) !void {
             defer self.reset();
 
-            for (self.inserted.items) |*t| {
+            for (self.impl.inserted.items) |*t| {
                 try t.insertfn(self.ecs, t.entity, t.bundle, ctx);
             }
 
-            for (self.added_components.items) |*t| {
+            for (self.impl.added_components.items) |*t| {
                 try t.addfn(self.ecs, t.entity, t.component, ctx);
             }
 
-            for (self.removed_components.items) |*t| {
+            for (self.impl.removed_components.items) |*t| {
                 try t.rmfn(self.ecs, t.entity, ctx);
             }
 
-            for (self.deleted.items) |t| {
+            for (self.impl.deleted.items) |t| {
                 try self.ecs.delete(t, ctx);
             }
         }
@@ -777,7 +776,7 @@ pub const EntityComponentStore = struct {
         pub fn insert_reserved(self: *@This(), e: Entity, components: anytype) !void {
             const alloc = self.alloc.allocator();
 
-            try self.inserted.append(alloc, .{
+            try self.impl.inserted.append(alloc, .{
                 .entity = e,
                 .bundle = @ptrCast(try self.allocated(components)),
                 .insertfn = @ptrCast(&(struct {
@@ -790,7 +789,7 @@ pub const EntityComponentStore = struct {
 
         pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
             const alloc = self.alloc.allocator();
-            try self.added_components.append(alloc, .{
+            try self.impl.added_components.append(alloc, .{
                 .entity = entity,
                 .component = @ptrCast(try self.allocated(component)),
                 .addfn = @ptrCast(&(struct {
@@ -803,7 +802,7 @@ pub const EntityComponentStore = struct {
 
         pub fn remove_component(self: *@This(), entity: Entity, component: type) !void {
             const alloc = self.alloc.allocator();
-            try self.removed_components.append(alloc, .{
+            try self.impl.removed_components.append(alloc, .{
                 .entity = entity,
                 .rmfn = @ptrCast(&(struct {
                     fn remove_component(ecs: *EntityComponentStore, e: Entity, ctx: *anyopaque) !void {
@@ -814,7 +813,7 @@ pub const EntityComponentStore = struct {
         }
 
         pub fn delete(self: *@This(), entity: Entity) !void {
-            try self.deleted.append(self.alloc.allocator(), entity);
+            try self.impl.deleted.append(self.alloc.allocator(), entity);
         }
     };
 };
