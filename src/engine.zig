@@ -291,6 +291,31 @@ pub const Window = struct {
             };
         }
 
+        // for the case where multiple physical keys map to the same logical key
+        // like for cases when you don't care about which 'shift' is pressed.
+        fn merge(self: @This(), o: @This()) @This() {
+            // .tick() is run first every frame
+            // then .from_int() is run
+            // then .merge() is called
+            return switch (self) {
+                .none => o,
+                .press => switch (o) {
+                    .none => .press,
+                    .press => .press,
+                    .repeat => .repeat,
+                    .release => .repeat,
+                },
+                .repeat => .repeat,
+                .release => switch (o) {
+                    .none => .release,
+                    .press => .repeat,
+                    .repeat => .repeat,
+                    .release => .release,
+                },
+            };
+        }
+
+        // the only real thing this does is .release => .none state change
         fn tick(self: anytype) void {
             self.* = switch (self.*) {
                 .none => .none,
@@ -388,6 +413,17 @@ pub const Window = struct {
                     @field(self, field.name).tick();
                 }
             }
+
+            fn merge(self: anytype) void {
+                // this line is mainly cuz i want to hint the compiler
+                // that self is *@This() but i can't type it in the signature nicely
+                // not sure how the compiler even knows if we want to have *@This() or @This() here
+                const keys = self.*;
+                self.shift = keys.shift_l.merge(keys.shift_r);
+                self.ctrl = keys.ctrl_l.merge(keys.ctrl_r);
+                self.alt = keys.alt_l.merge(keys.alt_r);
+                self.super = keys.super_l.merge(keys.super_r);
+            }
         } = .{},
     };
 
@@ -471,38 +507,14 @@ pub const Window = struct {
                 c.GLFW_KEY_X => global_window.input_state.keys.x = a,
                 c.GLFW_KEY_Y => global_window.input_state.keys.y = a,
                 c.GLFW_KEY_Z => global_window.input_state.keys.z = a,
-                c.GLFW_KEY_LEFT_SHIFT => {
-                    global_window.input_state.keys.shift = a;
-                    global_window.input_state.keys.shift_l = a;
-                },
-                c.GLFW_KEY_LEFT_CONTROL => {
-                    global_window.input_state.keys.ctrl = a;
-                    global_window.input_state.keys.ctrl_l = a;
-                },
-                c.GLFW_KEY_LEFT_ALT => {
-                    global_window.input_state.keys.alt = a;
-                    global_window.input_state.keys.alt_l = a;
-                },
-                c.GLFW_KEY_LEFT_SUPER => {
-                    global_window.input_state.keys.super = a;
-                    global_window.input_state.keys.super_l = a;
-                },
-                c.GLFW_KEY_RIGHT_SHIFT => {
-                    global_window.input_state.keys.shift = a;
-                    global_window.input_state.keys.shift_r = a;
-                },
-                c.GLFW_KEY_RIGHT_CONTROL => {
-                    global_window.input_state.keys.ctrl = a;
-                    global_window.input_state.keys.ctrl_r = a;
-                },
-                c.GLFW_KEY_RIGHT_ALT => {
-                    global_window.input_state.keys.alt = a;
-                    global_window.input_state.keys.alt_r = a;
-                },
-                c.GLFW_KEY_RIGHT_SUPER => {
-                    global_window.input_state.keys.super = a;
-                    global_window.input_state.keys.super_r = a;
-                },
+                c.GLFW_KEY_LEFT_SHIFT => global_window.input_state.keys.shift_l = a,
+                c.GLFW_KEY_LEFT_CONTROL => global_window.input_state.keys.ctrl_l = a,
+                c.GLFW_KEY_LEFT_ALT => global_window.input_state.keys.alt_l = a,
+                c.GLFW_KEY_LEFT_SUPER => global_window.input_state.keys.super_l = a,
+                c.GLFW_KEY_RIGHT_SHIFT => global_window.input_state.keys.shift_r = a,
+                c.GLFW_KEY_RIGHT_CONTROL => global_window.input_state.keys.ctrl_r = a,
+                c.GLFW_KEY_RIGHT_ALT => global_window.input_state.keys.alt_r = a,
+                c.GLFW_KEY_RIGHT_SUPER => global_window.input_state.keys.super_r = a,
                 c.GLFW_KEY_ESCAPE => global_window.input_state.keys.escape = a,
                 c.GLFW_KEY_SPACE => global_window.input_state.keys.space = a,
                 c.GLFW_KEY_BACKSPACE => global_window.input_state.keys.backspace = a,
@@ -575,6 +587,8 @@ pub const Window = struct {
 
         // polls events and calls callbacks
         c.glfwPollEvents();
+
+        self.input_state.keys.merge();
     }
 
     pub fn is_pressed(self: *@This(), key: c_int) bool {
@@ -748,12 +762,6 @@ pub const VulkanContext = struct {
                         .shader_draw_parameters = vk.TRUE,
                     })),
                 }),
-                // .p_next = @ptrCast(&vk.PhysicalDeviceSynchronization2Features{
-                //     .synchronization_2 = vk.TRUE,
-                //     .p_next = @ptrCast(@constCast(&vk.PhysicalDeviceDynamicRenderingFeatures{
-                //         .dynamic_rendering = vk.TRUE,
-                //     })),
-                // }),
                 .queue_create_info_count = queue_count,
                 .p_queue_create_infos = &qci,
                 .enabled_extension_count = required_device_extensions.len,
@@ -762,6 +770,7 @@ pub const VulkanContext = struct {
                     .fill_mode_non_solid = vk.TRUE,
                     .multi_draw_indirect = vk.TRUE,
                     // .vertex_pipeline_stores_and_atomics = vk.TRUE,
+                    // .fragment_stores_and_atomics = vk.TRUE,
                 },
             }, null);
             break :blk device;
@@ -796,7 +805,6 @@ pub const VulkanContext = struct {
         self.instance.destroySurfaceKHR(self.surface, null);
         self.instance.destroyInstance(null);
 
-        // Don't forget to free the tables to prevent a memory leak.
         allocator.destroy(self.device.wrapper);
         allocator.destroy(self.instance.wrapper);
     }
