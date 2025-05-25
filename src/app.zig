@@ -1077,7 +1077,7 @@ pub const AppState = struct {
                         } };
                         _ = try self.cmdbuf.insert(.{
                             try C.Name.from("player"),
-                            t,
+                            C.GlobalTransform{ .transform = t },
                             C.Controller{},
                             C.StaticMesh{ .mesh = app.handles.mesh.cube, .material = app.handles.material.models },
                             C.BatchedRender{},
