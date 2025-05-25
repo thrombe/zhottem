@@ -1226,15 +1226,26 @@ pub const AppState = struct {
                                 // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
 
                                 const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
-                                const t = C.GlobalTransform{ .transform = .{ .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)), .scale = .splat(rng.next()) } };
-                                _ = try self.cmdbuf.insert(.{
-                                    try C.Name.from("bullet"),
-                                    t,
-                                    // C.Rigidbody{ .flags = .{}, .vel = fwd.scale(50.0), .invmass = 1, .friction = 1 },
-                                    // C.AnimatedRender{ .model = app.handles.model.sphere, .bones = bones, .indices = indices },
-                                    C.StaticMesh{ .mesh = app.handles.mesh.cube, .material = app.handles.material.models },
-                                    C.BatchedRender{},
-                                    C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive },
+                                const t = C.GlobalTransform{
+                                    .transform = .{
+                                        .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)),
+                                        .scale = .splat(rng.next()),
+                                        .rotation = Vec4.quat_from_diff(.{ .y = 1 }, fwd),
+                                    },
+                                };
+                                const entity = try loader_mod.spawn_node(
+                                    &app.world,
+                                    assets,
+                                    &self.cmdbuf,
+                                    app.handles.gltf.library,
+                                    "sword_18",
+                                    t.transform,
+                                    app.handles.material.models,
+                                );
+                                try self.cmdbuf.add_component(entity, C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive });
+                                try self.cmdbuf.add_component(entity, try C.Name.from("sword_bullet"));
+                                try self.cmdbuf.overwrite_component(
+                                    entity,
                                     try app.world.phy.add_body(.{
                                         .shape = .{ .box = .{ .size = t.transform.scale } },
                                         .pos = t.transform.pos,
@@ -1243,7 +1254,7 @@ pub const AppState = struct {
                                         .rotation = t.transform.rotation,
                                         .motion_quality = .linear_cast,
                                     }),
-                                });
+                                );
                                 _ = try self.cmdbuf.insert(.{
                                     C.TimeDespawn{
                                         .despawn_time = self.time + assets.ref(app.handles.audio.shot).duration_sec(),
