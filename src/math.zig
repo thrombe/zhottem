@@ -242,6 +242,19 @@ pub const Vec4 = extern struct {
         };
     }
 
+    // rotate by the angle diff between a and b
+    // and the axis orthogonal to the plane formed by these vecs
+    pub fn quat_from_diff(a: Vec3, b: Vec3) @This() {
+        const da = a.normalize();
+        const db = b.normalize();
+        const axis = da.cross(db);
+        const d = da.dot(db);
+        if (d > 0.9999) return .quat_identity_rot();
+        if (d < -0.9999) return @This().quat_identity_rot().scale(-1);
+        const theta = std.math.acos(d);
+        return @This().quat_angle_axis(theta, axis);
+    }
+
     // - [How to Use Quaternions - YouTube](https://www.youtube.com/watch?v=bKd2lPjl92c)
     // use this for rotation relative to world axes
     pub fn quat_global_rot(self: *const @This(), other: @This()) @This() {
