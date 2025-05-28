@@ -38,6 +38,7 @@ pub const Jphysics = struct {
         character_contact_listener: Impl.MyCharacterContactListener = .{},
         object_layer_filter: Impl.MyObjectLayerFilter = .{},
         broadphase_layer_filter: Impl.MyBroadphaseLayerFilter = .{},
+        debug_renderer: ?Impl.MyDebugRenderer = null,
     };
 
     pub const BodyId = struct {
@@ -65,6 +66,13 @@ pub const Jphysics = struct {
         errdefer allocator.destroy(state);
         state.* = .{};
 
+        state.debug_renderer = try .init();
+        try jolt.DebugRenderer.init(@ptrCast(&state.debug_renderer));
+        errdefer {
+            jolt.DebugRenderer.deinit();
+            state.debug_renderer = null;
+        }
+
         var ps = try jolt.PhysicsSystem.create(
             state.broadphase_layer_interface.interface(),
             state.obj_vs_broadphase_layer_interface.interface(),
@@ -85,6 +93,11 @@ pub const Jphysics = struct {
 
     pub fn deinit(self: *@This()) void {
         self.phy.destroy();
+
+        jolt.DebugRenderer.deinit(@ptrCast(&self.state.debug_renderer));
+        self.state.debug_renderer.?.deinit();
+        self.state.debug_renderer = null;
+
         jolt.deinit();
         allocator.destroy(self.state);
     }
@@ -222,6 +235,28 @@ pub const Jphysics = struct {
 
     pub fn set_rotation(self: *@This(), bid: BodyId, rot: Vec4) void {
         self.phy.getBodyInterfaceMut().setRotation(bid.id, rot.to_buf());
+    }
+
+    pub fn render_clear(self: *@This()) void {
+        _ = self.state.debug_renderer orelse return;
+
+        if (self.state.debug_renderer) |*dbg| {
+            dbg.clear();
+        }
+    }
+
+    pub fn render_tick(self: *@This()) void {
+        _ = self.state.debug_renderer orelse return;
+
+        self.phy.drawBodies(&jolt.DebugRenderer.BodyDrawSettings{
+            .shape = true,
+            .shape_wireframe = true,
+            // .center_of_mass_transform = true,
+            // .world_transform = true,
+            // .velocity = true,
+            // .mass_and_inertia = true,
+            // .sleep_stats = true,
+        }, null);
     }
 
     pub const BodySettings = struct {
@@ -573,6 +608,168 @@ pub const Jphysics = struct {
                 _ = physics_system;
                 const self = @as(*MyPhysicsStepListener, @ptrCast(psl));
                 self.steps_heard += 1;
+            }
+        };
+
+        const MyDebugRenderer = extern struct {
+            usingnamespace jolt.DebugRenderer.Methods(@This());
+            __v: *const jolt.DebugRenderer.VTable(@This()) = &vtable,
+
+            state: *RenderState,
+
+            const vtable = jolt.DebugRenderer.VTable(@This()){
+                .drawLine = _drawLine,
+                // .drawTriangle = _drawTriangle,
+                // .createTriangleBatch = _createTriangleBatch,
+                // .createTriangleBatchIndexed = _createTriangleBatchIndexed,
+                // .drawGeometry = _drawGeometry,
+                .drawText3D = _drawText3D,
+            };
+
+            const Real = jolt.Real;
+            const RMatrix = jolt.RMatrix;
+            const AABox = jolt.AABox;
+            const Color = jolt.DebugRenderer.Color;
+            const Triangle = jolt.DebugRenderer.Triangle;
+            const Vertex = jolt.DebugRenderer.Vertex;
+            const Geometry = jolt.DebugRenderer.Geometry;
+            const CullMode = jolt.DebugRenderer.CullMode;
+            const CastShadow = jolt.DebugRenderer.CastShadow;
+            const DrawMode = jolt.DebugRenderer.DrawMode;
+
+            const LineVertex = struct {
+                pos: Vec3,
+                color: Vec4,
+            };
+            const RenderState = struct {
+                lock: std.Thread.Mutex = .{},
+                lines: std.ArrayList(LineVertex),
+            };
+
+            pub fn init() !@This() {
+                const state = try allocator.create(RenderState);
+                errdefer allocator.destroy(state);
+                state.* = .{
+                    .lines = .init(allocator.*),
+                };
+                return .{ .state = state };
+            }
+
+            pub fn deinit(self: *@This()) void {
+                defer allocator.destroy(self.state);
+                self.state.lock.lock();
+                defer self.state.lock.unlock();
+
+                self.state.lines.deinit();
+            }
+
+            // clear buffers every frame before physics tick
+            pub fn clear(self: *@This()) void {
+                self.state.lock.lock();
+                defer self.state.lock.unlock();
+
+                std.debug.print("dbg vertices {}\n", .{self.state.lines.items.len});
+                self.state.lines.clearRetainingCapacity();
+            }
+
+            fn _drawLine(
+                self: *@This(),
+                from: *const [3]Real,
+                to: *const [3]Real,
+                color: Color,
+            ) callconv(.C) void {
+                self.state.lock.lock();
+                defer self.state.lock.unlock();
+
+                self.state.lines.append(.{
+                    .pos = .from_buf(from),
+                    .color = .{
+                        .x = @as(f32, @floatFromInt(color.comp.r)) / 255.0,
+                        .y = @as(f32, @floatFromInt(color.comp.g)) / 255.0,
+                        .z = @as(f32, @floatFromInt(color.comp.b)) / 255.0,
+                        .w = @as(f32, @floatFromInt(color.comp.a)) / 255.0,
+                    },
+                }) catch @panic("oom");
+                self.state.lines.append(.{
+                    .pos = .from_buf(to),
+                    .color = .{
+                        .x = @as(f32, @floatFromInt(color.comp.r)) / 255.0,
+                        .y = @as(f32, @floatFromInt(color.comp.g)) / 255.0,
+                        .z = @as(f32, @floatFromInt(color.comp.b)) / 255.0,
+                        .w = @as(f32, @floatFromInt(color.comp.a)) / 255.0,
+                    },
+                }) catch @panic("oom");
+            }
+            fn _drawTriangle(
+                self: *@This(),
+                v1: *const [3]Real,
+                v2: *const [3]Real,
+                v3: *const [3]Real,
+                color: Color,
+            ) callconv(.C) void {
+                _ = self;
+                _ = v1;
+                _ = v2;
+                _ = v3;
+                _ = color;
+            }
+            fn _createTriangleBatch(
+                self: *@This(),
+                triangles: [*]Triangle,
+                triangle_count: u32,
+            ) callconv(.C) *anyopaque {
+                _ = self;
+                _ = triangles;
+                _ = triangle_count;
+                @panic("oof");
+            }
+            fn _createTriangleBatchIndexed(
+                self: *@This(),
+                vertices: [*]Vertex,
+                vertex_count: u32,
+                indices: [*]u32,
+                index_count: u32,
+            ) callconv(.C) *anyopaque {
+                _ = self;
+                _ = vertices;
+                _ = vertex_count;
+                _ = indices;
+                _ = index_count;
+                @panic("oof");
+            }
+            fn _drawGeometry(
+                self: *@This(),
+                model_matrix: *const RMatrix,
+                world_space_bound: *const AABox,
+                lod_scale_sq: f32,
+                color: Color,
+                geometry: *const Geometry,
+                cull_mode: CullMode,
+                cast_shadow: CastShadow,
+                draw_mode: DrawMode,
+            ) callconv(.C) void {
+                _ = self;
+                _ = model_matrix;
+                _ = world_space_bound;
+                _ = lod_scale_sq;
+                _ = color;
+                _ = geometry;
+                _ = cull_mode;
+                _ = cast_shadow;
+                _ = draw_mode;
+            }
+            fn _drawText3D(
+                self: *@This(),
+                positions: *const [3]Real,
+                string: [*:0]const u8,
+                color: Color,
+                height: f32,
+            ) callconv(.C) void {
+                _ = self;
+                _ = positions;
+                _ = string;
+                _ = color;
+                _ = height;
             }
         };
     };

@@ -1282,6 +1282,8 @@ pub const AppState = struct {
             var steps = @divFloor(self.physics.acctime, self.physics.step);
             steps = @min(steps, 5); // no more than 5 steps per frame
             if (steps >= 1) {
+                app.world.phy.render_clear();
+                defer app.world.phy.render_tick();
                 self.physics.acctime -= self.physics.step * steps;
 
                 // {
