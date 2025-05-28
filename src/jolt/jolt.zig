@@ -1388,8 +1388,11 @@ pub const RMatrix = extern struct {
 };
 
 pub const DebugRenderer = if (!debug_renderer_enabled) extern struct {} else extern struct {
-    pub fn createSingleton(debug_renderer_impl: *anyopaque) !void {
-        switch (@as(DebugRendererResult, @enumFromInt(c.JPC_CreateDebugRendererSingleton(debug_renderer_impl)))) {
+    pub fn init(debug_renderer_impl: *anyopaque) !void {
+        std.debug.assert(state != null);
+        std.debug.assert(state.?.debug_renderer == null);
+
+        switch (@as(DebugRendererResult, @enumFromInt(c.JPC_CreateDebugRenderer(debug_renderer_impl, &state.?.debug_renderer)))) {
             .success => {
                 return;
             },
@@ -1405,9 +1408,10 @@ pub const DebugRenderer = if (!debug_renderer_enabled) extern struct {} else ext
         }
     }
 
-    pub fn destroySingleton() void {
-        _ = c.JPC_DestroyDebugRendererSingleton(); // For Zig API, don't care if one actually existed, discard error.
-
+    pub fn deinit(impl: *anyopaque) void {
+        _ = impl;
+        _ = c.JPC_DestroyDebugRenderer(state.?.debug_renderer); // For Zig API, don't care if one actually existed, discard error.
+        state.?.debug_renderer = null;
     }
 
     pub fn createTriangleBatch(primitive_in: *const anyopaque) *TriangleBatch {
@@ -1683,6 +1687,7 @@ pub const GlobalState = struct {
 
     temp_allocator: *TempAllocator,
     job_system: *JobSystem,
+    debug_renderer: ?*anyopaque = null,
 };
 var state: ?GlobalState = null;
 

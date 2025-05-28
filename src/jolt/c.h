@@ -1156,12 +1156,12 @@ JPC_BodyCreationSettings_Set(JPC_BodyCreationSettings *out_settings,
 /// called only once, at program initialization, as when instantiating a DebugRenderer implementation in Jolt proper.
 /// You may pass a pointer to any struct, as long as its first member is a pointer to your JPC_DebugRendererVTable.
 JPC_API enum JPC_DebugRendererResult
-JPC_CreateDebugRendererSingleton(void *in_debug_renderer);
+JPC_CreateDebugRenderer(void *in_debug_renderer, void **out_debug_renderer);
 /// Iff there is a debug renderer currently instantiated, destroy it. This may allow another call to CreateDebugRenderer
 /// to be made without breaking things, but this isn't sufficiently tested to be a guarantee. This is used, for example,
 /// in the unit tests when more than one test needs to instantiate a debug renderer. Shouldn't be necessary for a game.
 JPC_API enum JPC_DebugRendererResult
-JPC_DestroyDebugRendererSingleton();
+JPC_DestroyDebugRenderer(void *debug_renderer);
 #endif //JPC_DEBUG_RENDERER
 //--------------------------------------------------------------------------------------------------
 //

@@ -720,7 +720,7 @@ public:
 
 #if JPC_DEBUG_RENDERER == 1
 
-class DebugRendererImpl final : public JPH::DebugRenderer
+class DebugRendererImpl final : public JPH::DebugRendererSimple
 {
 public:
 
@@ -768,7 +768,6 @@ public:
         JPC_DebugRendererVTable *vtbl;
     };
     CRenderer *c_renderer;
-    static DebugRendererImpl *sInstance;
 
     JPH_OVERRIDE_NEW_DELETE
     DebugRendererImpl(CRenderer *in_renderer) : c_renderer(in_renderer)
@@ -879,25 +878,25 @@ public:
             inHeight);
     }
 };
-DebugRendererImpl *DebugRendererImpl::sInstance = nullptr;
 //--------------------------------------------------------------------------------------------------
 JPC_API JPC_DebugRendererResult
-JPC_CreateDebugRendererSingleton(void *in_debug_renderer)
+JPC_CreateDebugRenderer(void *in_debug_renderer, void **out_debug_renderer)
 {
     assert(JPH::DebugRenderer::sInstance == nullptr); //Only one instance of JPH::DebugRenderer may ever be made
     if (JPH::DebugRenderer::sInstance != nullptr) return JPC_DEBUGRENDERER_DUPLICATE_SINGLETON; //No assert in release
-    DebugRendererImpl::sInstance =
+    DebugRendererImpl* dbg_renderer =
         new DebugRendererImpl(reinterpret_cast<DebugRendererImpl::CRenderer *>(in_debug_renderer));
     // At this point, a pointer to the created instance is also kept in JPH::DebugRenderer::sInstance.
-    return DebugRendererImpl::sInstance->ValidateCallbacks();
+    *out_debug_renderer = dbg_renderer;
+    return dbg_renderer->ValidateCallbacks();
 }
 
 JPC_API JPC_DebugRendererResult
-JPC_DestroyDebugRendererSingleton()
+JPC_DestroyDebugRenderer(void *dbg_renderer)
 {
     assert(JPH::DebugRenderer::sInstance != nullptr); //The singleton must have already been instantiated
     if (JPH::DebugRenderer::sInstance == nullptr) return JPC_DEBUGRENDERER_MISSING_SINGLETON; //No assert in release
-    delete DebugRendererImpl::sInstance;
+    delete (DebugRendererImpl*)dbg_renderer;
     return JPC_DEBUGRENDERER_SUCCESS;
 }
 
