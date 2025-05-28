@@ -130,20 +130,27 @@ fn imgui_step(b: *std.Build, v: struct {
     };
 }
 
+const JoltOptions = struct {
+    use_double_precision: bool,
+    enable_asserts: bool,
+    enable_cross_platform_determinism: bool,
+    enable_debug_renderer: bool,
+};
+
 fn jolt_step(b: *std.Build, v: struct {
     jolt: *std.Build.Dependency,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     alloc: std.mem.Allocator,
-}) !struct { lib: *std.Build.Step.Compile, options: *std.Build.Step.Options } {
+}) !struct { lib: *std.Build.Step.Compile, boptions: *std.Build.Step.Options, options: JoltOptions } {
     const is_windows = v.target.result.os.tag == .windows;
     const options = b.addOptions();
-    const jolt_options = .{
+    const jolt_options = JoltOptions{
         .use_double_precision = false,
         // .enable_asserts = v.optimize == .Debug,
         .enable_asserts = false,
         .enable_cross_platform_determinism = false,
-        .enable_debug_renderer = false,
+        .enable_debug_renderer = true,
     };
 
     inline for (std.meta.fields(@TypeOf(jolt_options))) |field| {
@@ -196,7 +203,7 @@ fn jolt_step(b: *std.Build, v: struct {
     jolt.linkLibC();
     jolt.linkLibCpp();
 
-    return .{ .lib = jolt, .options = options };
+    return .{ .lib = jolt, .boptions = options, .options = jolt_options };
 }
 
 const CompileMode = enum {
@@ -215,7 +222,8 @@ fn step(b: *std.Build, v: struct {
     imgui_dep: *std.Build.Dependency,
     dcimgui_generated: *std.Build.Step.WriteFile,
     jolt: *std.Build.Step.Compile,
-    jolt_options: *std.Build.Step.Options,
+    jolt_boptions: *std.Build.Step.Options,
+    jolt_options: JoltOptions,
     jolt_dep: *std.Build.Dependency,
     stb_dep: *std.Build.Dependency,
     steamworks_dep: *std.Build.Dependency,
@@ -252,7 +260,7 @@ fn step(b: *std.Build, v: struct {
     options.addOption([]const u8, "hotlib_name", if (is_windows) "hot.dll" else "libhot.so");
     options.addOption(CompileMode, "mode", v.mode);
     compile_step.root_module.addImport("build-options", options.createModule());
-    compile_step.root_module.addImport("jolt-options", v.jolt_options.createModule());
+    compile_step.root_module.addImport("jolt-options", v.jolt_boptions.createModule());
 
     if (is_windows) {
         compile_step.addIncludePath(b.path("./zig-out/vendor/include"));
@@ -364,6 +372,10 @@ fn step(b: *std.Build, v: struct {
             });
             try jolt_flags.append("-DJPH_SHARED_LIBRARY");
             if (is_windows) try jolt_flags.append("-DJPH_EXPORT=" ++ win_export);
+            if (v.jolt_options.enable_cross_platform_determinism) try jolt_flags.append("-DJPH_CROSS_PLATFORM_DETERMINISTIC");
+            if (v.jolt_options.enable_debug_renderer) try jolt_flags.append("-DJPH_DEBUG_RENDERER");
+            if (v.jolt_options.use_double_precision) try jolt_flags.append("-DJPH_DOUBLE_PRECISION");
+            if (v.jolt_options.enable_asserts) try jolt_flags.append("-DJPH_ENABLE_ASSERTS");
             if (!is_windows) try jolt_flags.appendSlice(strict_cxx_flags);
             compile_step.addCSourceFiles(.{
                 .root = b.path("./src"),
@@ -441,6 +453,7 @@ pub fn build(b: *std.Build) !void {
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
         .jolt = libjolt.lib,
+        .jolt_boptions = libjolt.boptions,
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
         .stb_dep = stb,
@@ -456,6 +469,7 @@ pub fn build(b: *std.Build) !void {
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
         .jolt = libjolt.lib,
+        .jolt_boptions = libjolt.boptions,
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
         .stb_dep = stb,
@@ -471,11 +485,16 @@ pub fn build(b: *std.Build) !void {
         .cimgui = libimgui.lib,
         .dcimgui_generated = libimgui.generated,
         .jolt = libjolt.lib,
+        .jolt_boptions = libjolt.boptions,
         .jolt_options = libjolt.options,
         .jolt_dep = jolt,
         .stb_dep = stb,
         .steamworks_dep = steamworks,
     });
+
+    compile_commands.step.dependOn(&libimgui.lib.step);
+    compile_commands.step.dependOn(&libjolt.lib.step);
+    compile_commands.step.dependOn(&hotlib.step);
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");
     build_libs_step.dependOn(&libimgui.lib.step);
