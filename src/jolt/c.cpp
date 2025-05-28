@@ -42,6 +42,7 @@
 #if JPC_DEBUG_RENDERER == 1
 #include <string_view>
 #include <Jolt/Renderer/DebugRenderer.h>
+#include <Jolt/Renderer/DebugRendererSimple.h>
 #endif //JPC_DEBUG_RENDERER
 
 JPH_SUPPRESS_WARNINGS
@@ -772,16 +773,16 @@ public:
     JPH_OVERRIDE_NEW_DELETE
     DebugRendererImpl(CRenderer *in_renderer) : c_renderer(in_renderer)
     {
-        DebugRenderer::Initialize();
+        DebugRendererSimple::Initialize();
     }
     JPC_DebugRendererResult ValidateCallbacks()
     {
         bool valid = true;
         valid &= (c_renderer->vtbl->DrawLine                   != nullptr);
-        valid &= (c_renderer->vtbl->DrawTriangle               != nullptr);
-        valid &= (c_renderer->vtbl->CreateTriangleBatch        != nullptr);
-        valid &= (c_renderer->vtbl->CreateTriangleBatchIndexed != nullptr);
-        valid &= (c_renderer->vtbl->DrawGeometry               != nullptr);
+        // valid &= (c_renderer->vtbl->DrawTriangle               != nullptr);
+        // valid &= (c_renderer->vtbl->CreateTriangleBatch        != nullptr);
+        // valid &= (c_renderer->vtbl->CreateTriangleBatchIndexed != nullptr);
+        // valid &= (c_renderer->vtbl->DrawGeometry               != nullptr);
         valid &= (c_renderer->vtbl->DrawText3D                 != nullptr);
         return valid ? JPC_DEBUGRENDERER_SUCCESS : JPC_DEBUGRENDERER_INCOMPLETE_IMPL;
     }
@@ -793,75 +794,75 @@ public:
         storeRVec3(in_to, inTo);
         c_renderer->vtbl->DrawLine(c_renderer, in_from, in_to, *toJpc(&inColor));
     }
-    virtual void DrawTriangle(
-        JPH::RVec3Arg inV1,
-        JPH::RVec3Arg inV2,
-        JPH::RVec3Arg inV3,
-        JPH::ColorArg inColor,
-        JPH::DebugRenderer::ECastShadow inCastShadow) override
-    {
-        JPC_Real in_v1[3];
-        storeRVec3(in_v1, inV1);
-        JPC_Real in_v2[3];
-        storeRVec3(in_v2, inV2);
-        JPC_Real in_v3[3];
-        storeRVec3(in_v3, inV3);
-        c_renderer->vtbl->DrawTriangle(
-            c_renderer, in_v1, in_v2, in_v3, *toJpc(&inColor), static_cast<JPC_CastShadow>(inCastShadow));
-    }
-    virtual JPH::DebugRenderer::Batch CreateTriangleBatch(
-        const JPH::DebugRenderer::Triangle *inTriangles,
-        int inTriangleCount) override
-    {
-        JPC_DebugRenderer_TriangleBatch *c_batch = c_renderer->vtbl->CreateTriangleBatch(
-            c_renderer,
-            toJpc(inTriangles),
-            inTriangleCount);
-        auto jph_batch = reinterpret_cast<BatchImpl *>(c_batch);
-        return jph_batch;
-    }
-    virtual JPH::DebugRenderer::Batch CreateTriangleBatch(
-        const JPH::DebugRenderer::Vertex *inVertices,
-        int inVertexCount,
-        const uint32_t *inIndices,
-        int inIndexCount) override
-    {
-        JPC_DebugRenderer_TriangleBatch *c_batch = c_renderer->vtbl->CreateTriangleBatchIndexed(
-            c_renderer,
-            toJpc(inVertices),
-            inVertexCount,
-            inIndices,
-            inIndexCount);
-        auto jph_batch = reinterpret_cast<BatchImpl *>(c_batch);
-        return jph_batch;
-    }
-    virtual void DrawGeometry(
-        JPH::RMat44Arg inModelMatrix,
-        const JPH::AABox &inWorldSpaceBounds,
-        float inLODScaleSq,
-        JPH::ColorArg inModelColor,
-        const JPH::DebugRenderer::GeometryRef &inGeometry,
-        JPH::DebugRenderer::ECullMode inCullMode,
-        JPH::DebugRenderer::ECastShadow inCastShadow,
-        JPH::DebugRenderer::EDrawMode inDrawMode) override
-    {
-        auto in_model_matrix = reinterpret_cast<const JPC_RMatrix*>(&inModelMatrix);
-        JPC_DebugRenderer_Geometry in_geometry {
-            toJpc(&inGeometry.GetPtr()->mLODs[0]),
-            static_cast<uint64_t>(inGeometry.GetPtr()->mLODs.size()),
-            toJpc(&inGeometry.GetPtr()->mBounds)
-        };
-        c_renderer->vtbl->DrawGeometry(
-            c_renderer,
-            in_model_matrix,
-            toJpc(&inWorldSpaceBounds),
-            inLODScaleSq,
-            *toJpc(&inModelColor),
-            &in_geometry,
-            static_cast<JPC_CullMode>(inCullMode),
-            static_cast<JPC_CastShadow>(inCastShadow),
-            static_cast<JPC_DrawMode>(inDrawMode));
-    }
+    // virtual void DrawTriangle(
+    //     JPH::RVec3Arg inV1,
+    //     JPH::RVec3Arg inV2,
+    //     JPH::RVec3Arg inV3,
+    //     JPH::ColorArg inColor,
+    //     JPH::DebugRenderer::ECastShadow inCastShadow) override
+    // {
+    //     JPC_Real in_v1[3];
+    //     storeRVec3(in_v1, inV1);
+    //     JPC_Real in_v2[3];
+    //     storeRVec3(in_v2, inV2);
+    //     JPC_Real in_v3[3];
+    //     storeRVec3(in_v3, inV3);
+    //     c_renderer->vtbl->DrawTriangle(
+    //         c_renderer, in_v1, in_v2, in_v3, *toJpc(&inColor), static_cast<JPC_CastShadow>(inCastShadow));
+    // }
+    // virtual JPH::DebugRenderer::Batch CreateTriangleBatch(
+    //     const JPH::DebugRenderer::Triangle *inTriangles,
+    //     int inTriangleCount) override
+    // {
+    //     JPC_DebugRenderer_TriangleBatch *c_batch = c_renderer->vtbl->CreateTriangleBatch(
+    //         c_renderer,
+    //         toJpc(inTriangles),
+    //         inTriangleCount);
+    //     auto jph_batch = reinterpret_cast<BatchImpl *>(c_batch);
+    //     return jph_batch;
+    // }
+    // virtual JPH::DebugRenderer::Batch CreateTriangleBatch(
+    //     const JPH::DebugRenderer::Vertex *inVertices,
+    //     int inVertexCount,
+    //     const uint32_t *inIndices,
+    //     int inIndexCount) override
+    // {
+    //     JPC_DebugRenderer_TriangleBatch *c_batch = c_renderer->vtbl->CreateTriangleBatchIndexed(
+    //         c_renderer,
+    //         toJpc(inVertices),
+    //         inVertexCount,
+    //         inIndices,
+    //         inIndexCount);
+    //     auto jph_batch = reinterpret_cast<BatchImpl *>(c_batch);
+    //     return jph_batch;
+    // }
+    // virtual void DrawGeometry(
+    //     JPH::RMat44Arg inModelMatrix,
+    //     const JPH::AABox &inWorldSpaceBounds,
+    //     float inLODScaleSq,
+    //     JPH::ColorArg inModelColor,
+    //     const JPH::DebugRenderer::GeometryRef &inGeometry,
+    //     JPH::DebugRenderer::ECullMode inCullMode,
+    //     JPH::DebugRenderer::ECastShadow inCastShadow,
+    //     JPH::DebugRenderer::EDrawMode inDrawMode) override
+    // {
+    //     auto in_model_matrix = reinterpret_cast<const JPC_RMatrix*>(&inModelMatrix);
+    //     JPC_DebugRenderer_Geometry in_geometry {
+    //         toJpc(&inGeometry.GetPtr()->mLODs[0]),
+    //         static_cast<uint64_t>(inGeometry.GetPtr()->mLODs.size()),
+    //         toJpc(&inGeometry.GetPtr()->mBounds)
+    //     };
+    //     c_renderer->vtbl->DrawGeometry(
+    //         c_renderer,
+    //         in_model_matrix,
+    //         toJpc(&inWorldSpaceBounds),
+    //         inLODScaleSq,
+    //         *toJpc(&inModelColor),
+    //         &in_geometry,
+    //         static_cast<JPC_CullMode>(inCullMode),
+    //         static_cast<JPC_CastShadow>(inCastShadow),
+    //         static_cast<JPC_DrawMode>(inDrawMode));
+    // }
     virtual void DrawText3D(
         JPH::RVec3Arg inPosition,
         const std::string_view &inString,
