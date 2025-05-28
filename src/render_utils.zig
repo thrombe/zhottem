@@ -189,6 +189,7 @@ pub const GraphicsPipeline = struct {
         pass: ?vk.RenderPass = null,
         desc_set_layouts: []const vk.DescriptorSetLayout,
         push_constant_ranges: []const vk.PushConstantRange,
+        primitive_topology: vk.PrimitiveTopology = .triangle_list,
     };
 
     pub fn new(device: *Device, v: Args) !@This() {
@@ -234,7 +235,7 @@ pub const GraphicsPipeline = struct {
         };
 
         const piasci = vk.PipelineInputAssemblyStateCreateInfo{
-            .topology = .triangle_list,
+            .topology = v.primitive_topology,
             .primitive_restart_enable = vk.FALSE,
         };
 

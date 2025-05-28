@@ -810,6 +810,7 @@ pub const RendererState = struct {
                     .offset = 0,
                     .size = @sizeOf(resources_mod.PushConstants),
                 }},
+                .primitive_topology = material.primitive_topology,
             });
         }
 

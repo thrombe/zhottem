@@ -720,6 +720,7 @@ pub const ResourceManager = struct {
             frag: []const u8,
             vert: []const u8,
             src: []const u8,
+            primitive_topology: vk.PrimitiveTopology = .triangle_list,
         };
 
         pub const GltfData = struct {
