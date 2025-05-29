@@ -65,4 +65,5 @@
  const int _bind_bones = 4;
  const int _bind_call_ctxts = 5;
  const int _bind_texture = 6;
+ const int _bind_line_vertex_buffer = 7;
 

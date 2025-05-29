@@ -42,6 +42,7 @@ pub const UniformBinds = enum(u32) {
     bones,
     call_ctxts,
     texture,
+    line_vertex_buffer,
 
     pub fn bind(self: @This()) u32 {
         return @intFromEnum(self);
@@ -56,11 +57,15 @@ pub const ResourceManager = struct {
     // dynamic as instances vary at runtime
     instances: InstanceResources,
 
+    // uploads every frame :(
+    jolt_debug_resources: JoltDebugResources,
+
     pub fn init(assets: Assets, engine: *Engine, pool: vk.CommandPool) !@This() {
         return .{
             .assets = assets,
             .asset_buffers = try assets.upload(engine, pool),
             .instances = try .init(engine, pool, .{}),
+            .jolt_debug_resources = try .init(engine, pool, .{}),
         };
     }
 
@@ -68,6 +73,7 @@ pub const ResourceManager = struct {
         self.assets.deinit();
         self.asset_buffers.deinit(device);
         self.instances.deinit(device);
+        self.jolt_debug_resources.deinit(device);
     }
 
     pub fn add_binds(self: *@This(), builder: *render_utils.DescriptorSet.Builder) !void {
@@ -82,7 +88,154 @@ pub const ResourceManager = struct {
         try add_to_set(builder, &self.instances.instance_buffer.current.buffer, .instances);
         try add_to_set(builder, &self.instances.bone_buffer.current.buffer, .bones);
         try add_to_set(builder, &self.instances.draw_ctx_buffer.current.buffer, .call_ctxts);
+
+        try add_to_set(builder, &self.jolt_debug_resources.line_buffer.current.buffer, .line_vertex_buffer);
     }
+
+    pub const JoltDebugResources = struct {
+        line_buffer: InstanceResources.DoubleBuffer,
+
+        pub const LineVertex = extern struct {
+            pos: math.Vec3,
+            color: math.Vec4,
+        };
+
+        pub fn init(engine: *Engine, pool: vk.CommandPool, v: struct {
+            line_vertex_cap: u32 = 40000,
+        }) !@This() {
+            const ctx = &engine.graphics;
+            const device = &ctx.device;
+
+            var line_buffer = try Buffer.new_initialized(ctx, .{
+                .size = v.line_vertex_cap,
+                .usage = .{ .storage_buffer_bit = true },
+                .memory_type = .{
+                    .device_local_bit = true,
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true,
+                },
+            }, std.mem.zeroes(LineVertex), pool);
+            errdefer line_buffer.deinit(device);
+
+            return .{ .line_buffer = .{ .current = .{ .buffer = line_buffer, .capacity = v.line_vertex_cap } } };
+        }
+
+        pub fn deinit(self: *@This(), device: *Device) void {
+            {
+                const buf = &self.line_buffer;
+                buf.current.buffer.deinit(device);
+                if (buf.back) |*back| back.buffer.deinit(device);
+            }
+        }
+
+        pub fn reset(self: *@This()) void {
+            self.line_buffer.count = 0;
+        }
+
+        pub fn update(
+            self: *@This(),
+            ctx: *Engine.VulkanContext,
+            command_pool: vk.CommandPool,
+            v: struct {
+                line_buffer: []LineVertex,
+            },
+        ) !struct {
+            buffer_invalid: bool,
+            cmdbuf_invalid: bool,
+        } {
+            // try to swap the buffer created in the last frame
+            const swapped = self.swap_tick(&ctx.device);
+
+            try self.update_vertices(&ctx.device, v.line_buffer);
+
+            // start allocation of new buffer asap after we know current buffer is not enough
+            try self.alloc_tick(ctx, command_pool);
+
+            return .{ .buffer_invalid = swapped, .cmdbuf_invalid = true };
+        }
+
+        fn update_vertices(self: *@This(), device: *Device, vertices: []LineVertex) !void {
+            const buf = &self.line_buffer;
+            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
+            defer device.unmapMemory(buf.current.buffer.memory);
+
+            const gpu_items: [*]LineVertex = @ptrCast(@alignCast(data));
+
+            const can_alloc = @min(buf.current.capacity - buf.count, vertices.len);
+            @memcpy(gpu_items[buf.count..][0..can_alloc], vertices[0..can_alloc]);
+            buf.count = can_alloc;
+
+            if (can_alloc < vertices.len and buf.state == .enough) {
+                buf.state = .out_of_objects;
+            }
+        }
+
+        fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool) !void {
+            const device = &ctx.device;
+
+            {
+                const buf = &self.line_buffer;
+                switch (buf.state) {
+                    .enough, .back_allocated => {},
+                    .out_of_objects => {
+                        const instance_cap = buf.current.capacity;
+                        const new_instance_cap = instance_cap + instance_cap / 2;
+                        var instance_buffer = try Buffer.new_initialized(ctx, .{
+                            .size = new_instance_cap,
+                            .usage = .{ .storage_buffer_bit = true },
+                            .memory_type = .{
+                                .device_local_bit = true,
+                                .host_visible_bit = true,
+                                .host_coherent_bit = true,
+                            },
+                        }, std.mem.zeroes(LineVertex), pool);
+                        errdefer instance_buffer.deinit(device);
+
+                        buf.back = .{
+                            .buffer = instance_buffer,
+                            .capacity = new_instance_cap,
+                        };
+                        buf.state = .back_allocated;
+                    },
+                }
+            }
+        }
+
+        fn swap_tick(self: *@This(), device: *Device) bool {
+            var did_swap = false;
+            {
+                const buf = &self.line_buffer;
+
+                switch (buf.state) {
+                    .enough, .out_of_objects => {},
+                    .back_allocated => {
+                        // this is okay cuz we have an empty queue every frame
+                        buf.current.buffer.deinit(device);
+                        buf.current = buf.back.?;
+                        buf.back = null;
+                        buf.state = .enough;
+                        did_swap = true;
+                    },
+                }
+            }
+            return did_swap;
+        }
+
+        pub fn draw(
+            self: *@This(),
+            device: *Device,
+            cmdbufs: *CmdBuffer,
+            desc_sets: []const vk.DescriptorSet,
+            dbg_pipeline: *const GraphicsPipeline,
+        ) void {
+            const buf = &self.line_buffer;
+            for (cmdbufs.bufs) |cmdbuf| {
+                device.cmdBindPipeline(cmdbuf, .graphics, dbg_pipeline.pipeline);
+                device.cmdBindDescriptorSets(cmdbuf, .graphics, dbg_pipeline.layout, 0, @intCast(desc_sets.len), desc_sets.ptr, 0, null);
+                device.cmdDraw(cmdbuf, buf.count, 1, 0, 0);
+            }
+        }
+    };
 
     pub const BatchHandle = struct {
         index: u32,

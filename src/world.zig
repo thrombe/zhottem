@@ -637,13 +637,10 @@ pub const Jphysics = struct {
             const CastShadow = jolt.DebugRenderer.CastShadow;
             const DrawMode = jolt.DebugRenderer.DrawMode;
 
-            const LineVertex = struct {
-                pos: Vec3,
-                color: Vec4,
-            };
+            const JoltDebugResources = resources_mod.ResourceManager.JoltDebugResources;
             const RenderState = struct {
                 lock: std.Thread.Mutex = .{},
-                lines: std.ArrayList(LineVertex),
+                lines: std.ArrayList(JoltDebugResources.LineVertex),
             };
 
             pub fn init() !@This() {
