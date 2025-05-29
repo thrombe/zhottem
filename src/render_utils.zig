@@ -259,6 +259,20 @@ pub const GraphicsPipeline = struct {
             .line_width = 1,
         };
 
+        // welp. depth bias might not work for lines :/
+        // https://github.com/gpuweb/gpuweb/issues/4729#issue-2386851106
+        // switch (v.primitive_topology) {
+        //     .point_list, .line_list, .line_strip => {
+        //         prsci.line_width = 1;
+        //         prsci.polygon_mode = .line;
+        //         prsci.depth_bias_enable = vk.TRUE;
+        //         prsci.depth_bias_constant_factor = 30.0;
+        //         prsci.depth_bias_clamp = 100.0;
+        //         prsci.depth_bias_slope_factor = 50.0;
+        //     },
+        //     else => {},
+        // }
+
         const pmsci = vk.PipelineMultisampleStateCreateInfo{
             .rasterization_samples = .{ .@"1_bit" = true },
             .sample_shading_enable = vk.FALSE,

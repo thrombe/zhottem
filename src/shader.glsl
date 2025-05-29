@@ -121,6 +121,8 @@ layout(set = 0, binding = _bind_line_vertex_buffer) readonly restrict buffer Lin
 
         vec4 pos = vec4(v.pos, 1.0);
         pos = ubo.world_to_screen * pos;
+        // z fighting fix for lines :/
+        pos.z -= 0.0006;
 
         gl_Position = pos;
         vcolor = v.color;
