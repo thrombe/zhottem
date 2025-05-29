@@ -1278,7 +1278,7 @@ pub const AppState = struct {
                                 );
                                 try self.cmdbuf.add_component(entity, C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive });
                                 try self.cmdbuf.add_component(entity, try C.Name.from("sword_bullet"));
-                                try self.cmdbuf.overwrite_component(
+                                try self.cmdbuf.add_component(
                                     entity,
                                     try app.world.phy.add_body(.{
                                         // .shape = .{ .capsule = .{ .radius = 0.2, .half_height = 0.5 } },

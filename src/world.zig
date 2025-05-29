@@ -403,7 +403,7 @@ pub const Jphysics = struct {
                 io_settings: *jolt.CharacterContactSettings,
             ) callconv(.C) void {
                 _ = iself;
-                // _ = character;
+                _ = character;
                 _ = body;
                 _ = sub_shape_id;
                 _ = contact_position;
@@ -411,8 +411,6 @@ pub const Jphysics = struct {
                 // _ = io_settings;
 
                 io_settings.can_push_character = false;
-
-                std.debug.print("{any}\n", .{character.getLinearVelocity()});
             }
             pub fn OnCharacterContactAdded(
                 iself: *jolt.CharacterContactListener,
@@ -642,6 +640,9 @@ pub const Jphysics = struct {
 
             state: *RenderState,
 
+            // TODO: support the more efficient methods too
+            //   - don't forget to modify DebugRendererImpl in src/jolt/c.cpp
+            //     to enable the other methods
             const vtable = jolt.DebugRenderer.VTable(@This()){
                 .drawLine = _drawLine,
                 // .drawTriangle = _drawTriangle,
