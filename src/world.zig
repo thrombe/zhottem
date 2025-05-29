@@ -690,7 +690,6 @@ pub const Jphysics = struct {
                 self.state.lock.lock();
                 defer self.state.lock.unlock();
 
-                std.debug.print("dbg vertices {}\n", .{self.state.lines.items.len});
                 self.state.lines.clearRetainingCapacity();
             }
 

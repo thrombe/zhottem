@@ -641,7 +641,7 @@ pub fn present(
         _ = app_state.cmdbuf_fuse.fuse();
     }
 
-    if (self.world.phy.state.debug_renderer) |*dbg_renderer| {
+    if (app_state.jolt_debug_render) if (self.world.phy.state.debug_renderer) |*dbg_renderer| {
         dbg_renderer.state.lock.lock();
         defer dbg_renderer.state.lock.unlock();
 
@@ -653,7 +653,7 @@ pub fn present(
         if (dbg_updates.cmdbuf_invalid) {
             _ = app_state.cmdbuf_fuse.fuse();
         }
-    }
+    };
 
     if (dynamic_state.stages.update()) {
         _ = app_state.shader_fuse.fuse();
@@ -664,7 +664,7 @@ pub fn present(
     }
 
     if (app_state.cmdbuf_fuse.unfuse()) {
-        try dynamic_state.recreate_cmdbuf(engine, self);
+        try dynamic_state.recreate_cmdbuf(engine, self, app_state);
     }
 
     const current_si = try dynamic_state.swapchain.present_start(ctx);
@@ -712,7 +712,6 @@ pub const RendererState = struct {
     const Pipelines = std.AutoArrayHashMap(ResourceManager.MaterialHandle, GraphicsPipeline);
 
     pub fn init(app: *App, engine: *Engine, app_state: *AppState) !@This() {
-        _ = app_state;
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
@@ -772,7 +771,7 @@ pub const RendererState = struct {
             }
         }
 
-        self.cmdbuffer = try self.create_cmdbuf(engine, app);
+        self.cmdbuffer = try self.create_cmdbuf(engine, app, app_state);
         errdefer self.cmdbuffer.deinit(device);
 
         return self;
@@ -788,11 +787,11 @@ pub const RendererState = struct {
         _ = app_state.cmdbuf_fuse.fuse();
     }
 
-    pub fn recreate_cmdbuf(self: *@This(), engine: *Engine, app: *App) !void {
+    pub fn recreate_cmdbuf(self: *@This(), engine: *Engine, app: *App, app_state: *AppState) !void {
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
-        const cmdbuffer = try self.create_cmdbuf(engine, app);
+        const cmdbuffer = try self.create_cmdbuf(engine, app, app_state);
         self.cmdbuffer.deinit(device);
         self.cmdbuffer = cmdbuffer;
     }
@@ -842,7 +841,7 @@ pub const RendererState = struct {
         self.descriptor_set = desc_set;
     }
 
-    pub fn create_cmdbuf(self: *@This(), engine: *Engine, app: *App) !CmdBuffer {
+    pub fn create_cmdbuf(self: *@This(), engine: *Engine, app: *App, app_state: *AppState) !CmdBuffer {
         const ctx = &engine.graphics;
         const device = &ctx.device;
 
@@ -868,7 +867,7 @@ pub const RendererState = struct {
             &self.pipelines,
         );
 
-        app.resources.jolt_debug_resources.draw(
+        if (app_state.jolt_debug_render) app.resources.jolt_debug_resources.draw(
             device,
             &cmdbuf,
             &[_]vk.DescriptorSet{
@@ -960,6 +959,7 @@ pub const AppState = struct {
     uniform_buffer: []u8,
     uniform_shader_dumped: bool = false,
     focus: bool = false,
+    jolt_debug_render: bool = false,
 
     cmdbuf: ecs_mod.EntityComponentStore.CmdBuf,
 
@@ -1315,9 +1315,9 @@ pub const AppState = struct {
             var steps = @divFloor(self.physics.acctime, self.physics.step);
             steps = @min(steps, 5); // no more than 5 steps per frame
             if (steps >= 1) {
-                app.resources.jolt_debug_resources.reset();
-                app.world.phy.render_clear();
-                defer app.world.phy.render_tick();
+                if (self.jolt_debug_render) app.resources.jolt_debug_resources.reset();
+                if (self.jolt_debug_render) app.world.phy.render_clear();
+                defer if (self.jolt_debug_render) app.world.phy.render_tick();
 
                 self.physics.acctime -= self.physics.step * steps;
 
@@ -1714,6 +1714,7 @@ pub const GuiState = struct {
         _ = c.ImGui_SliderFloat("Speed", &controller.speed, 0.1, 10.0);
         _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
+        reset = reset or c.ImGui_Checkbox("Jolt debug renderer", @ptrCast(&state.jolt_debug_render));
 
         reset = reset or c.ImGui_Button("Reset render state");
 
