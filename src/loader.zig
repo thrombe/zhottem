@@ -37,13 +37,18 @@ pub const Rigidbody = struct {
 
     pub const ColliderShape = union(enum) {
         mesh: struct {},
+        capsule: Capsule,
         sphere: Sphere,
         plane: Plane,
         box: Box,
 
+        pub const Capsule = struct {
+            half_height: f32 = 0.5,
+            radius: f32 = 0.2,
+        };
         pub const Sphere = struct {
             center: Vec4 = .{},
-            radius: f32,
+            radius: f32 = 1,
         };
         pub const Plane = struct {
             normal: Vec4 = .{ .y = 1 },
@@ -244,6 +249,7 @@ fn _spawn_node(
                                 },
                                 .sphere => |s| .{ .sphere = .{ .radius = s.radius } },
                                 .box => |s| .{ .box = .{ .size = s.half_extent } },
+                                .capsule => |s| .{ .capsule = .{ .half_height = s.half_height, .radius = s.radius } },
                                 else => return error.ShapeNotSupportedYet,
                             };
                             try cmdbuf.add_component(entity, try world.phy.add_body(.{

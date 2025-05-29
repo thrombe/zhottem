@@ -142,17 +142,35 @@ pub const Jphysics = struct {
             .sphere => |s| {
                 const shape = try jolt.SphereShapeSettings.create(s.radius);
                 defer shape.release();
-                body_settings.shape = try shape.createShape();
+                const rt_shape = try jolt.DecoratedShapeSettings.createRotatedTranslated(
+                    shape.asShapeSettings(),
+                    Vec4.quat_identity_rot().to_buf(),
+                    settings.offset.to_buf(),
+                );
+                defer rt_shape.release();
+                body_settings.shape = try rt_shape.createShape();
             },
             .box => |s| {
                 const shape = try jolt.BoxShapeSettings.create(s.size.to_buf());
                 defer shape.release();
-                body_settings.shape = try shape.createShape();
+                const rt_shape = try jolt.DecoratedShapeSettings.createRotatedTranslated(
+                    shape.asShapeSettings(),
+                    Vec4.quat_identity_rot().to_buf(),
+                    settings.offset.to_buf(),
+                );
+                defer rt_shape.release();
+                body_settings.shape = try rt_shape.createShape();
             },
             .capsule => |s| {
                 const shape = try jolt.CapsuleShapeSettings.create(s.half_height, s.radius);
                 defer shape.release();
-                body_settings.shape = try shape.createShape();
+                const rt_shape = try jolt.DecoratedShapeSettings.createRotatedTranslated(
+                    shape.asShapeSettings(),
+                    Vec4.quat_identity_rot().to_buf(),
+                    settings.offset.to_buf(),
+                );
+                defer rt_shape.release();
+                body_settings.shape = try rt_shape.createShape();
             },
             .mesh => |s| {
                 const shape = try jolt.MeshShapeSettings.create(
@@ -167,7 +185,13 @@ pub const Jphysics = struct {
                     settings.scale.to_buf(),
                 );
                 defer scaled_shape.release();
-                body_settings.shape = try scaled_shape.createShape();
+                const rt_shape = try jolt.DecoratedShapeSettings.createRotatedTranslated(
+                    scaled_shape.asShapeSettings(),
+                    Vec4.quat_identity_rot().to_buf(),
+                    settings.offset.to_buf(),
+                );
+                defer rt_shape.release();
+                body_settings.shape = try rt_shape.createShape();
             },
         }
         // it is refcounted so we release this one
@@ -269,6 +293,7 @@ pub const Jphysics = struct {
         velocity: Vec3 = .{},
         angular_velocity: Vec3 = .{},
         friction: f32 = 0,
+        offset: Vec3 = .{},
     };
     pub const ShapeSettings = union(enum) {
         sphere: struct {

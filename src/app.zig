@@ -1257,11 +1257,11 @@ pub const AppState = struct {
                                 // @memset(bones, .{});
                                 // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
 
-                                const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
+                                // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
                                 const t = C.GlobalTransform{
                                     .transform = .{
                                         .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)),
-                                        .scale = .splat(rng.next()),
+                                        .scale = .splat(1),
                                         .rotation = Vec4.quat_from_diff(.{ .y = 1 }, fwd),
                                     },
                                 };
@@ -1279,7 +1279,9 @@ pub const AppState = struct {
                                 try self.cmdbuf.overwrite_component(
                                     entity,
                                     try app.world.phy.add_body(.{
-                                        .shape = .{ .box = .{ .size = t.transform.scale } },
+                                        // .shape = .{ .capsule = .{ .radius = 0.2, .half_height = 0.5 } },
+                                        .shape = .{ .box = .{ .size = t.transform.scale.mul(.{ .y = 0.8, .x = 0.12, .z = 0.05 }) } },
+                                        .offset = t.transform.scale.mul(.{ .y = 0.8 }),
                                         .pos = t.transform.pos,
                                         .velocity = fwd.scale(50),
                                         .friction = 0.4,
