@@ -85,6 +85,7 @@ const Handles = struct {
     material: struct {
         background: ResourceManager.MaterialHandle,
         models: ResourceManager.MaterialHandle,
+        dbg: ResourceManager.MaterialHandle,
     },
     gltf: struct {
         library: ResourceManager.GltfHandle,
@@ -149,6 +150,13 @@ const Handles = struct {
                     .vert = "vert",
                     .frag = "frag",
                     .src = "src/shader.glsl",
+                }),
+                .dbg = try cpu.add(Material{
+                    .name = "DBG",
+                    .vert = "dbg_vert",
+                    .frag = "dbg_frag",
+                    .src = "src/shader.glsl",
+                    .primitive_topology = .line_list,
                 }),
             },
             .image = .{
@@ -633,6 +641,20 @@ pub fn present(
         _ = app_state.cmdbuf_fuse.fuse();
     }
 
+    if (self.world.phy.state.debug_renderer) |*dbg_renderer| {
+        dbg_renderer.state.lock.lock();
+        defer dbg_renderer.state.lock.unlock();
+
+        const buf = dbg_renderer.state.lines.items;
+        const dbg_updates = try self.resources.jolt_debug_resources.update(ctx, self.command_pool, .{ .line_buffer = buf });
+        if (dbg_updates.buffer_invalid) {
+            _ = app_state.shader_fuse.fuse();
+        }
+        if (dbg_updates.cmdbuf_invalid) {
+            _ = app_state.cmdbuf_fuse.fuse();
+        }
+    }
+
     if (dynamic_state.stages.update()) {
         _ = app_state.shader_fuse.fuse();
     }
@@ -844,6 +866,15 @@ pub const RendererState = struct {
                 self.descriptor_set.set,
             },
             &self.pipelines,
+        );
+
+        app.resources.jolt_debug_resources.draw(
+            device,
+            &cmdbuf,
+            &[_]vk.DescriptorSet{
+                self.descriptor_set.set,
+            },
+            &self.pipelines.get(app.handles.material.dbg).?,
         );
 
         cmdbuf.dynamic_render_end(device);
@@ -1282,8 +1313,10 @@ pub const AppState = struct {
             var steps = @divFloor(self.physics.acctime, self.physics.step);
             steps = @min(steps, 5); // no more than 5 steps per frame
             if (steps >= 1) {
+                app.resources.jolt_debug_resources.reset();
                 app.world.phy.render_clear();
                 defer app.world.phy.render_tick();
+
                 self.physics.acctime -= self.physics.step * steps;
 
                 // {
@@ -1630,6 +1663,7 @@ pub const AppState = struct {
             try gen.add_struct("Instance", resources_mod.Instance);
             try gen.add_struct("DrawCtx", resources_mod.ResourceManager.InstanceResources.DrawCtx);
             try gen.add_struct("PushConstants", resources_mod.PushConstants);
+            try gen.add_struct("LineVertex", resources_mod.ResourceManager.JoltDebugResources.LineVertex);
             try gen.add_bind_enum(resources_mod.UniformBinds);
             try gen.dump_shader("src/uniforms.glsl");
         }

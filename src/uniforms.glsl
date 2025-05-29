@@ -58,6 +58,11 @@
      uint first_draw_ctx;
  };
 
+ struct LineVertex {
+     vec3 pos;
+     vec4 color;
+ };
+
  const int _bind_camera = 0;
  const int _bind_vertices = 1;
  const int _bind_indices = 2;

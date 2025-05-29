@@ -36,6 +36,9 @@ layout(set = 0, binding = _bind_bones) readonly restrict buffer BoneBuffer {
 layout(set = 0, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuffer {
     DrawCtx draw_ctxts[];
 };
+layout(set = 0, binding = _bind_line_vertex_buffer) readonly restrict buffer LineVertices {
+    LineVertex line_vertices[];
+};
 
 #ifdef MODEL_VERT_PASS
     layout(location = 0) out vec3 opos;
@@ -110,3 +113,29 @@ layout(set = 0, binding = _bind_call_ctxts) readonly restrict buffer DrawCtxBuff
         fcolor = vec4(color, 1.0);
     }
 #endif // BG_FRAG_PASS
+
+#ifdef DBG_VERT_PASS
+    layout(location = 0) out vec4 vcolor;
+    void main() {
+        LineVertex v = line_vertices[gl_VertexIndex];
+
+        vec4 pos = vec4(v.pos, 1.0);
+        pos = ubo.world_to_screen * pos;
+
+        gl_Position = pos;
+        vcolor = v.color;
+    }
+#endif // DBG_VERT_PASS
+
+#ifdef DBG_FRAG_PASS
+    layout(location = 0) in vec4 vcolor;
+    layout(location = 0) out vec4 fcolor;
+    void main() {
+        vec2 res = vec2(ubo.width, ubo.height);
+
+        vec2 screen_uv = gl_FragCoord.xy/res.xy;
+        vec2 center = step(-abs(screen_uv * 2.0 - 1.0), vec2(-0.004) * res.yx/min(res.x, res.y));
+        float cursor = 1.0 - max(center.x, center.y);
+        fcolor = vec4(mix(vcolor.xyz, vec3(0.0, 1.0, 1.0), cursor), 1.0);
+    }
+#endif // DBG_FRAG_PASS
