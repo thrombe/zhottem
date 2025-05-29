@@ -144,6 +144,7 @@ const Handles = struct {
                     .vert = "bg_vert",
                     .frag = "bg_frag",
                     .src = "src/shader.glsl",
+                    .cull_mode = .{},
                 }),
                 .models = try cpu.add(Material{
                     .name = "MODEL",
@@ -156,7 +157,7 @@ const Handles = struct {
                     .vert = "dbg_vert",
                     .frag = "dbg_frag",
                     .src = "src/shader.glsl",
-                    .primitive_topology = .line_list,
+                    .render_mode = .lines,
                 }),
             },
             .image = .{
@@ -831,7 +832,8 @@ pub const RendererState = struct {
                     .offset = 0,
                     .size = @sizeOf(resources_mod.PushConstants),
                 }},
-                .primitive_topology = material.primitive_topology,
+                .cull_mode = material.cull_mode,
+                .render_mode = material.render_mode,
             });
         }
 

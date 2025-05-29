@@ -175,6 +175,12 @@ pub const GraphicsPipeline = struct {
     pipeline: vk.Pipeline,
     layout: vk.PipelineLayout,
 
+    pub const RenderMode = enum {
+        lines,
+        solid_triangles,
+        wireframe_triangles,
+    };
+
     const Args = struct {
         vert: []u32,
         frag: []u32,
@@ -189,7 +195,8 @@ pub const GraphicsPipeline = struct {
         pass: ?vk.RenderPass = null,
         desc_set_layouts: []const vk.DescriptorSetLayout,
         push_constant_ranges: []const vk.PushConstantRange,
-        primitive_topology: vk.PrimitiveTopology = .triangle_list,
+        cull_mode: vk.CullModeFlags = .{ .back_bit = true },
+        render_mode: RenderMode = .solid_triangles,
     };
 
     pub fn new(device: *Device, v: Args) !@This() {
@@ -235,7 +242,11 @@ pub const GraphicsPipeline = struct {
         };
 
         const piasci = vk.PipelineInputAssemblyStateCreateInfo{
-            .topology = v.primitive_topology,
+            .topology = switch (v.render_mode) {
+                .lines => .line_list,
+                .solid_triangles => .triangle_list,
+                .wireframe_triangles => .triangle_list,
+            },
             .primitive_restart_enable = vk.FALSE,
         };
 
@@ -246,12 +257,12 @@ pub const GraphicsPipeline = struct {
             .p_scissors = undefined, // set in createCommandBuffers with cmdSetScissor
         };
 
-        const prsci = vk.PipelineRasterizationStateCreateInfo{
+        var prsci = vk.PipelineRasterizationStateCreateInfo{
             .depth_clamp_enable = vk.FALSE,
             .rasterizer_discard_enable = vk.FALSE,
             .polygon_mode = .fill,
-            .cull_mode = .{ .back_bit = false },
-            .front_face = .clockwise,
+            .cull_mode = v.cull_mode,
+            .front_face = .counter_clockwise,
             .depth_bias_enable = vk.FALSE,
             .depth_bias_constant_factor = 0,
             .depth_bias_clamp = 0,
@@ -259,19 +270,26 @@ pub const GraphicsPipeline = struct {
             .line_width = 1,
         };
 
-        // welp. depth bias might not work for lines :/
-        // https://github.com/gpuweb/gpuweb/issues/4729#issue-2386851106
-        // switch (v.primitive_topology) {
-        //     .point_list, .line_list, .line_strip => {
-        //         prsci.line_width = 1;
-        //         prsci.polygon_mode = .line;
-        //         prsci.depth_bias_enable = vk.TRUE;
-        //         prsci.depth_bias_constant_factor = 30.0;
-        //         prsci.depth_bias_clamp = 100.0;
-        //         prsci.depth_bias_slope_factor = 50.0;
-        //     },
-        //     else => {},
-        // }
+        switch (v.render_mode) {
+            .lines => {
+                prsci.line_width = 1;
+                prsci.polygon_mode = .line;
+
+                // welp. depth bias might not work for lines :/
+                // https://github.com/gpuweb/gpuweb/issues/4729#issue-2386851106
+            },
+            .solid_triangles => {
+                prsci.polygon_mode = .fill;
+            },
+            .wireframe_triangles => {
+                prsci.polygon_mode = .line;
+
+                prsci.depth_bias_enable = vk.TRUE;
+                prsci.depth_bias_constant_factor = 1.0;
+                prsci.depth_bias_clamp = 0.0;
+                prsci.depth_bias_slope_factor = 1.0;
+            },
+        }
 
         const pmsci = vk.PipelineMultisampleStateCreateInfo{
             .rasterization_samples = .{ .@"1_bit" = true },

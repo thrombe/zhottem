@@ -873,7 +873,8 @@ pub const ResourceManager = struct {
             frag: []const u8,
             vert: []const u8,
             src: []const u8,
-            primitive_topology: vk.PrimitiveTopology = .triangle_list,
+            cull_mode: vk.CullModeFlags = .{ .back_bit = true },
+            render_mode: render_utils.GraphicsPipeline.RenderMode = .solid_triangles,
         };
 
         pub const GltfData = struct {
