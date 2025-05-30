@@ -102,6 +102,7 @@ const HotReloader = struct {
 
                 // event.file.len == 0 cuz fswatch keeps returning "" when libhot.so changes :/
                 if (std.mem.eql(u8, options.hotlib_name, event.file) or event.file.len == 0) {
+                    std.Thread.sleep(std.time.ns_per_ms * 500);
                     std.debug.print("reloading\n", .{});
 
                     // dlopen() caches library loads.

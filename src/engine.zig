@@ -801,6 +801,11 @@ pub const VulkanContext = struct {
 
         const mem_props = vkinstance.getPhysicalDeviceMemoryProperties(pdev);
 
+        // const exts = try vkinstance.enumerateDeviceExtensionPropertiesAlloc(pdev, null, allocator.*);
+        // for (exts) |ext| {
+        //     std.debug.print("{s}\n", .{ext.extension_name});
+        // }
+
         return .{
             .vkb = vkb,
             .instance = vkinstance,
