@@ -331,13 +331,19 @@ pub const EntityComponentStore = struct {
             const vtable = ComponentVtable.from(component);
             try self.vtables.append(vtable);
             try self.component_sizes.append(compid.size);
+        } else {
+            std.debug.print("duplicate type registered {s}\n", .{@typeName(component)});
+            return error.RegisterDuplicate;
         }
         return compid;
     }
 
     pub fn get_component_id(self: *@This(), component: type) !ComponentId {
         const type_id = TypeId.from_type(component);
-        return self.components.get(type_id) orelse error.TypeNotAComponent;
+        return self.components.get(type_id) orelse {
+            std.debug.print("type: '{s}' not a component\n", .{@typeName(component)});
+            return error.TypeNotAComponent;
+        };
     }
 
     fn component_ids_from(self: *@This(), typ: type) ![@typeInfo(typ).@"struct".fields.len]ComponentId {
@@ -349,6 +355,7 @@ pub const EntityComponentStore = struct {
             if (e) |entry| {
                 components[i] = entry.value_ptr.*;
             } else {
+                std.debug.print("type: '{s}' not a component\n", .{@typeName(typ)});
                 return error.FieldNotAComponent;
             }
         }
@@ -458,7 +465,10 @@ pub const EntityComponentStore = struct {
             if (edge.found_existing) {
                 break :blk edge.value_ptr.*;
             } else {
-                const typ = curr_archetype.typ.inserted(compid) orelse return error.ComponentAlreadyPresent;
+                const typ = curr_archetype.typ.inserted(compid) orelse {
+                    std.debug.print("duplicate component on entity: {s}\n", .{@typeName(@TypeOf(component))});
+                    return error.ComponentAlreadyPresent;
+                };
                 const archeid = try self.get_archetype(typ, ctx);
                 edge.value_ptr.* = archeid;
                 break :blk archeid;
