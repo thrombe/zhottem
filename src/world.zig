@@ -1026,6 +1026,8 @@ pub const Components = struct {
         material: ResourceManager.MaterialHandle,
         armature: ResourceManager.ArmatureHandle,
 
+        animation_index: u32,
+
         // relative to the start of this animation
         // += dt each frame
         time: f32 = 0,

@@ -5,6 +5,7 @@ const vk = @import("vulkan");
 const utils = @import("utils.zig");
 const Fuse = utils.Fuse;
 const ShaderUtils = utils.ShaderUtils;
+const cast = utils.cast;
 
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
@@ -470,15 +471,20 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .{},
         handles.material.models,
     );
-    _ = try loader_mod.spawn_node(
-        &world,
-        &assets,
-        &cmdbuf,
-        handles.gltf.library,
-        "person_ig",
-        .{ .pos = .{ .z = 5, .y = 1 }, .scale = .splat(4) },
-        handles.material.models,
-    );
+
+    for (0..10) |x| {
+        for (0..10) |z| {
+            _ = try loader_mod.spawn_node(
+                &world,
+                &assets,
+                &cmdbuf,
+                handles.gltf.library,
+                "person_ig",
+                .{ .pos = .{ .x = cast(f32, x) + 10, .z = cast(f32, z) + 10 }, .scale = .splat(0.5) },
+                handles.material.models,
+            );
+        }
+    }
 
     // t.transform = .{
     //     .pos = .{ .y = -5.5 },
@@ -1252,13 +1258,6 @@ pub const AppState = struct {
                             // }
 
                             if (player.shooter.try_shoot(mouse.right)) {
-                                // const bones = try allocator.alloc(math.Mat4x4, assets.ref(app.handles.model.sphere).bones.len);
-                                // errdefer allocator.free(bones);
-                                // const indices = try allocator.alloc(C.AnimatedRender.AnimationIndices, assets.ref(app.handles.model.sphere).bones.len);
-                                // errdefer allocator.free(indices);
-                                // @memset(bones, .{});
-                                // @memset(indices, std.mem.zeroes(C.AnimatedRender.AnimationIndices));
-
                                 // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
                                 const t = C.GlobalTransform{
                                     .transform = .{
@@ -1412,7 +1411,7 @@ pub const AppState = struct {
         {
             const animate = struct {
                 fn animate(ar: *C.AnimatedMesh, armature: *assets_mod.Armature, time: f32) bool {
-                    const animation = &armature.animations[4];
+                    const animation = &armature.animations[ar.animation_index];
 
                     for (ar.bones) |*t| {
                         t.* = math.Mat4x4.scaling_mat(.splat(1));

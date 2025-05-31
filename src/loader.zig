@@ -207,6 +207,7 @@ fn _spawn_node(
                 .mesh = hmesh,
                 .material = material,
                 .armature = harmature,
+                .animation_index = @intCast(entity.id % armature.animations.len),
                 .bones = bones,
                 .indices = indices,
             });

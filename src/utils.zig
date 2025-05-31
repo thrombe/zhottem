@@ -123,6 +123,35 @@ pub const TypeId = extern struct {
     }
 };
 
+pub fn cast(typ: type, val: anytype) typ {
+    const E = @typeInfo(@TypeOf(val));
+    const T = @typeInfo(typ);
+    if (comptime (std.meta.activeTag(E) == .int and std.meta.activeTag(T) == .float)) {
+        return @floatFromInt(val);
+    }
+    if (comptime (std.meta.activeTag(E) == .float and std.meta.activeTag(T) == .int)) {
+        return @intFromFloat(val);
+    }
+    if (comptime (std.meta.activeTag(E) == .float and std.meta.activeTag(T) == .float)) {
+        return @floatCast(val);
+    }
+    if (comptime (std.meta.activeTag(E) == .int and std.meta.activeTag(T) == .int)) {
+        return @intCast(val);
+    }
+    if (comptime (std.meta.activeTag(E) == .comptime_int)) {
+        return val;
+    }
+    if (comptime (std.meta.activeTag(E) == .comptime_float)) {
+        if (comptime (std.meta.activeTag(T) == .float)) {
+            return val;
+        }
+        if (comptime (std.meta.activeTag(T) == .int)) {
+            return @intFromFloat(@as(f32, val));
+        }
+    }
+    @compileError("can't cast from '" ++ @typeName(@TypeOf(val)) ++ "' to '" ++ @typeName(typ) ++ "'");
+}
+
 pub inline fn dump_error(err: anyerror) void {
     std.debug.print("error: {any}\n", .{err});
     if (@errorReturnTrace()) |trace| {
