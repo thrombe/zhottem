@@ -1418,7 +1418,7 @@ pub const ShaderCompiler = struct {
                             ctx.err_chan.send(err) catch continue;
                         };
 
-                        std.time.sleep(std.time.ns_per_ms * 100);
+                        std.Thread.sleep(std.time.ns_per_ms * 100);
                     }
                 }
             };
