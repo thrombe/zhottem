@@ -332,7 +332,20 @@ const HotApp = struct {
             gpa.allocator().destroy(self);
         }
 
-        self.engine = try Engine.init();
+        var args = try std.process.argsWithAllocator(allocator.*);
+        defer args.deinit();
+
+        var engine_args: Engine.Window.Args = .{};
+        while (args.next()) |arg| {
+            if (std.mem.eql(u8, arg, "-x11")) {
+                engine_args.platform_hint = .x11;
+            }
+            if (std.mem.eql(u8, arg, "-wayland")) {
+                engine_args.platform_hint = .wayland;
+            }
+        }
+
+        self.engine = try Engine.init(engine_args);
         errdefer self.engine.deinit();
 
         std.debug.print("using device: {s}\n", .{self.engine.graphics.props.device_name});

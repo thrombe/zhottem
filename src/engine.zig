@@ -28,8 +28,8 @@ audio: Audio,
 window: *Window,
 graphics: VulkanContext,
 
-pub fn init() !@This() {
-    var window = try Window.init();
+pub fn init(wv: Window.Args) !@This() {
+    var window = try Window.init(wv);
     errdefer window.deinit();
 
     var audio = try Audio.init();
@@ -524,8 +524,20 @@ pub const Window = struct {
         }
     };
 
-    pub fn init() !*@This() {
+    pub const Args = struct {
+        platform_hint: ?enum {
+            x11,
+            wayland,
+        } = null,
+    };
+
+    pub fn init(v: Args) !*@This() {
         _ = c.glfwSetErrorCallback(&Callbacks.err);
+
+        if (v.platform_hint) |hint| switch (hint) {
+            .x11 => c.glfwInitHint(c.GLFW_PLATFORM, c.GLFW_PLATFORM_X11),
+            .wayland => c.glfwInitHint(c.GLFW_PLATFORM, c.GLFW_PLATFORM_WAYLAND),
+        };
 
         if (c.glfwInit() != c.GLFW_TRUE) return error.GlfwInitFailed;
         errdefer c.glfwTerminate();
