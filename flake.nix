@@ -29,7 +29,6 @@
     naersk = {
       url = "github:nmattia/naersk";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
     };
     # a tui debugger (better rust support)
     nnd = {
@@ -166,14 +165,16 @@
           zig
 
           zls
-          gdb
-          nnd
 
           # - [nixOS usage | Mach: zig game engine & graphics toolkit](https://machengine.org/about/nixos-usage/)
           xorg.libX11
           vulkan-loader
 
           renderdoc
+          gdb
+          nnd
+          linuxKernel.packages.linux_zen.perf
+          hotspot
         ])
         ++ []
         ++ (custom-commands pkgs);
