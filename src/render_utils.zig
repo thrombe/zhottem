@@ -2207,7 +2207,7 @@ pub fn dump_image_to_file(
         .r16g16b16a16_sfloat => {
             const src = std.mem.bytesAsSlice(f16, buf);
             for (src[0..pixels.len], 0..) |f, i| {
-                pixels[i] = @intFromFloat(f * 255.0);
+                pixels[i] = @intFromFloat(std.math.clamp(f * 255.0, 0, 255));
             }
         },
         .r8g8b8a8_srgb => {
