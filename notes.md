@@ -1,0 +1,1 @@
+/home/issac/daata/repos/projects/notes/configma/notes/home/daata/repos/projects/eyeface/notes.md

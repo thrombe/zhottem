@@ -78,6 +78,8 @@ texture: Image,
 handles: Handles,
 entities: Entities,
 
+telemetry: utils.Remotery,
+
 const Entities = struct {
     player: Entity,
 };
@@ -327,6 +329,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var ctx = &engine.graphics;
     const device = &ctx.device;
 
+    var telemetry = try utils.Remotery.init(ctx);
+    errdefer telemetry.deinit();
+
     const cmd_pool = try device.createCommandPool(&.{
         .queue_family_index = ctx.graphics_queue.family,
         .flags = .{
@@ -575,6 +580,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .recorder = recorder,
         .audio = audio,
 
+        .telemetry = telemetry,
+
         .net_ctx = net_ctx,
         .net_server = net_server,
         .net_client = net_client,
@@ -599,6 +606,8 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.recorder.deinit() catch |e| utils.dump_error(e);
     defer self.audio.deinit() catch |e| utils.dump_error(e);
     defer self.texture.deinit(device);
+
+    defer self.telemetry.deinit();
 
     defer self.net_ctx.deinit();
     defer if (self.net_server) |s| s.deinit();
@@ -626,29 +635,44 @@ pub fn present(
     gui_renderer: *GuiEngine.GuiRenderer,
     engine: *Engine,
 ) !Swapchain.PresentState {
+    self.telemetry.begin_sample("app.present");
+    defer self.telemetry.end_sample();
+
     const ctx = &engine.graphics;
 
     if (engine.window.resize_fuse.unfuse()) {
         _ = app_state.resize_fuse.fuse();
     }
 
-    // TODO: might be useful to create some kinda double buffered setup for
-    //  cmdbuffers so that i can queue them before .queueWaitIdle()
-    // multiple framebuffers => multiple descriptor sets => different buffers
-    // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad
-    // so just wait for one frame's queue to be empty before trying to render another frame
-    try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
+    {
+        self.telemetry.begin_sample("queue wait idle");
+        defer self.telemetry.end_sample();
 
-    try self.uniforms.upload(&ctx.device);
-    const updates = try self.resources.instances.update(ctx, self.command_pool);
-    if (updates.buffer_invalid) {
-        _ = app_state.shader_fuse.fuse();
+        // TODO: might be useful to create some kinda double buffered setup for
+        //  cmdbuffers so that i can queue them before .queueWaitIdle()
+        // multiple framebuffers => multiple descriptor sets => different buffers
+        // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad
+        // so just wait for one frame's queue to be empty before trying to render another frame
+        try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
     }
-    if (updates.cmdbuf_invalid) {
-        _ = app_state.cmdbuf_fuse.fuse();
+
+    {
+        self.telemetry.begin_sample("gpu buffer uploads");
+        defer self.telemetry.end_sample();
+
+        try self.uniforms.upload(&ctx.device);
+        const updates = try self.resources.instances.update(ctx, self.command_pool);
+        if (updates.buffer_invalid) {
+            _ = app_state.shader_fuse.fuse();
+        }
+        if (updates.cmdbuf_invalid) {
+            _ = app_state.cmdbuf_fuse.fuse();
+        }
     }
 
     if (app_state.jolt_debug_render) if (self.world.phy.state.debug_renderer) |*dbg_renderer| {
+        self.telemetry.begin_sample("jolt update resources");
+        defer self.telemetry.end_sample();
         dbg_renderer.state.lock.lock();
         defer dbg_renderer.state.lock.unlock();
 
@@ -667,10 +691,14 @@ pub fn present(
     }
 
     if (app_state.shader_fuse.unfuse()) {
+        self.telemetry.begin_sample("recreating pipelins");
+        defer self.telemetry.end_sample();
         try dynamic_state.recreate_pipelines(engine, self, app_state);
     }
 
     if (app_state.cmdbuf_fuse.unfuse()) {
+        self.telemetry.begin_sample("recreating command buffers");
+        defer self.telemetry.end_sample();
         try dynamic_state.recreate_cmdbuf(engine, self, app_state);
     }
 
@@ -692,6 +720,8 @@ pub fn present(
 
     // this has to happen before the next app/gui tick
     if (app_state.resize_fuse.unfuse()) {
+        self.telemetry.begin_sample("recreating swapchain");
+        defer self.telemetry.end_sample();
         // this is not good :/
         // we have to wait for queue to be idle before creating swapchain again
         try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
@@ -1005,6 +1035,9 @@ pub const AppState = struct {
     }
 
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
+        app.telemetry.begin_sample("app_state.tick");
+        defer app.telemetry.end_sample();
+
         const assets = &app.resources.assets;
         const window = engine.window;
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
@@ -1018,6 +1051,9 @@ pub const AppState = struct {
 
         // local input tick
         {
+            app.telemetry.begin_sample(".local_input");
+            defer app.telemetry.end_sample();
+
             var mouse = &input.mouse;
             var kb = &input.keys;
 
@@ -1080,10 +1116,21 @@ pub const AppState = struct {
 
         // networking tick
         {
+            app.telemetry.begin_sample(".networking");
+            defer app.telemetry.end_sample();
+
             try app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
 
-            try app.net_ctx.tick();
+            {
+                app.telemetry.begin_sample(".tick");
+                defer app.telemetry.end_sample();
+
+                try app.net_ctx.tick();
+            }
             if (app.net_server) |s| while (s.messages.try_recv()) |e| {
+                app.telemetry.begin_sample(".server_msg");
+                defer app.telemetry.end_sample();
+
                 switch (e.event) {
                     .join => {
                         self.client_count += 1;
@@ -1131,8 +1178,16 @@ pub const AppState = struct {
                 }
             };
 
-            try app.net_ctx.tick();
+            {
+                app.telemetry.begin_sample(".tick");
+                defer app.telemetry.end_sample();
+
+                try app.net_ctx.tick();
+            }
             while (app.net_client.messages.try_recv()) |e| {
+                app.telemetry.begin_sample(".player_msg");
+                defer app.telemetry.end_sample();
+
                 switch (e.event) {
                     .spawn_player => |id| {
                         if (player_id == id.id) {
@@ -1310,6 +1365,9 @@ pub const AppState = struct {
 
         // physics tick
         {
+            app.telemetry.begin_sample(".physics");
+            defer app.telemetry.end_sample();
+
             self.physics.acctime += delta;
             self.physics.interpolation_acctime += delta;
 
@@ -1334,6 +1392,9 @@ pub const AppState = struct {
 
                 var player_it = try app.world.ecs.iterator(struct { char: C.CharacterBody });
                 while (player_it.next()) |e| {
+                    app.telemetry.begin_sample(".jolt");
+                    defer app.telemetry.end_sample();
+
                     const char: *C.CharacterBody = e.char;
                     char.force = char.force.add(Vec3.from_buf(app.world.phy.phy.getGravity()));
 
@@ -1364,18 +1425,27 @@ pub const AppState = struct {
                         },
                     );
                 }
-                try app.world.step(self.physics.step * steps, @intFromFloat(steps));
 
-                self.physics.interpolation_acctime = self.physics.acctime;
-                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform });
-                while (it.next()) |e| {
-                    e.ft.transform = e.t.transform;
+                {
+                    app.telemetry.begin_sample(".world");
+                    defer app.telemetry.end_sample();
+
+                    try app.world.step(self.physics.step * steps, @intFromFloat(steps));
+
+                    self.physics.interpolation_acctime = self.physics.acctime;
+                    var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform });
+                    while (it.next()) |e| {
+                        e.ft.transform = e.t.transform;
+                    }
                 }
             }
         }
 
         // alive state tick
         {
+            app.telemetry.begin_sample(".alive_state");
+            defer app.telemetry.end_sample();
+
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });
             while (it.next()) |e| {
                 switch (e.ds.state) {
@@ -1409,6 +1479,9 @@ pub const AppState = struct {
 
         // animation tick
         {
+            app.telemetry.begin_sample(".animation");
+            defer app.telemetry.end_sample();
+
             const animate = struct {
                 fn animate(ar: *C.AnimatedMesh, armature: *assets_mod.Armature, time: f32) bool {
                     const animation = &armature.animations[ar.animation_index];
@@ -1492,6 +1565,9 @@ pub const AppState = struct {
 
         // add missing last transforms
         {
+            app.telemetry.begin_sample(".add_missing_transforms");
+            defer app.telemetry.end_sample();
+
             var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
             while (it.next()) |e| {
                 var ee = it.current_entity_explorer();
@@ -1501,14 +1577,25 @@ pub const AppState = struct {
             }
         }
 
-        try self.cmdbuf.apply(@ptrCast(&app.world));
+        {
+            app.telemetry.begin_sample(".cmdbuf_apply");
+            defer app.telemetry.end_sample();
+
+            try self.cmdbuf.apply(@ptrCast(&app.world));
+        }
 
         // render instance tick
         {
+            app.telemetry.begin_sample(".render_instance");
+            defer app.telemetry.end_sample();
+
             const instances = &app.resources.instances;
             instances.reset();
 
             {
+                app.telemetry.begin_sample(".static_mesh");
+                defer app.telemetry.end_sample();
+
                 var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticMesh, b: C.BatchedRender });
                 while (it.next()) |e| {
                     if (e.b.batch == null) {
@@ -1524,6 +1611,9 @@ pub const AppState = struct {
             }
 
             {
+                app.telemetry.begin_sample(".animated_mesh");
+                defer app.telemetry.end_sample();
+
                 var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedMesh, b: C.BatchedRender });
                 while (it.next()) |e| {
                     if (e.b.batch == null) {
@@ -1545,6 +1635,9 @@ pub const AppState = struct {
 
         // audio tick
         {
+            app.telemetry.begin_sample(".audio");
+            defer app.telemetry.end_sample();
+
             const playing = &app.audio.ctx.ctx.playing;
 
             // if true, the audio thread won't know it had to swap
@@ -1585,6 +1678,9 @@ pub const AppState = struct {
 
         // camera tick
         {
+            app.telemetry.begin_sample(".camera");
+            defer app.telemetry.end_sample();
+
             const player = try app.world.ecs.get(app.entities.player, struct {
                 camera: math.Camera,
                 controller: C.Controller,

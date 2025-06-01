@@ -1660,3 +1660,95 @@ pub const Glslc = struct {
         }
     };
 };
+
+pub const Remotery = struct {
+    const c = @cImport({
+        @cDefine("RMT_ENABLED", "1");
+        @cDefine("RMT_USE_VULKAN", "1");
+        @cInclude("Remotery.h");
+    });
+
+    const VulkanContext = @import("engine.zig").VulkanContext;
+    const vk = @import("vulkan");
+
+    rmt: *c.Remotery,
+    samples: std.StringArrayHashMap(c.rmtU32),
+
+    bind: *c.rmtVulkanBind,
+
+    pub fn init(ctx: *VulkanContext) !@This() {
+        var rmt: *c.Remotery = undefined;
+        const code = c._rmt_CreateGlobalInstance(@ptrCast(&rmt));
+        if (code != c.RMT_ERROR_NONE) {
+            std.debug.print("code: {d}\n", .{code});
+            return error.ErrorInitializingRMT;
+        }
+        errdefer c._rmt_DestroyGlobalInstance(rmt);
+
+        const funcs: c.rmtVulkanFunctions = .{
+            .vkGetPhysicalDeviceProperties = @ptrCast(@constCast(ctx.instance.wrapper.dispatch.vkGetPhysicalDeviceProperties)),
+            .vkQueueSubmit = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkQueueSubmit)),
+            .vkQueueWaitIdle = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkQueueWaitIdle)),
+            .vkCreateQueryPool = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkCreateQueryPool)),
+            .vkDestroyQueryPool = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkDestroyQueryPool)),
+            .vkResetQueryPool = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkResetQueryPool)),
+            .vkGetQueryPoolResults = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkGetQueryPoolResults)),
+            .vkCmdWriteTimestamp = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkCmdWriteTimestamp)),
+            .vkCreateSemaphore = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkCreateSemaphore)),
+            .vkDestroySemaphore = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkDestroySemaphore)),
+            .vkSignalSemaphore = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkSignalSemaphore)),
+            .vkGetSemaphoreCounterValue = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkGetSemaphoreCounterValue)),
+            .vkGetCalibratedTimestampsEXT = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkGetCalibratedTimestampsKHR)),
+        };
+
+        var bind: ?*c.rmtVulkanBind = null;
+        if (c._rmt_BindVulkan(
+            @ptrFromInt(@intFromEnum(ctx.instance.handle)),
+            @ptrFromInt(@intFromEnum(ctx.pdev)),
+            @ptrFromInt(@intFromEnum(ctx.device.handle)),
+            @ptrFromInt(@intFromEnum(ctx.graphics_queue.handle)),
+            &funcs,
+            @ptrCast(&bind),
+        ) != c.RMT_ERROR_NONE) return error.ErrorBindingVulkan;
+
+        return .{ .rmt = rmt, .samples = .init(allocator.*), .bind = bind orelse return error.ErrorBindingVulkan };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        c._rmt_UnbindVulkan(self.bind);
+        c._rmt_DestroyGlobalInstance(self.rmt);
+        self.samples.deinit();
+    }
+
+    pub fn mark_frame(_: *@This()) !void {
+        if (c._rmt_MarkFrame() != c.RMT_ERROR_NONE) return error.ErrorMarkingFrame;
+    }
+
+    pub fn begin_vulkan_sample(self: *@This(), cmdbuf: vk.CommandBuffer, name: [:0]const u8) void {
+        const sample = self.samples.getOrPut(name) catch @panic("OOM");
+        if (!sample.found_existing) {
+            sample.value_ptr.* = 0;
+        }
+        c._rmt_BeginVulkanSample(self.bind, @ptrFromInt(@intFromEnum(cmdbuf)), name.ptr, sample.value_ptr);
+    }
+
+    pub fn end_vulkan_sample(_: *@This()) void {
+        c._rmt_EndVulkanSample();
+    }
+
+    pub fn begin_sample(self: *@This(), name: [:0]const u8) void {
+        const sample = self.samples.getOrPut(name) catch @panic("OOM");
+        if (!sample.found_existing) {
+            sample.value_ptr.* = 0;
+        }
+        c._rmt_BeginCPUSample(name.ptr, 0, sample.value_ptr);
+    }
+
+    pub fn end_sample(_: *@This()) void {
+        c._rmt_EndCPUSample();
+    }
+
+    pub fn log(_: *@This(), msg: [:0]const u8) void {
+        c._rmt_LogText(msg.ptr);
+    }
+};

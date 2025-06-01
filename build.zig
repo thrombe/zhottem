@@ -206,6 +206,37 @@ fn jolt_step(b: *std.Build, v: struct {
     return .{ .lib = jolt, .boptions = options, .options = jolt_options };
 }
 
+fn remotery_step(b: *std.Build, v: struct {
+    remotery: *std.Build.Dependency,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    alloc: std.mem.Allocator,
+}) !struct { lib: *std.Build.Step.Compile } {
+    const remotery = b.addSharedLibrary(.{
+        .name = "remotery",
+        .target = v.target,
+        .optimize = v.optimize,
+    });
+
+    var flags = Flags.init(v.alloc);
+    try flags.appendSlice(compile_commands_flags);
+    try flags.appendSlice(&[_][]const u8{
+        "-DRMT_ENABLED=1",
+        "-DRMT_USE_VULKAN=1",
+    });
+
+    remotery.addIncludePath(v.remotery.path("lib"));
+    remotery.addCSourceFiles(.{
+        .root = v.remotery.path("lib"),
+        .flags = try flags.toOwnedSlice(),
+        .files = &[_][]const u8{"Remotery.c"},
+    });
+    remotery.linkSystemLibrary("vulkan");
+    remotery.linkLibC();
+
+    return .{ .lib = remotery };
+}
+
 const CompileMode = enum {
     exe,
     hotexe,
@@ -227,6 +258,8 @@ fn step(b: *std.Build, v: struct {
     jolt_dep: *std.Build.Dependency,
     stb_dep: *std.Build.Dependency,
     steamworks_dep: *std.Build.Dependency,
+    remotery: *std.Build.Step.Compile,
+    remotery_dep: *std.Build.Dependency,
 }) !*std.Build.Step.Compile {
     const is_windows = v.target.result.os.tag == .windows;
 
@@ -278,6 +311,7 @@ fn step(b: *std.Build, v: struct {
             compile_step.addIncludePath(v.imgui_dep.path("./backends"));
             compile_step.addIncludePath(v.jolt_dep.path("./"));
             compile_step.addIncludePath(v.stb_dep.path("./"));
+            compile_step.addIncludePath(v.remotery_dep.path("./lib"));
             compile_step.addIncludePath(b.path("./src"));
 
             compile_step.addIncludePath(v.steamworks_dep.path("./public"));
@@ -356,9 +390,11 @@ fn step(b: *std.Build, v: struct {
             if (is_windows) {
                 compile_step.addObjectFile(b.path("./zig-out/lib/cimgui.lib"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/jolt.lib"));
+                compile_step.addObjectFile(b.path("./zig-out/lib/remotery.lib"));
             } else {
                 compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/libjolt.so"));
+                compile_step.addObjectFile(b.path("./zig-out/lib/libremotery.so"));
             }
 
             var jolt_flags = Flags.init(v.alloc);
@@ -417,6 +453,7 @@ pub fn build(b: *std.Build) !void {
     const jolt = b.dependency("jolt", .{});
     const stb = b.dependency("stb", .{});
     const steamworks = b.dependency("steamworks", .{});
+    const remotery = b.dependency("remotery", .{});
 
     const vulkan = vulkan_step(b, .{
         .vulkan_headers = vulkan_headers,
@@ -431,6 +468,12 @@ pub fn build(b: *std.Build) !void {
     });
     const libjolt = try jolt_step(b, .{
         .jolt = jolt,
+        .target = target,
+        .optimize = optimize,
+        .alloc = alloc,
+    });
+    const libremotery = try remotery_step(b, .{
+        .remotery = remotery,
         .target = target,
         .optimize = optimize,
         .alloc = alloc,
@@ -458,6 +501,8 @@ pub fn build(b: *std.Build) !void {
         .jolt_dep = jolt,
         .stb_dep = stb,
         .steamworks_dep = steamworks,
+        .remotery = libremotery.lib,
+        .remotery_dep = remotery,
     });
     const hotlib = try step(b, .{
         .target = target,
@@ -474,6 +519,8 @@ pub fn build(b: *std.Build) !void {
         .jolt_dep = jolt,
         .stb_dep = stb,
         .steamworks_dep = steamworks,
+        .remotery = libremotery.lib,
+        .remotery_dep = remotery,
     });
     const hotexe = try step(b, .{
         .target = target,
@@ -490,10 +537,13 @@ pub fn build(b: *std.Build) !void {
         .jolt_dep = jolt,
         .stb_dep = stb,
         .steamworks_dep = steamworks,
+        .remotery = libremotery.lib,
+        .remotery_dep = remotery,
     });
 
     compile_commands.step.dependOn(&libimgui.lib.step);
     compile_commands.step.dependOn(&libjolt.lib.step);
+    compile_commands.step.dependOn(&libremotery.lib.step);
     compile_commands.step.dependOn(&hotlib.step);
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");
@@ -501,6 +551,8 @@ pub fn build(b: *std.Build) !void {
     build_libs_step.dependOn(&b.addInstallArtifact(libimgui.lib, .{}).step);
     build_libs_step.dependOn(&libjolt.lib.step);
     build_libs_step.dependOn(&b.addInstallArtifact(libjolt.lib, .{}).step);
+    build_libs_step.dependOn(&libremotery.lib.step);
+    build_libs_step.dependOn(&b.addInstallArtifact(libremotery.lib, .{}).step);
     build_libs_step.dependOn(&hotlib.step);
     build_libs_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     build_libs_step.dependOn(compile_commands.step);

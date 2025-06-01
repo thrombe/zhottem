@@ -662,6 +662,7 @@ pub const VulkanContext = struct {
     const required_device_extensions = [_][*:0]const u8{
         vk.extensions.khr_swapchain.name,
         vk.extensions.khr_dynamic_rendering.name,
+        vk.extensions.khr_calibrated_timestamps.name,
     };
     pub const Api = struct {
         const apis: []const vk.ApiInfo = &.{
@@ -680,6 +681,7 @@ pub const VulkanContext = struct {
             vk.extensions.khr_surface,
             vk.extensions.khr_swapchain,
             vk.extensions.khr_dynamic_rendering,
+            vk.extensions.khr_calibrated_timestamps,
                 // EH: ?what are these
                 // vk.extensions.ext_validation_features,
                 // vk.extensions.ext_validation_flags,
