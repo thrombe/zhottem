@@ -1752,3 +1752,122 @@ pub const Remotery = struct {
         c._rmt_LogText(msg.ptr);
     }
 };
+
+pub const Tracy = struct {
+    const options = @import("tracy-options");
+    const c = @cImport({
+        if (options.tracy_enable) @cDefine("TRACY_ENABLE", {});
+        if (options.on_demand) @cDefine("TRACY_ON_DEMAND", {});
+        if (options.callstack) @cDefine("TRACY_CALLSTACK", {});
+        if (options.no_callstack) @cDefine("TRACY_NO_CALLSTACK", {});
+        if (options.no_callstack_inlines) @cDefine("TRACY_NO_CALLSTACK_INLINES", {});
+        if (options.only_localhost) @cDefine("TRACY_ONLY_LOCALHOST", {});
+        if (options.no_broadcast) @cDefine("TRACY_NO_BROADCAST", {});
+        if (options.only_ipv4) @cDefine("TRACY_ONLY_IPV4", {});
+        if (options.no_code_transfer) @cDefine("TRACY_NO_CODE_TRANSFER", {});
+        if (options.no_context_switch) @cDefine("TRACY_NO_CONTEXT_SWITCH", {});
+        if (options.no_exit) @cDefine("TRACY_NO_EXIT", {});
+        if (options.no_sampling) @cDefine("TRACY_NO_SAMPLING", {});
+        if (options.no_verify) @cDefine("TRACY_NO_VERIFY", {});
+        if (options.no_vsync_capture) @cDefine("TRACY_NO_VSYNC_CAPTURE", {});
+        if (options.no_frame_image) @cDefine("TRACY_NO_FRAME_IMAGE", {});
+        if (options.no_system_tracing) @cDefine("TRACY_NO_SYSTEM_TRACING", {});
+        if (options.patchable_nopsleds) @cDefine("TRACY_PATCHABLE_NOPSLEDS", {});
+        if (options.delayed_init) @cDefine("TRACY_DELAYED_INIT", {});
+        if (options.manual_lifetime) @cDefine("TRACY_MANUAL_LIFETIME", {});
+        if (options.fibers) @cDefine("TRACY_FIBERS", {});
+        if (options.timer_fallback) @cDefine("TRACY_TIMER_FALLBACK", {});
+        if (options.no_crash_handler) @cDefine("TRACY_NO_CRASH_HANDLER", {});
+        if (options.libunwind_backtrace) @cDefine("TRACY_LIBUNWIND_BACKTRACE", {});
+        if (options.symbol_offline_resolve) @cDefine("TRACY_SYMBOL_OFFLINE_RESOLVE", {});
+        if (options.libbacktrace_elf_dynload_support) @cDefine("TRACY_LIBBACKTRACE_ELF_DYNLOAD_SUPPORT", {});
+        if (options.verbose) @cDefine("TRACY_VERBOSE", {});
+        if (options.debuginfod) @cDefine("TRACY_DEBUGINFOD", {});
+        if (options.shared) @cDefine("DTRACY_EXPORTS", {});
+        if (builtin.os.tag == .windows and options.shared) @cDefine("WINVER", "0x0601");
+        if (builtin.os.tag == .windows and options.shared) @cDefine("_WIN32_WINNT", "0x0601");
+        @cInclude("tracy/TracyC.h");
+    });
+
+    samples: std.ArrayList(ZoneContext),
+
+    pub fn init() !@This() {
+        return .{ .samples = .init(allocator.*) };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.samples.deinit();
+    }
+
+    pub fn begin_sample(self: *@This(), comptime src: std.builtin.SourceLocation, name: [:0]const u8) void {
+        self.samples.append(self.beginZone(src, name)) catch @panic("OOM");
+    }
+
+    pub fn end_sample(self: *@This()) void {
+        const sample = self.samples.pop() orelse return;
+        sample.end();
+    }
+
+    pub fn mark_frame(_: *@This()) !void {
+        c.___tracy_emit_frame_mark(null);
+    }
+
+    pub fn log(_: *@This(), msg: [:0]const u8) void {
+        _ = msg;
+    }
+
+    pub const ZoneOptions = struct {
+        active: bool = true,
+        name: ?[]const u8 = null,
+        color: ?u32 = null,
+    };
+
+    pub const ZoneContext = struct {
+        ctx: c.___tracy_c_zone_context,
+
+        pub inline fn end(zone: ZoneContext) void {
+            c.___tracy_emit_zone_end(zone.ctx);
+        }
+
+        pub inline fn name(zone: ZoneContext, zone_name: []const u8) void {
+            c.___tracy_emit_zone_name(zone.ctx, zone_name.ptr, zone_name.len);
+        }
+
+        pub inline fn text(zone: ZoneContext, zone_text: []const u8) void {
+            c.___tracy_emit_zone_text(zone.ctx, zone_text.ptr, zone_text.len);
+        }
+
+        pub inline fn color(zone: ZoneContext, zone_color: u32) void {
+            c.___tracy_emit_zone_color(zone.ctx, zone_color);
+        }
+
+        pub inline fn value(zone: ZoneContext, zone_value: u64) void {
+            c.___tracy_emit_zone_value(zone.ctx, zone_value);
+        }
+    };
+
+    pub inline fn beginZone(_: *@This(), comptime src: std.builtin.SourceLocation, name: [:0]const u8) ZoneContext {
+        const opts = ZoneOptions{ .name = name };
+        const active: c_int = @intFromBool(opts.active);
+
+        const src_loc = c.___tracy_source_location_data{
+            .name = if (opts.name) |n| n.ptr else null,
+            .function = src.fn_name.ptr,
+            .file = src.file,
+            .line = src.line,
+            .color = opts.color orelse 0,
+        };
+
+        if (!options.no_callstack) {
+            if (options.callstack) {
+                return .{
+                    .ctx = c.___tracy_emit_zone_begin_callstack(&src_loc, 5, active),
+                };
+            }
+        }
+
+        return .{
+            .ctx = c.___tracy_emit_zone_begin(&src_loc, active),
+        };
+    }
+};

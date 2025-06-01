@@ -42,6 +42,13 @@
             .url = "https://github.com/Celtoys/Remotery/archive/5483f65b60334059933ff82464d8ea6882d20073.tar.gz",
             .hash = "N-V-__8AAKrBEQDvjEgWGbLAUmNXF7xbsdKINldFKwQnhqhk",
         },
+        .tracy = .{
+            // TODO: disabled until nixpkgs gets 0.12
+            // .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.12.0.tar.gz",
+            // .hash = "N-V-__8AABI9PwGkEDxc-gkF60lgvJ3cKJv44jVYIWomN7dW",
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz",
+            .hash = "N-V-__8AAMeOlQEipHjcyu0TCftdAi9AQe7EXUDJOoVe0k-t",
+        },
     },
 
     .paths = .{""},

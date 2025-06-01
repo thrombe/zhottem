@@ -237,6 +237,140 @@ fn remotery_step(b: *std.Build, v: struct {
     return .{ .lib = remotery };
 }
 
+const TracyOptions = struct {
+    // Enable profiling
+    tracy_enable: bool = true,
+    // On-demand profiling
+    on_demand: bool = false,
+    // Enfore callstack collection for tracy regions
+    callstack: bool = false,
+    // Disable all callstack related functionality
+    no_callstack: bool = false,
+    // Disables the inline functions in callstacks
+    no_callstack_inlines: bool = false,
+    // Only listen on the localhost interface
+    only_localhost: bool = false,
+    // Disable client discovery by broadcast to local network
+    no_broadcast: bool = false,
+    // Tracy will only accept connections on IPv4 addresses (disable IPv6)
+    only_ipv4: bool = false,
+    // Disable collection of source code
+    no_code_transfer: bool = false,
+    // Disable capture of context switches
+    no_context_switch: bool = false,
+    // Client executable does not exit until all profile data is sent to server
+    no_exit: bool = false,
+    // Disable call stack sampling
+    no_sampling: bool = false,
+    // Disable zone validation for C API
+    no_verify: bool = false,
+    // Disable capture of hardware Vsync events
+    no_vsync_capture: bool = false,
+    // Disable the frame image support and its thread
+    no_frame_image: bool = false,
+    // Disable systrace sampling
+    no_system_tracing: bool = false,
+    // Enable nopsleds for efficient patching by system-level tools (e.g. rr)
+    patchable_nopsleds: bool = false,
+    // Use lower resolution timers
+    timer_fallback: bool = false,
+    // Use libunwind backtracing where supported
+    libunwind_backtrace: bool = false,
+    // Instead of full runtime symbol resolution, only resolve the image path and offset to enable offline symbol resolution
+    symbol_offline_resolve: bool = false,
+    // Enable libbacktrace to support dynamically loaded elfs in symbol resolution resolution after the first symbol resolve operation
+    libbacktrace_elf_dynload_support: bool = false,
+    // Enable delayed initialization of the library (init on first call)
+    delayed_init: bool = false,
+    // Enable the manual lifetime management of the profile
+    manual_lifetime: bool = false,
+    // Enable fibers support
+    fibers: bool = false,
+    // Disable crash handling
+    no_crash_handler: bool = false,
+    // Enable verbose logging
+    verbose: bool = false,
+    // Enable debuginfod support
+    debuginfod: bool = false,
+
+    shared: bool = true,
+};
+
+fn tracy_step(b: *std.Build, v: struct {
+    dep: *std.Build.Dependency,
+    options: TracyOptions,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    alloc: std.mem.Allocator,
+}) !struct { lib: *std.Build.Step.Compile, boptions: *std.Build.Step.Options, options: TracyOptions } {
+    const is_windows = v.target.result.os.tag == .windows;
+
+    const tracy = b.addSharedLibrary(.{
+        .name = "tracy",
+        .target = v.target,
+        .optimize = v.optimize,
+    });
+
+    var flags = Flags.init(v.alloc);
+    try flags.appendSlice(compile_commands_flags);
+
+    if (v.options.tracy_enable) try flags.append("-DTRACY_ENABLE");
+    if (v.options.on_demand) try flags.append("-DTRACY_ON_DEMAND");
+    if (v.options.callstack) try flags.append("-DTRACY_CALLSTACK");
+    if (v.options.no_callstack) try flags.append("-DTRACY_NO_CALLSTACK");
+    if (v.options.no_callstack_inlines) try flags.append("-DTRACY_NO_CALLSTACK_INLINES");
+    if (v.options.only_localhost) try flags.append("-DTRACY_ONLY_LOCALHOST");
+    if (v.options.no_broadcast) try flags.append("-DTRACY_NO_BROADCAST");
+    if (v.options.only_ipv4) try flags.append("-DTRACY_ONLY_IPV4");
+    if (v.options.no_code_transfer) try flags.append("-DTRACY_NO_CODE_TRANSFER");
+    if (v.options.no_context_switch) try flags.append("-DTRACY_NO_CONTEXT_SWITCH");
+    if (v.options.no_exit) try flags.append("-DTRACY_NO_EXIT");
+    if (v.options.no_sampling) try flags.append("-DTRACY_NO_SAMPLING");
+    if (v.options.no_verify) try flags.append("-DTRACY_NO_VERIFY");
+    if (v.options.no_vsync_capture) try flags.append("-DTRACY_NO_VSYNC_CAPTURE");
+    if (v.options.no_frame_image) try flags.append("-DTRACY_NO_FRAME_IMAGE");
+    if (v.options.no_system_tracing) try flags.append("-DTRACY_NO_SYSTEM_TRACING");
+    if (v.options.patchable_nopsleds) try flags.append("-DTRACY_PATCHABLE_NOPSLEDS");
+    if (v.options.delayed_init) try flags.append("-DTRACY_DELAYED_INIT");
+    if (v.options.manual_lifetime) try flags.append("-DTRACY_MANUAL_LIFETIME");
+    if (v.options.fibers) try flags.append("-DTRACY_FIBERS");
+    if (v.options.timer_fallback) try flags.append("-DTRACY_TIMER_FALLBACK");
+    if (v.options.no_crash_handler) try flags.append("-DTRACY_NO_CRASH_HANDLER");
+    if (v.options.libunwind_backtrace) try flags.append("-DTRACY_LIBUNWIND_BACKTRACE");
+    if (v.options.libunwind_backtrace) tracy.linkSystemLibrary("libunwind");
+    if (v.options.symbol_offline_resolve) try flags.append("-DTRACY_SYMBOL_OFFLINE_RESOLVE");
+    if (v.options.libbacktrace_elf_dynload_support) try flags.append("-DTRACY_LIBBACKTRACE_ELF_DYNLOAD_SUPPORT");
+    if (v.options.verbose) try flags.append("-DTRACY_VERBOSE");
+    if (v.options.debuginfod) try flags.append("-DTRACY_DEBUGINFOD");
+    if (v.options.debuginfod) tracy.linkSystemLibrary("libdebuginfod");
+    if (v.options.shared) try flags.append("-DDTRACY_EXPORTS");
+    if (is_windows and v.options.shared) try flags.appendSlice(&.{
+        "-DWINVER=0x0601",
+        "-D_WIN32_WINNT=0x0601",
+    });
+    // try flags.append("-std=c++14");
+
+    if (is_windows) {
+        tracy.linkSystemLibrary("dbghelp");
+        tracy.linkSystemLibrary("ws2_32");
+    }
+
+    const options = b.addOptions();
+    inline for (std.meta.fields(@TypeOf(v.options))) |field| {
+        options.addOption(field.type, field.name, @field(v.options, field.name));
+    }
+
+    tracy.addIncludePath(v.dep.path("public"));
+    tracy.addCSourceFiles(.{
+        .root = v.dep.path("public"),
+        .flags = try flags.toOwnedSlice(),
+        .files = &[_][]const u8{"TracyClient.cpp"},
+    });
+    tracy.linkLibCpp();
+
+    return .{ .lib = tracy, .options = v.options, .boptions = options };
+}
+
 const CompileMode = enum {
     exe,
     hotexe,
@@ -260,6 +394,9 @@ fn step(b: *std.Build, v: struct {
     steamworks_dep: *std.Build.Dependency,
     remotery: *std.Build.Step.Compile,
     remotery_dep: *std.Build.Dependency,
+    tracy: *std.Build.Step.Compile,
+    tracy_dep: *std.Build.Dependency,
+    tracy_boptions: *std.Build.Step.Options,
 }) !*std.Build.Step.Compile {
     const is_windows = v.target.result.os.tag == .windows;
 
@@ -294,6 +431,7 @@ fn step(b: *std.Build, v: struct {
     options.addOption(CompileMode, "mode", v.mode);
     compile_step.root_module.addImport("build-options", options.createModule());
     compile_step.root_module.addImport("jolt-options", v.jolt_boptions.createModule());
+    compile_step.root_module.addImport("tracy-options", v.tracy_boptions.createModule());
 
     if (is_windows) {
         compile_step.addIncludePath(b.path("./zig-out/vendor/include"));
@@ -391,10 +529,12 @@ fn step(b: *std.Build, v: struct {
                 compile_step.addObjectFile(b.path("./zig-out/lib/cimgui.lib"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/jolt.lib"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/remotery.lib"));
+                compile_step.addObjectFile(b.path("./zig-out/lib/tracy.lib"));
             } else {
                 compile_step.addObjectFile(b.path("./zig-out/lib/libcimgui.so"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/libjolt.so"));
                 compile_step.addObjectFile(b.path("./zig-out/lib/libremotery.so"));
+                compile_step.addObjectFile(b.path("./zig-out/lib/libtracy.so"));
             }
 
             var jolt_flags = Flags.init(v.alloc);
@@ -454,6 +594,7 @@ pub fn build(b: *std.Build) !void {
     const stb = b.dependency("stb", .{});
     const steamworks = b.dependency("steamworks", .{});
     const remotery = b.dependency("remotery", .{});
+    const tracy = b.dependency("tracy", .{});
 
     const vulkan = vulkan_step(b, .{
         .vulkan_headers = vulkan_headers,
@@ -477,6 +618,13 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .alloc = alloc,
+    });
+    const libtracy = try tracy_step(b, .{
+        .dep = tracy,
+        .target = target,
+        .optimize = optimize,
+        .alloc = alloc,
+        .options = .{ .shared = true },
     });
     const compile_commands = try compile_commands_step(b, .{
         .cdb_dir = ".cache/cdb",
@@ -503,6 +651,9 @@ pub fn build(b: *std.Build) !void {
         .steamworks_dep = steamworks,
         .remotery = libremotery.lib,
         .remotery_dep = remotery,
+        .tracy = libtracy.lib,
+        .tracy_dep = tracy,
+        .tracy_boptions = libtracy.boptions,
     });
     const hotlib = try step(b, .{
         .target = target,
@@ -521,6 +672,9 @@ pub fn build(b: *std.Build) !void {
         .steamworks_dep = steamworks,
         .remotery = libremotery.lib,
         .remotery_dep = remotery,
+        .tracy = libtracy.lib,
+        .tracy_dep = tracy,
+        .tracy_boptions = libtracy.boptions,
     });
     const hotexe = try step(b, .{
         .target = target,
@@ -539,11 +693,15 @@ pub fn build(b: *std.Build) !void {
         .steamworks_dep = steamworks,
         .remotery = libremotery.lib,
         .remotery_dep = remotery,
+        .tracy = libtracy.lib,
+        .tracy_dep = tracy,
+        .tracy_boptions = libtracy.boptions,
     });
 
     compile_commands.step.dependOn(&libimgui.lib.step);
     compile_commands.step.dependOn(&libjolt.lib.step);
     compile_commands.step.dependOn(&libremotery.lib.step);
+    compile_commands.step.dependOn(&libtracy.lib.step);
     compile_commands.step.dependOn(&hotlib.step);
 
     const build_libs_step = b.step("build-libs", "Build the libs required for the app");
@@ -553,6 +711,8 @@ pub fn build(b: *std.Build) !void {
     build_libs_step.dependOn(&b.addInstallArtifact(libjolt.lib, .{}).step);
     build_libs_step.dependOn(&libremotery.lib.step);
     build_libs_step.dependOn(&b.addInstallArtifact(libremotery.lib, .{}).step);
+    build_libs_step.dependOn(&libtracy.lib.step);
+    build_libs_step.dependOn(&b.addInstallArtifact(libtracy.lib, .{}).step);
     build_libs_step.dependOn(&hotlib.step);
     build_libs_step.dependOn(&b.addInstallArtifact(hotlib, .{}).step);
     build_libs_step.dependOn(compile_commands.step);

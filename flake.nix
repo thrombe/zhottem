@@ -175,6 +175,7 @@
           nnd
           linuxKernel.packages.linux_zen.perf
           hotspot
+          tracy
         ])
         ++ []
         ++ (custom-commands pkgs);
