@@ -1685,6 +1685,8 @@ pub const Remotery = struct {
         }
         errdefer c._rmt_DestroyGlobalInstance(rmt);
 
+        // TODO: vulkan is broken. not sure if it's remotery or me.
+        //    - remotery's vulkan support is not yet in a release
         const funcs: c.rmtVulkanFunctions = .{
             .vkGetPhysicalDeviceProperties = @ptrCast(@constCast(ctx.instance.wrapper.dispatch.vkGetPhysicalDeviceProperties)),
             .vkQueueSubmit = @ptrCast(@constCast(ctx.device.wrapper.dispatch.vkQueueSubmit)),
@@ -1799,11 +1801,36 @@ pub const Tracy = struct {
         self.samples.deinit();
     }
 
-    pub fn begin_sample(self: *@This(), comptime src: std.builtin.SourceLocation, name: [:0]const u8) void {
-        self.samples.append(self.beginZone(src, name)) catch @panic("OOM");
+    pub inline fn begin_sample(self: *@This(), comptime src: std.builtin.SourceLocation, comptime name: [:0]const u8) void {
+        const opts = comptime ZoneOptions{ .name = name };
+        const active: c_int = @intFromBool(opts.active);
+
+        const S = struct {
+            // NOTE: this is marked static in the original C macros
+            // and this is how you have static local varialbles in zig.
+            var src_loc = c.___tracy_source_location_data{
+                .name = if (opts.name) |n| n.ptr else null,
+                .function = src.fn_name.ptr,
+                .file = src.file,
+                .line = src.line,
+                .color = opts.color orelse 0,
+            };
+        };
+
+        if (!options.no_callstack) {
+            if (options.callstack) {
+                return .{
+                    .ctx = c.___tracy_emit_zone_begin_callstack(&S.src_loc, 5, active),
+                };
+            }
+        }
+
+        self.samples.append(.{
+            .ctx = c.___tracy_emit_zone_begin(&S.src_loc, active),
+        }) catch @panic("OOM");
     }
 
-    pub fn end_sample(self: *@This()) void {
+    pub inline fn end_sample(self: *@This()) void {
         const sample = self.samples.pop() orelse return;
         sample.end();
     }
@@ -1845,29 +1872,4 @@ pub const Tracy = struct {
             c.___tracy_emit_zone_value(zone.ctx, zone_value);
         }
     };
-
-    pub inline fn beginZone(_: *@This(), comptime src: std.builtin.SourceLocation, name: [:0]const u8) ZoneContext {
-        const opts = ZoneOptions{ .name = name };
-        const active: c_int = @intFromBool(opts.active);
-
-        const src_loc = c.___tracy_source_location_data{
-            .name = if (opts.name) |n| n.ptr else null,
-            .function = src.fn_name.ptr,
-            .file = src.file,
-            .line = src.line,
-            .color = opts.color orelse 0,
-        };
-
-        if (!options.no_callstack) {
-            if (options.callstack) {
-                return .{
-                    .ctx = c.___tracy_emit_zone_begin_callstack(&src_loc, 5, active),
-                };
-            }
-        }
-
-        return .{
-            .ctx = c.___tracy_emit_zone_begin(&src_loc, active),
-        };
-    }
 };

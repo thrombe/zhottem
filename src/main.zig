@@ -404,8 +404,8 @@ const HotApp = struct {
     }
 
     fn tick(self: *@This()) !bool {
-        defer self.app.telemetry.mark_frame() catch |e| utils.dump_error(e);
-        self.app.telemetry.begin_sample("frame.tick");
+        self.app.telemetry.mark_frame() catch |e| utils.dump_error(e);
+        self.app.telemetry.begin_sample(@src(), "frame.tick");
         defer self.app.telemetry.end_sample();
 
         if (self.engine.window.should_close()) return false;

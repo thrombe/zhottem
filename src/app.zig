@@ -78,7 +78,7 @@ texture: Image,
 handles: Handles,
 entities: Entities,
 
-telemetry: utils.Remotery,
+telemetry: utils.Tracy,
 
 const Entities = struct {
     player: Entity,
@@ -329,7 +329,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var ctx = &engine.graphics;
     const device = &ctx.device;
 
-    var telemetry = try utils.Remotery.init(ctx);
+    var telemetry = try utils.Tracy.init();
     errdefer telemetry.deinit();
 
     const cmd_pool = try device.createCommandPool(&.{
@@ -635,7 +635,7 @@ pub fn present(
     gui_renderer: *GuiEngine.GuiRenderer,
     engine: *Engine,
 ) !Swapchain.PresentState {
-    self.telemetry.begin_sample("app.present");
+    self.telemetry.begin_sample(@src(), "app.present");
     defer self.telemetry.end_sample();
 
     const ctx = &engine.graphics;
@@ -645,7 +645,7 @@ pub fn present(
     }
 
     {
-        self.telemetry.begin_sample("queue wait idle");
+        self.telemetry.begin_sample(@src(), ".queue_wait_idle");
         defer self.telemetry.end_sample();
 
         // TODO: might be useful to create some kinda double buffered setup for
@@ -657,7 +657,7 @@ pub fn present(
     }
 
     {
-        self.telemetry.begin_sample("gpu buffer uploads");
+        self.telemetry.begin_sample(@src(), ".gpu_buffer_uploads");
         defer self.telemetry.end_sample();
 
         try self.uniforms.upload(&ctx.device);
@@ -671,7 +671,7 @@ pub fn present(
     }
 
     if (app_state.jolt_debug_render) if (self.world.phy.state.debug_renderer) |*dbg_renderer| {
-        self.telemetry.begin_sample("jolt update resources");
+        self.telemetry.begin_sample(@src(), ".jolt_update_resources");
         defer self.telemetry.end_sample();
         dbg_renderer.state.lock.lock();
         defer dbg_renderer.state.lock.unlock();
@@ -691,13 +691,13 @@ pub fn present(
     }
 
     if (app_state.shader_fuse.unfuse()) {
-        self.telemetry.begin_sample("recreating pipelins");
+        self.telemetry.begin_sample(@src(), ".recreating_pipelins");
         defer self.telemetry.end_sample();
         try dynamic_state.recreate_pipelines(engine, self, app_state);
     }
 
     if (app_state.cmdbuf_fuse.unfuse()) {
-        self.telemetry.begin_sample("recreating command buffers");
+        self.telemetry.begin_sample(@src(), ".recreating_command_buffers");
         defer self.telemetry.end_sample();
         try dynamic_state.recreate_cmdbuf(engine, self, app_state);
     }
@@ -720,7 +720,7 @@ pub fn present(
 
     // this has to happen before the next app/gui tick
     if (app_state.resize_fuse.unfuse()) {
-        self.telemetry.begin_sample("recreating swapchain");
+        self.telemetry.begin_sample(@src(), ".recreating_swapchain");
         defer self.telemetry.end_sample();
         // this is not good :/
         // we have to wait for queue to be idle before creating swapchain again
@@ -1035,7 +1035,7 @@ pub const AppState = struct {
     }
 
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
-        app.telemetry.begin_sample("app_state.tick");
+        app.telemetry.begin_sample(@src(), "app_state.tick");
         defer app.telemetry.end_sample();
 
         const assets = &app.resources.assets;
@@ -1051,7 +1051,7 @@ pub const AppState = struct {
 
         // local input tick
         {
-            app.telemetry.begin_sample(".local_input");
+            app.telemetry.begin_sample(@src(), ".local_input");
             defer app.telemetry.end_sample();
 
             var mouse = &input.mouse;
@@ -1116,19 +1116,19 @@ pub const AppState = struct {
 
         // networking tick
         {
-            app.telemetry.begin_sample(".networking");
+            app.telemetry.begin_sample(@src(), ".networking");
             defer app.telemetry.end_sample();
 
             try app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
 
             {
-                app.telemetry.begin_sample(".tick");
+                app.telemetry.begin_sample(@src(), ".tick");
                 defer app.telemetry.end_sample();
 
                 try app.net_ctx.tick();
             }
             if (app.net_server) |s| while (s.messages.try_recv()) |e| {
-                app.telemetry.begin_sample(".server_msg");
+                app.telemetry.begin_sample(@src(), ".server_msg");
                 defer app.telemetry.end_sample();
 
                 switch (e.event) {
@@ -1179,13 +1179,13 @@ pub const AppState = struct {
             };
 
             {
-                app.telemetry.begin_sample(".tick");
+                app.telemetry.begin_sample(@src(), ".tick");
                 defer app.telemetry.end_sample();
 
                 try app.net_ctx.tick();
             }
             while (app.net_client.messages.try_recv()) |e| {
-                app.telemetry.begin_sample(".player_msg");
+                app.telemetry.begin_sample(@src(), ".player_msg");
                 defer app.telemetry.end_sample();
 
                 switch (e.event) {
@@ -1365,7 +1365,7 @@ pub const AppState = struct {
 
         // physics tick
         {
-            app.telemetry.begin_sample(".physics");
+            app.telemetry.begin_sample(@src(), ".physics");
             defer app.telemetry.end_sample();
 
             self.physics.acctime += delta;
@@ -1374,9 +1374,17 @@ pub const AppState = struct {
             var steps = @divFloor(self.physics.acctime, self.physics.step);
             steps = @min(steps, 5); // no more than 5 steps per frame
             if (steps >= 1) {
+                app.telemetry.begin_sample(@src(), ".jolt");
+                defer app.telemetry.end_sample();
+
                 if (self.jolt_debug_render) app.resources.jolt_debug_resources.reset();
                 if (self.jolt_debug_render) app.world.phy.render_clear();
-                defer if (self.jolt_debug_render) app.world.phy.render_tick();
+                defer if (self.jolt_debug_render) {
+                    app.telemetry.begin_sample(@src(), ".render");
+                    defer app.telemetry.end_sample();
+
+                    app.world.phy.render_tick();
+                };
 
                 self.physics.acctime -= self.physics.step * steps;
 
@@ -1392,7 +1400,7 @@ pub const AppState = struct {
 
                 var player_it = try app.world.ecs.iterator(struct { char: C.CharacterBody });
                 while (player_it.next()) |e| {
-                    app.telemetry.begin_sample(".jolt");
+                    app.telemetry.begin_sample(@src(), ".tick");
                     defer app.telemetry.end_sample();
 
                     const char: *C.CharacterBody = e.char;
@@ -1427,7 +1435,7 @@ pub const AppState = struct {
                 }
 
                 {
-                    app.telemetry.begin_sample(".world");
+                    app.telemetry.begin_sample(@src(), ".world_copy");
                     defer app.telemetry.end_sample();
 
                     try app.world.step(self.physics.step * steps, @intFromFloat(steps));
@@ -1443,7 +1451,7 @@ pub const AppState = struct {
 
         // alive state tick
         {
-            app.telemetry.begin_sample(".alive_state");
+            app.telemetry.begin_sample(@src(), ".alive_state");
             defer app.telemetry.end_sample();
 
             var it = try app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });
@@ -1479,7 +1487,7 @@ pub const AppState = struct {
 
         // animation tick
         {
-            app.telemetry.begin_sample(".animation");
+            app.telemetry.begin_sample(@src(), ".animation");
             defer app.telemetry.end_sample();
 
             const animate = struct {
@@ -1565,7 +1573,7 @@ pub const AppState = struct {
 
         // add missing last transforms
         {
-            app.telemetry.begin_sample(".add_missing_transforms");
+            app.telemetry.begin_sample(@src(), ".add_missing_transforms");
             defer app.telemetry.end_sample();
 
             var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
@@ -1578,7 +1586,7 @@ pub const AppState = struct {
         }
 
         {
-            app.telemetry.begin_sample(".cmdbuf_apply");
+            app.telemetry.begin_sample(@src(), ".cmdbuf_apply");
             defer app.telemetry.end_sample();
 
             try self.cmdbuf.apply(@ptrCast(&app.world));
@@ -1586,14 +1594,14 @@ pub const AppState = struct {
 
         // render instance tick
         {
-            app.telemetry.begin_sample(".render_instance");
+            app.telemetry.begin_sample(@src(), ".render_instance");
             defer app.telemetry.end_sample();
 
             const instances = &app.resources.instances;
             instances.reset();
 
             {
-                app.telemetry.begin_sample(".static_mesh");
+                app.telemetry.begin_sample(@src(), ".static_mesh");
                 defer app.telemetry.end_sample();
 
                 var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticMesh, b: C.BatchedRender });
@@ -1611,7 +1619,7 @@ pub const AppState = struct {
             }
 
             {
-                app.telemetry.begin_sample(".animated_mesh");
+                app.telemetry.begin_sample(@src(), ".animated_mesh");
                 defer app.telemetry.end_sample();
 
                 var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedMesh, b: C.BatchedRender });
@@ -1635,7 +1643,7 @@ pub const AppState = struct {
 
         // audio tick
         {
-            app.telemetry.begin_sample(".audio");
+            app.telemetry.begin_sample(@src(), ".audio");
             defer app.telemetry.end_sample();
 
             const playing = &app.audio.ctx.ctx.playing;
@@ -1678,7 +1686,7 @@ pub const AppState = struct {
 
         // camera tick
         {
-            app.telemetry.begin_sample(".camera");
+            app.telemetry.begin_sample(@src(), ".camera");
             defer app.telemetry.end_sample();
 
             const player = try app.world.ecs.get(app.entities.player, struct {

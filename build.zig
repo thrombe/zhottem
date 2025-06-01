@@ -624,7 +624,15 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .alloc = alloc,
-        .options = .{ .shared = true },
+        .options = .{
+            .shared = true,
+            // if false, client saves all traces until it connects to a server
+            // and 1 client can only connect to 1 server. server restarts not possible
+            // setting it to true does not save traces, and connects to servers on demand
+            .on_demand = true,
+            .only_localhost = true,
+            .only_ipv4 = true,
+        },
     });
     const compile_commands = try compile_commands_step(b, .{
         .cdb_dir = ".cache/cdb",
