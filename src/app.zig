@@ -182,6 +182,7 @@ const AudioPlayer = Engine.Audio.Stream(.output, struct {
     // owned by ResourceManager.CpuResources
     samples: []assets_mod.Wav,
     frame_count: u64 = 0,
+    volume: f32 = 0.1,
 
     playing: struct {
         // only swap in callback.
@@ -240,7 +241,7 @@ const AudioPlayer = Engine.Audio.Stream(.output, struct {
 
         self.ctx.playing.fused_swap();
         for (self.ctx.playing.samples.items) |*ps| {
-            _ = ps.fill(self.ctx.frame_count, self.ctx.samples, output);
+            _ = ps.fill(self.ctx.volume, self.ctx.frame_count, self.ctx.samples, output);
         }
     }
 
@@ -265,13 +266,13 @@ const AudioPlayer = Engine.Audio.Stream(.output, struct {
         // which means quarter the power (per unit area (which is what we end up hearing ig. cuz the ear drums are constant in size))
         // which means we just divide the amplitude by 2 to account for the distance
 
-        pub fn fill(self: *@This(), frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
+        pub fn fill(self: *@This(), volume: f32, frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
             const min = 1.0;
             const max = 100.0;
             const original_dist = self.pos.length();
             const dist = @min(max, @max(min, original_dist));
 
-            const att = self.volume / dist;
+            const att = volume * self.volume / dist;
 
             const right_dot = 0.5 * if (original_dist > 0.01) self.pos.x / original_dist else 0.0;
             var left = 0.5 - right_dot;
@@ -1811,11 +1812,11 @@ pub const GuiState = struct {
             c.ImGui_Text("Application average %.3f ms/frame (%.1f FPS)", frametime, std.time.ms_per_s / frametime);
 
             c.ImGui_Text("State");
-            self.editState(state, player.controller);
+            self.editState(app, state, player.controller);
         }
     }
 
-    fn editState(self: *@This(), state: *AppState, controller: *C.Controller) void {
+    fn editState(self: *@This(), app: *App, state: *AppState, controller: *C.Controller) void {
         _ = self;
 
         var reset = false;
@@ -1823,6 +1824,7 @@ pub const GuiState = struct {
         _ = c.ImGui_SliderFloat("Speed", &controller.speed, 0.1, 10.0);
         _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
+        _ = c.ImGui_SliderFloat("audio volume", @ptrCast(&app.audio.ctx.ctx.volume), 0.0, 1.0);
         reset = reset or c.ImGui_Checkbox("Jolt debug renderer", @ptrCast(&state.jolt_debug_render));
 
         reset = reset or c.ImGui_Button("Reset render state");
