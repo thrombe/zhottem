@@ -5,6 +5,7 @@ const vk = @import("vulkan");
 const utils = @import("utils.zig");
 const Fuse = utils.Fuse;
 const ShaderUtils = utils.ShaderUtils;
+pub const Telemetry = utils.Tracy;
 const cast = utils.cast;
 
 const math = @import("math.zig");
@@ -78,7 +79,7 @@ texture: Image,
 handles: Handles,
 entities: Entities,
 
-telemetry: utils.Tracy,
+telemetry: Telemetry,
 
 const Entities = struct {
     player: Entity,
@@ -913,6 +914,7 @@ pub const RendererState = struct {
             },
             &self.pipelines.get(app.handles.material.dbg).?,
         );
+        app.telemetry.plot("jolt.debug_vertex_count", app.resources.jolt_debug_resources.line_buffer.count);
 
         cmdbuf.dynamic_render_end(device);
         cmdbuf.draw_into_swapchain(device, .{
@@ -1037,6 +1039,8 @@ pub const AppState = struct {
     pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
         app.telemetry.begin_sample(@src(), "app_state.tick");
         defer app.telemetry.end_sample();
+
+        app.telemetry.plot("num_entities", app.world.ecs.entities.count());
 
         const assets = &app.resources.assets;
         const window = engine.window;

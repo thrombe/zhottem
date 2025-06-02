@@ -1792,6 +1792,7 @@ pub const Tracy = struct {
     });
 
     samples: std.ArrayList(ZoneContext),
+    depth: u32 = 5,
 
     pub fn init() !@This() {
         return .{ .samples = .init(allocator.*) };
@@ -1820,7 +1821,7 @@ pub const Tracy = struct {
         if (!options.no_callstack) {
             if (options.callstack) {
                 return .{
-                    .ctx = c.___tracy_emit_zone_begin_callstack(&S.src_loc, 5, active),
+                    .ctx = c.___tracy_emit_zone_begin_callstack(&S.src_loc, self.depth, active),
                 };
             }
         }
@@ -1839,9 +1840,55 @@ pub const Tracy = struct {
         c.___tracy_emit_frame_mark(null);
     }
 
-    pub fn log(_: *@This(), msg: [:0]const u8) void {
-        _ = msg;
+    pub fn log(self: *@This(), msg: [:0]const u8) void {
+        c.___tracy_emit_messageL(msg, self.depth);
     }
+
+    pub inline fn plot_config(name: [:0]const u8, config: PlotConfig) void {
+        c.___tracy_emit_plot_config(
+            name,
+            @intFromEnum(config.plot_type),
+            @intFromBool(config.step),
+            @intFromBool(config.fill),
+            config.color,
+        );
+    }
+
+    pub inline fn plot(self: *@This(), name: [:0]const u8, value: anytype) void {
+        const type_info = @typeInfo(@TypeOf(value));
+        switch (type_info) {
+            .comptime_int => self.plot(name, @as(i64, value)),
+            .comptime_float => self.plot(name, @as(f64, value)),
+            .int => |int_type| {
+                if (int_type.bits > 64) @compileError("Too large int to plot");
+                c.___tracy_emit_plot_int(name, @intCast(value));
+            },
+            .float => |float_type| {
+                if (float_type.bits <= 32) {
+                    c.___tracy_emit_plot_float(name, @floatCast(value));
+                } else if (float_type.bits <= 64) {
+                    c.___tracy_emit_plot(name, @floatCast(value));
+                } else {
+                    @compileError("Too large float to plot");
+                }
+            },
+            else => @compileError("Unsupported plot value type"),
+        }
+    }
+
+    pub const PlotType = enum(c.TracyPlotFormatEnum) {
+        Number = c.TracyPlotFormatNumber,
+        Memory = c.TracyPlotFormatMemory,
+        Percentage = c.TracyPlotFormatPercentage,
+        Watt = c.TracyPlotFormatWatt,
+    };
+
+    pub const PlotConfig = struct {
+        plot_type: PlotType,
+        step: bool,
+        fill: bool,
+        color: u32,
+    };
 
     pub const ZoneOptions = struct {
         active: bool = true,
