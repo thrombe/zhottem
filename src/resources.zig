@@ -280,7 +280,7 @@ pub const ResourceManager = struct {
             can_draw: u32 = 0,
         };
         const Batches = std.ArrayList(Batch);
-        const MaterialBatches = std.AutoArrayHashMap(MaterialHandle, struct {
+        const MaterialBatches = std.AutoHashMap(MaterialHandle, struct {
             batch: std.ArrayList(BatchHandle),
 
             // as far as i an tell - push contents don't need to live after the call to cmdPushConstants
@@ -792,7 +792,7 @@ pub const ResourceManager = struct {
             device: *Device,
             cmdbuf: *CmdBuffer,
             desc_sets: []const vk.DescriptorSet,
-            pipelines: *std.AutoArrayHashMap(MaterialHandle, GraphicsPipeline),
+            pipelines: *std.AutoHashMap(MaterialHandle, GraphicsPipeline),
         ) void {
             var count: usize = 0;
             var it = self.material_batches.iterator();

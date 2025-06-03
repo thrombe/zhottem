@@ -156,7 +156,7 @@ pub const Archetype = struct {
     // it is implicit whether we want to add or remove this component to this archetype
     edges: ArchetypeEdges,
 
-    const ArchetypeEdges = std.AutoArrayHashMap(ComponentId, ArchetypeId);
+    const ArchetypeEdges = std.AutoHashMap(ComponentId, ArchetypeId);
     pub fn from_type(typ: Type) !@This() {
         const components = try allocator.alloc(std.ArrayListAligned(u8, 8), typ.count());
         errdefer allocator.free(components);
@@ -227,10 +227,10 @@ pub const EntityComponentStore = struct {
     entity_id: u32 = 0,
 
     archetype_map: ArchetypeMap,
-    component_map: std.AutoArrayHashMap(ComponentId, std.ArrayList(ArchetypeId)),
+    // component_map: std.AutoHashMap(ComponentId, std.ArrayList(ArchetypeId)),
 
-    const Entities = std.AutoArrayHashMap(Entity, ArchetypeEntity);
-    const TypeComponents = std.AutoArrayHashMap(TypeId, ComponentId);
+    const Entities = std.AutoHashMap(Entity, ArchetypeEntity);
+    const TypeComponents = std.AutoHashMap(TypeId, ComponentId);
     const Vtables = std.ArrayList(ComponentVtable);
     const ComponentVtable = struct {
         name: []const u8,
@@ -266,6 +266,7 @@ pub const EntityComponentStore = struct {
             }
         }
     };
+    // arrayhashmap cuz ecs.iterate() needs to iterate this. (?)
     const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
         pub fn hash(ctx: @This(), key: Type) u32 {
             _ = ctx;
@@ -287,7 +288,7 @@ pub const EntityComponentStore = struct {
             .components = .init(allocator.*),
             .component_sizes = .init(allocator.*),
             .archetype_map = .init(allocator.*),
-            .component_map = .init(allocator.*),
+            // .component_map = .init(allocator.*),
             .vtables = .init(allocator.*),
             .entityid_component_id = undefined,
         };
@@ -312,10 +313,10 @@ pub const EntityComponentStore = struct {
 
         self.archetype_map.deinit();
 
-        for (self.component_map.values()) |*list| {
-            list.deinit();
-        }
-        self.component_map.deinit();
+        // for (self.component_map.values()) |*list| {
+        //     list.deinit();
+        // }
+        // self.component_map.deinit();
     }
 
     pub fn register(self: *@This(), component: type) !ComponentId {
@@ -450,7 +451,7 @@ pub const EntityComponentStore = struct {
     }
 
     pub fn delete(self: *@This(), entity: Entity, ctx: *anyopaque) !void {
-        const ae = self.entities.fetchSwapRemove(entity) orelse return error.EntityNotFound;
+        const ae = self.entities.fetchRemove(entity) orelse return error.EntityNotFound;
         self.swap_remove(ae.value, ctx, true);
     }
 

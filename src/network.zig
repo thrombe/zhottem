@@ -141,8 +141,8 @@ pub const NetworkingContext = struct {
         ctx: *Ctx,
         socket: posix.socket_t,
         next_conn_id: u32 = 1,
-        address_map: std.AutoArrayHashMap(u32, std.net.Address),
-        conn_map: std.ArrayHashMap(std.net.Address, u32, struct {
+        address_map: std.AutoHashMap(u32, std.net.Address),
+        conn_map: std.HashMap(std.net.Address, u32, struct {
             pub fn hash(ctx: @This(), key: std.net.Address) u32 {
                 _ = ctx;
                 var hasher = std.hash.Wyhash.init(0);
@@ -150,12 +150,11 @@ pub const NetworkingContext = struct {
                 hasher.update(bytes);
                 return @truncate(hasher.final());
             }
-            pub fn eql(ctx: @This(), a: std.net.Address, b: std.net.Address, b_index: usize) bool {
-                _ = b_index;
+            pub fn eql(ctx: @This(), a: std.net.Address, b: std.net.Address) bool {
                 _ = ctx;
                 return a.eql(b);
             }
-        }, true),
+        }, 80),
         messages: utils_mod.Channel(RecvedMessage),
         thread: ?std.Thread,
         quit: utils_mod.Fuse = .{},

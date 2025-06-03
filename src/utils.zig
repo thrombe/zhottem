@@ -1129,8 +1129,8 @@ pub const ShaderUtils = struct {
 };
 
 pub const ShaderCompiler = struct {
-    pub const StageMap = std.StringArrayHashMap(Compiled);
-    pub const StageSet = std.StringArrayHashMap(bool);
+    pub const StageMap = std.StringHashMap(Compiled);
+    pub const StageSet = std.StringHashMap(bool);
 
     pub const Stages = struct {
         map: StageMap,
@@ -1151,7 +1151,7 @@ pub const ShaderCompiler = struct {
 
             outer: while (true) {
                 while (compiler.ctx.compiled.try_recv()) |shader| {
-                    if (shaders.fetchSwapRemove(shader.name)) |kv| {
+                    if (shaders.fetchRemove(shader.name)) |kv| {
                         kv.value.deinit();
                     }
                     try shaders.put(shader.name, shader);
@@ -1672,7 +1672,7 @@ pub const Remotery = struct {
     const vk = @import("vulkan");
 
     rmt: *c.Remotery,
-    samples: std.StringArrayHashMap(c.rmtU32),
+    samples: std.StringHashMap(c.rmtU32),
 
     bind: *c.rmtVulkanBind,
 

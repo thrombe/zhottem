@@ -52,6 +52,8 @@ layout(set = 0, binding = _bind_line_vertex_buffer) readonly restrict buffer Lin
 
         vec4 pos = vec4(v.pos, 1.0);
         mat4 itransform = mat4(0.0);
+        // #pragma nounroll
+        #pragma unroll 4
         for (int i=0;i<4;i++) {
             itransform += bones[inst.bone_offset + v.bone_ids[i]] * v.bone_weights[i];
         }

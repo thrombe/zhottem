@@ -748,7 +748,7 @@ pub const RendererState = struct {
     // not owned
     pool: vk.CommandPool,
 
-    const Pipelines = std.AutoArrayHashMap(ResourceManager.MaterialHandle, GraphicsPipeline);
+    const Pipelines = std.AutoHashMap(ResourceManager.MaterialHandle, GraphicsPipeline);
 
     pub fn init(app: *App, engine: *Engine, app_state: *AppState) !@This() {
         const ctx = &engine.graphics;

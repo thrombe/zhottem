@@ -498,7 +498,7 @@ pub const Gltf = struct {
         }
 
         // create a node to bone mapping
-        var joint_to_bone = std.AutoArrayHashMap(Info.NodeIndex, BoneId).init(self.alloc);
+        var joint_to_bone = std.AutoHashMap(Info.NodeIndex, BoneId).init(self.alloc);
         for (skini.joints, 0..) |j, i| {
             try joint_to_bone.put(j, @intCast(i));
         }
@@ -530,7 +530,7 @@ pub const Gltf = struct {
         };
     }
 
-    fn parse_skin_animations(self: *@This(), joint_to_bone: *std.AutoArrayHashMap(Info.NodeIndex, BoneId)) ![]Animation {
+    fn parse_skin_animations(self: *@This(), joint_to_bone: *std.AutoHashMap(Info.NodeIndex, BoneId)) ![]Animation {
         var animations = std.ArrayList(Animation).init(self.alloc);
 
         const info = &self.info.value;
