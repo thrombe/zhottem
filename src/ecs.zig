@@ -48,72 +48,60 @@ pub const ComponentId = packed struct {
 
 // @ctz()
 // @clz()
+// @popCount()
 pub const Type = struct {
-    // assume components are 0..128
-    components: u128,
+    //  - it is a single vector instruction to do 'or' and 'and' with std.StaticBitSet(256).
+    //    source: i checked assembly: https://godbolt.org/z/MMaej9Yvx
+    components: Components,
 
-    const one: u128 = 1;
+    pub const Components = std.bit_set.ArrayBitSet(u64, 256);
 
     pub inline fn from(components: []const ComponentId) @This() {
-        var this: @This() = .{ .components = 0 };
+        var this: @This() = .{ .components = .initEmpty() };
         for (components) |comp| {
-            this.components |= mask(comp);
+            this.components.set(@intCast(comp.id));
         }
-        std.debug.assert(components.len == @popCount(this.components));
+        std.debug.assert(components.len == this.components.count());
         return this;
-    }
-
-    inline fn mask(comp: anytype) u128 {
-        return switch (@TypeOf(comp)) {
-            ComponentId => @This().one << @intCast(comp.id),
-            else => @This().one << @intCast(comp),
-        };
     }
 
     // have a biset of components in each Type
     // mask out all components with bigger or equal ids: bitset & ((1 << compid.id) - 1)
     // count the number of bits still set
     pub fn index(self: *const @This(), component: ComponentId) ?usize {
-        const m = mask(component);
-        if (self.components & m > 0) {
-            return @popCount(self.components & (m - 1));
+        if (self.components.isSet(@intCast(component.id))) {
+            var components = self.components;
+            components.setRangeValue(.{ .start = component.id, .end = self.components.capacity() }, false);
+            return components.count();
         } else {
             return null;
         }
     }
 
     pub fn count(self: *const @This()) usize {
-        return @popCount(self.components);
+        return self.components.count();
     }
 
-    pub fn has_components(self: *const @This(), components: u128) bool {
-        return (self.components & components) == components;
+    pub fn has_components(self: *const @This(), components: Components) bool {
+        return self.components.supersetOf(components);
     }
 
     pub inline fn removed(self: *const @This(), compid: ComponentId) ?@This() {
-        const typ = self.*;
-
-        typ.components &= ~mask(compid);
-        if (typ.components == self.components) {
-            return null;
-        }
-
-        return typ;
+        var this = self.*;
+        if (!this.components.isSet(@intCast(compid.id))) return null;
+        this.components.setValue(@intCast(compid.id), false);
+        return this;
     }
 
     pub inline fn inserted(self: *const @This(), compid: ComponentId) ?@This() {
-        var typ = self.*;
-
-        typ.components |= mask(compid);
-        if (typ.components == self.components) {
-            return null;
-        }
-
-        return typ;
+        var this = self.*;
+        if (this.components.isSet(@intCast(compid.id))) return null;
+        this.components.setValue(@intCast(compid.id), true);
+        return this;
     }
 
     pub fn iterator(self: *@This(), sizes: []u16) ComponentIterator {
-        return .{ .components = self.components, .sizes = sizes };
+        return .{ .components = self.components.iterator(.{}), .sizes = sizes };
     }
 
     // from a struct to a struct to the same struct but all fields are pointers
@@ -141,14 +129,12 @@ pub const Type = struct {
     }
 
     pub const ComponentIterator = struct {
-        components: u128,
+        components: Components.Iterator(.{}),
         sizes: []u16,
 
         pub fn next(self: *@This()) ?ComponentId {
-            if (self.components > 0) {
-                const i = @ctz(self.components);
-                self.components &= ~mask(i);
-                return .{ .id = i, .size = self.sizes[i] };
+            if (self.components.next()) |i| {
+                return .{ .id = @intCast(i), .size = self.sizes[i] };
             } else {
                 return null;
             }
@@ -351,7 +337,7 @@ pub const EntityComponentStore = struct {
         pub fn eql(ctx: @This(), a: Type, b: Type, b_index: usize) bool {
             _ = b_index;
             _ = ctx;
-            return a.components == b.components;
+            return a.components.eql(b.components);
         }
     }, true);
 
@@ -438,7 +424,7 @@ pub const EntityComponentStore = struct {
         return components;
     }
 
-    fn components_from(self: *@This(), typ: type) !u128 {
+    fn components_from(self: *@This(), typ: type) !Type.Components {
         const components = try self.component_ids_from(typ);
         return Type.from(&components).components;
     }
@@ -479,7 +465,7 @@ pub const EntityComponentStore = struct {
             try archetype.components[compi].appendSlice(bytes);
         }
 
-        if (_typ.components != typ.components) {
+        if (!_typ.components.eql(typ.components)) {
             const compi = archetype.typ.index(self.entityid_component_id).?;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
