@@ -614,15 +614,14 @@ pub const EntityComponentStore = struct {
         @memcpy(comp_mem, std.mem.asBytes(&component));
     }
 
-    pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(typ) {
-        const ids = try self.component_ids_from(typ);
+    pub fn query(self: *@This(), comptime components: type) !EntityQuery(components) {
+        const ids = try self.component_ids_from(components);
+        return .{ .ecs = self, .comp_with = Type.from(&ids).components, .comp_without = .initEmpty() };
+    }
 
-        return .{
-            .ids = ids,
-            .typ = Type.from(&ids),
-            .archetype_it = self.archetype_map.iterator(),
-            .ecs = self,
-        };
+    pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(EntityQuery(typ)) {
+        var q = try self.query(typ);
+        return try q.iterator();
     }
 
     pub fn explorer(self: *@This(), entity: Entity) !EntityExplorer {
@@ -703,15 +702,84 @@ pub const EntityComponentStore = struct {
         };
     };
 
-    pub fn EntityIterator(typ: type) type {
+    pub fn EntityQuery(_get: type) type {
+        return NewEntityQuery(_get, struct {}, struct {});
+    }
+
+    pub fn NewEntityQuery(_get: type, _with: type, _without: type) type {
         return struct {
-            const fields = @typeInfo(typ).@"struct".fields;
+            pub const Get = _get;
+            pub const With = _with;
+            pub const Without = _without;
+
+            ecs: *EntityComponentStore,
+            comp_with: Type.Components,
+            comp_without: Type.Components,
+
+            fn tuple_union(a: type, b: type) type {
+                comptime {
+                    const fields_a = std.meta.fields(a);
+                    const fields_b = std.meta.fields(b);
+                    var fields: [fields_a.len + fields_b.len]std.builtin.Type.StructField = undefined;
+                    for (fields_a, 0..) |field, i| {
+                        fields[i] = field;
+                        fields[i].name = std.fmt.comptimePrint("{d}", .{i});
+                    }
+                    for (fields_b, fields_a.len..) |*field, i| {
+                        fields[i] = field;
+                        fields[i].name = std.fmt.comptimePrint("{d}", .{i});
+                    }
+                    return @Type(.{ .@"struct" = .{
+                        .layout = .auto,
+                        .fields = &fields,
+                        .decls = &.{},
+                        .is_tuple = true,
+                    } });
+                }
+            }
+
+            pub fn with(self: @This(), comptime components: type) !NewEntityQuery(Get, tuple_union(With, components), Without) {
+                const comps = try self.ecs.component_ids_from(components);
+                var comp_with = self.comp_with;
+                comp_with.setUnion(Type.from(&comps).components);
+                if (comp_with.intersectWith(self.comp_without).count() > 0) return error.BadTypeQuery;
+                return .{ .ecs = self.ecs, .comp_with = comp_with, .comp_without = self.comp_without };
+            }
+
+            pub fn without(self: @This(), comptime components: type) !NewEntityQuery(Get, With, tuple_union(Without, components)) {
+                const comps = try self.ecs.component_ids_from(components);
+                var comp_without = self.comp_without;
+                comp_without.setUnion(Type.from(&comps).components);
+                if (comp_without.intersectWith(self.comp_with).count() > 0) return error.BadTypeQuery;
+                return .{ .ecs = self.ecs, .comp_with = self.comp_with, .comp_without = comp_without };
+            }
+
+            pub fn filter(self: *@This(), components: Type.Components) bool {
+                return self.comp_with.subsetOf(components) and self.comp_without.intersectWith(components).count() == 0;
+            }
+
+            pub fn iterator(self: *@This()) !EntityIterator(@This()) {
+                const ids = try self.ecs.component_ids_from(tuple_union(Get, With));
+
+                return .{
+                    .ids = ids,
+                    .comp_query = self.*,
+                    .archetype_it = self.ecs.archetype_map.iterator(),
+                    .ecs = self.ecs,
+                };
+            }
+        };
+    }
+
+    pub fn EntityIterator(_query: type) type {
+        return struct {
+            const fields = @typeInfo(_query.Get).@"struct".fields;
             const len = fields.len;
 
             ecs: *EntityComponentStore,
             // same order as that of fields
             ids: [len]ComponentId,
-            typ: Type,
+            comp_query: _query,
             archetype_it: ArchetypeMap.Iterator,
             current: ?struct {
                 archetype: ArchetypeId,
@@ -727,10 +795,10 @@ pub const EntityComponentStore = struct {
                 };
             }
 
-            pub fn next(self: *@This()) ?Type.pointer(typ) {
+            pub fn next(self: *@This()) ?Type.pointer(_query.Get) {
                 outer: while (true) {
                     if (self.current) |*curr| inner: {
-                        var t: Type.pointer(typ) = undefined;
+                        var t: Type.pointer(_query.Get) = undefined;
                         const archetype = &self.ecs.archetypes.items[curr.archetype];
                         inline for (fields, self.ids) |field, compid| {
                             const ci = archetype.typ.index(compid).?;
@@ -749,7 +817,7 @@ pub const EntityComponentStore = struct {
                     }
 
                     while (self.archetype_it.next()) |e| {
-                        if (!e.key_ptr.has_components(self.typ.components)) {
+                        if (!self.comp_query.filter(e.key_ptr.components)) {
                             continue;
                         }
 
