@@ -12,7 +12,6 @@ const C = world_mod.C;
 
 const ecs_mod = @import("ecs.zig");
 const EntityComponentStore = ecs_mod.EntityComponentStore;
-const Entity = ecs_mod.Entity;
 
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
@@ -23,7 +22,6 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 const types = .{
-    .{ .type = Entity },
     .{ .type = C.Name },
     .{ .type = C.Transform, .default = C.Transform{} },
     .{ .type = Rigidbody, .default = Rigidbody{} },
@@ -67,7 +65,6 @@ pub const Rigidbody = struct {
 pub fn generate_type_registry() !void {
     var importer = try assets_mod.TypeSchemaGenerator.init(.{
         .name = C.Name,
-        .entity = Entity,
         .transform = C.Transform,
     });
     defer importer.deinit();
@@ -119,7 +116,7 @@ pub fn spawn_node(
     name: []const u8,
     transform: C.Transform,
     material: ResourceManager.MaterialHandle,
-) !Entity {
+) !C.Entity {
     const gltf = cpu.ref(gltf_handle);
     const info = &gltf.gltf.info.value;
 
@@ -154,11 +151,11 @@ fn _spawn_node(
     cpu: *ResourceManager.Assets,
     cmdbuf: *EntityComponentStore.CmdBuf,
     gltf_handle: ResourceManager.GltfHandle,
-    parent: ?Entity,
+    parent: ?C.Entity,
     node_index: GltfInfo.NodeIndex,
     transform: C.Transform,
     material: ResourceManager.MaterialHandle,
-) !Entity {
+) !C.Entity {
     const gltf = cpu.ref(gltf_handle);
     const info: *assets_mod.Gltf.Info = &gltf.gltf.info.value;
     const nodes = info.nodes;
@@ -166,10 +163,10 @@ fn _spawn_node(
     const local = C.Transform.from_asset_transform(node.transform());
     const global = transform.apply_local(local);
 
-    const entity = if (node.extras) |*e| try maybe_get_entity(e) orelse cmdbuf.reserve() else cmdbuf.reserve();
+    const entity = try cmdbuf.reserve();
 
     {
-        var children = std.ArrayList(Entity).init(allocator.*);
+        var children = std.ArrayList(C.Entity).init(allocator.*);
         errdefer children.deinit();
         for (node.children) |ci| {
             const child = try _spawn_node(
@@ -207,7 +204,7 @@ fn _spawn_node(
                 .mesh = hmesh,
                 .material = material,
                 .armature = harmature,
-                .animation_index = @intCast(entity.id % armature.animations.len),
+                .animation_index = @intCast(entity.index % armature.animations.len),
                 .bones = bones,
                 .indices = indices,
             });
@@ -231,7 +228,6 @@ fn _spawn_node(
                     defer component.deinit();
 
                     switch (typ.type) {
-                        Entity => {},
                         C.Name => {
                             const value = try C.Name.from(component.value.name);
                             try cmdbuf.add_component(entity, value);
@@ -279,19 +275,19 @@ fn _spawn_node(
     return entity;
 }
 
-fn maybe_get_entity(extras: *GltfInfo.ZhottExtras) !?Entity {
-    for (extras.zhott_components) |comp| {
-        if (std.mem.eql(u8, @typeName(Entity), comp.component_name)) {
-            const component = try std.json.parseFromValue(
-                Entity,
-                allocator.*,
-                comp.value,
-                .{ .allocate = .alloc_if_needed },
-            );
-            defer component.deinit();
+// fn maybe_get_entity(extras: *GltfInfo.ZhottExtras) !?Entity {
+//     for (extras.zhott_components) |comp| {
+//         if (std.mem.eql(u8, @typeName(Entity), comp.component_name)) {
+//             const component = try std.json.parseFromValue(
+//                 Entity,
+//                 allocator.*,
+//                 comp.value,
+//                 .{ .allocate = .alloc_if_needed },
+//             );
+//             defer component.deinit();
 
-            return component.value;
-        }
-    }
-    return null;
-}
+//             return component.value;
+//         }
+//     }
+//     return null;
+// }

@@ -12,7 +12,6 @@ const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
 
 const ecs_mod = @import("ecs.zig");
-const Entity = ecs_mod.Entity;
 const EntityComponentStore = ecs_mod.EntityComponentStore;
 
 const main = @import("main.zig");
@@ -20,6 +19,7 @@ const allocator = main.allocator;
 
 pub const C = struct {
     pub usingnamespace Components;
+    pub const Entity = ecs_mod.Entity;
     pub const BodyId = Jphysics.BodyId;
     pub const CharacterBody = Jphysics.CharacterBody;
 };
@@ -955,8 +955,8 @@ pub const Components = struct {
     };
 
     pub const Node = struct {
-        parent: ?Entity,
-        children: std.ArrayList(Entity),
+        parent: ?C.Entity,
+        children: std.ArrayList(C.Entity),
 
         pub fn deinit(self: *@This()) void {
             self.children.deinit();

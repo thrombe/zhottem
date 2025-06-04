@@ -9,11 +9,22 @@ const TypeId = utils_mod.TypeId;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-pub const Entity = struct {
-    // i don't think i need generational indices here :/
-    // these ids are not at all any sort of indices, these map to ArchetypeEntity using a hashmap.
-    // thoughhh we could totally switch to a array. hmmmmmmmmm
-    id: u32,
+pub const Entity = packed struct(u64) {
+    index: u32,
+    meta: Meta = .{},
+
+    const Meta = packed struct(u32) {
+        gen: u24 = 0,
+        // for Entity struct outside the ecs, flags will always be 0
+        // flags is there just for the ecs to track things.
+        // flags will be set to 0 outside just to avoid desync between
+        // actual Entity in ecs, and a random floating Entity struct
+        flags: Flags = .{},
+    };
+    const Flags = packed struct(u8) {
+        disabled: bool = false,
+        _reserved: u7 = 0,
+    };
 };
 
 pub const ArchetypeEntity = struct {
@@ -208,6 +219,71 @@ pub const Archetype = struct {
     }
 };
 
+pub const Entities = struct {
+    values: std.ArrayList(struct {
+        meta: Entity.Meta = .{},
+        aid: ArchetypeEntity,
+    }),
+    free_list: utils_mod.Deque(u32),
+
+    pub fn init(alloc: std.mem.Allocator) !@This() {
+        return .{
+            .values = .init(alloc),
+            .free_list = try .init(alloc),
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.values.deinit();
+        self.free_list.deinit();
+    }
+
+    pub fn new(self: *@This()) !Entity {
+        if (self.free_list.pop_front()) |index| {
+            const e = &self.values.items[index];
+            // we don't need protection against accessing null values right? right?
+            // - easy enough to add a entity.meta.flags.initialized. but meh.
+            e.aid = std.mem.zeroes(@TypeOf(e.aid));
+            e.meta.flags = .{};
+            return .{
+                .meta = .{ .gen = e.meta.gen },
+                .index = index,
+            };
+        } else {
+            const index = self.values.items.len;
+            try self.values.append(.{ .aid = std.mem.zeroes(ArchetypeEntity) });
+            return .{ .index = @intCast(index), .meta = .{} };
+        }
+    }
+
+    pub fn set(self: *@This(), entity: Entity, aid: ArchetypeEntity) !void {
+        const e = &self.values.items[entity.index];
+        if (e.meta.gen != entity.meta.gen) return error.GenerationMismatch;
+        e.aid = aid;
+    }
+
+    pub fn get(self: *@This(), entity: Entity) ?*ArchetypeEntity {
+        const e = &self.values.items[entity.index];
+        if (e.meta.gen != entity.meta.gen) return null;
+        return &e.aid;
+    }
+
+    pub fn pop(self: *@This(), entity: Entity) !?ArchetypeEntity {
+        const e = &self.values.items[entity.index];
+        if (entity.meta.gen != e.meta.gen) return null;
+        const aid = e.aid;
+        e.aid = std.mem.zeroes(@TypeOf(e.aid));
+        e.meta.gen += 1;
+        e.meta.flags = .{};
+        try self.free_list.push_back(entity.index);
+        return aid;
+    }
+
+    pub fn count(self: *@This()) usize {
+        return self.values.items.len;
+    }
+};
+
 // ECS lol
 pub const EntityComponentStore = struct {
     // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
@@ -224,12 +300,10 @@ pub const EntityComponentStore = struct {
     vtables: Vtables,
     // Entity's component id
     entityid_component_id: ComponentId,
-    entity_id: u32 = 0,
 
     archetype_map: ArchetypeMap,
     // component_map: std.AutoHashMap(ComponentId, std.ArrayList(ArchetypeId)),
 
-    const Entities = std.AutoHashMap(Entity, ArchetypeEntity);
     const TypeComponents = std.AutoHashMap(TypeId, ComponentId);
     const Vtables = std.ArrayList(ComponentVtable);
     const ComponentVtable = struct {
@@ -283,7 +357,7 @@ pub const EntityComponentStore = struct {
 
     pub fn init(ctx: *anyopaque) !@This() {
         var self = @This(){
-            .entities = .init(allocator.*),
+            .entities = try .init(allocator.*),
             .archetypes = .init(allocator.*),
             .components = .init(allocator.*),
             .component_sizes = .init(allocator.*),
@@ -409,17 +483,13 @@ pub const EntityComponentStore = struct {
             const compi = archetype.typ.index(self.entityid_component_id).?;
             const bytes = std.mem.asBytes(&eid);
             try archetype.components[compi].appendSlice(bytes);
-            try self.entities.put(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
+            try self.entities.set(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
         }
     }
 
     pub fn insert(self: *@This(), components: anytype, ctx: *anyopaque) !Entity {
-        // TODO: think of a better way to generate unique entity ids? do i need to??
-        const eid = Entity{ .id = self.entity_id };
-        defer self.entity_id += 1;
-
+        const eid = try self.entities.new();
         try self.insert_reserved(eid, components, ctx);
-
         return eid;
     }
 
@@ -446,21 +516,21 @@ pub const EntityComponentStore = struct {
         if (archetype.count - 1 != ae.entity_index) {
             const entity_ci = archetype.typ.index(self.entityid_component_id).?;
             const val = std.mem.bytesAsValue(Entity, archetype.components[entity_ci].items[(archetype.count - 1) * self.entityid_component_id.size ..]);
-            self.entities.getEntry(val.*).?.value_ptr.entity_index = ae.entity_index;
+            self.entities.get(val.*).?.entity_index = ae.entity_index;
         }
     }
 
     pub fn delete(self: *@This(), entity: Entity, ctx: *anyopaque) !void {
-        const ae = self.entities.fetchRemove(entity) orelse return error.EntityNotFound;
-        self.swap_remove(ae.value, ctx, true);
+        const ae = (try self.entities.pop(entity)) orelse return error.EntityNotFound;
+        self.swap_remove(ae, ctx, true);
     }
 
     pub fn add_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
         const compid = try self.get_component_id(@TypeOf(component));
-        const ae = self.entities.getEntry(entity) orelse return error.EntityNotFound;
+        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
 
         const archeid = blk: {
-            const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
+            const curr_archetype = &self.archetypes.items[ae.archetype];
 
             const edge = try curr_archetype.edges.getOrPut(compid);
             if (edge.found_existing) {
@@ -476,11 +546,11 @@ pub const EntityComponentStore = struct {
             }
         };
 
-        const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
+        const curr_archetype = &self.archetypes.items[ae.archetype];
         const archetype = &self.archetypes.items[archeid];
         defer {
-            self.swap_remove(ae.value_ptr.*, ctx, false);
-            ae.value_ptr.* = .{
+            self.swap_remove(ae.*, ctx, false);
+            ae.* = .{
                 .archetype = archeid,
                 .entity_index = archetype.count,
             };
@@ -497,7 +567,7 @@ pub const EntityComponentStore = struct {
                 try archetype.components[i].appendSlice(std.mem.asBytes(&component));
             } else {
                 defer j += 1;
-                const comp_mem = curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size];
+                const comp_mem = curr_archetype.components[j].items[ae.entity_index * curr_compid.size ..][0..curr_compid.size];
                 try archetype.components[i].appendSlice(comp_mem);
             }
         }
@@ -505,9 +575,9 @@ pub const EntityComponentStore = struct {
 
     pub fn remove_component(self: *@This(), entity: Entity, component: type, ctx: *anyopaque) !void {
         const compid = try self.get_component_id(component);
-        const ae = self.entities.getEntry(entity) orelse return error.EntityNotFound;
+        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
         const archeid = blk: {
-            const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
+            const curr_archetype = &self.archetypes.items[ae.archetype];
 
             const edge = try curr_archetype.edges.getOrPut(compid);
             if (edge.found_existing) {
@@ -520,11 +590,11 @@ pub const EntityComponentStore = struct {
             }
         };
 
-        const curr_archetype = &self.archetypes.items[ae.value_ptr.archetype];
+        const curr_archetype = &self.archetypes.items[ae.archetype];
         const archetype = &self.archetypes.items[archeid];
         defer {
-            self.swap_remove(ae.value_ptr.*, ctx, false);
-            ae.value_ptr.* = .{
+            self.swap_remove(ae.*, ctx, false);
+            ae.* = .{
                 .archetype = archeid,
                 .entity_index = archetype.count,
             };
@@ -537,7 +607,7 @@ pub const EntityComponentStore = struct {
         while (curr_archetype.components.len > j) : (j += 1) {
             const curr_compid = it.next().?;
 
-            const comp_mem = curr_archetype.components[j].items[ae.value_ptr.entity_index * curr_compid.size ..][0..curr_compid.size];
+            const comp_mem = curr_archetype.components[j].items[ae.entity_index * curr_compid.size ..][0..curr_compid.size];
             if (std.meta.eql(compid, curr_compid)) {
                 self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
             } else {
@@ -549,11 +619,11 @@ pub const EntityComponentStore = struct {
 
     pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
         const compid = try self.get_component_id(@TypeOf(component));
-        const ae = self.entities.getEntry(entity) orelse return error.EntityNotFound;
-        const archetype = &self.archetypes.items[ae.value_ptr.archetype];
+        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+        const archetype = &self.archetypes.items[ae.archetype];
 
         const ci = archetype.typ.index(compid).?;
-        const comp_mem = archetype.components[ci].items[ae.value_ptr.entity_index * compid.size ..][0..compid.size];
+        const comp_mem = archetype.components[ci].items[ae.entity_index * compid.size ..][0..compid.size];
         self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
         @memcpy(comp_mem, std.mem.asBytes(&component));
     }
@@ -795,14 +865,12 @@ pub const EntityComponentStore = struct {
             return mem;
         }
 
-        pub fn reserve(self: *@This()) Entity {
-            const e = Entity{ .id = self.ecs.entity_id };
-            defer self.ecs.entity_id += 1;
-            return e;
+        pub fn reserve(self: *@This()) !Entity {
+            return try self.ecs.entities.new();
         }
 
         pub fn insert(self: *@This(), components: anytype) !Entity {
-            const e = self.reserve();
+            const e = try self.reserve();
             try self.insert_reserved(e, components);
             return e;
         }
