@@ -341,8 +341,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
         }
 
         pub fn query(self: *@This(), comptime components: type) EntityQuery(components) {
-            const ids = component_ids_from(components);
-            return .{ .ecs = self, .comp_with = Type.from(&ids).components, .comp_without = .initEmpty() };
+            return .{ .ecs = self };
         }
 
         pub fn iterator(self: *@This(), comptime typ: type) EntityIterator(EntityQuery(typ)) {
@@ -687,36 +686,43 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                 pub const Without = _without;
 
                 ecs: *Ecs,
-                // TODO: do we need to store this now that component_types is a comptime arg?
-                comp_with: Type.Components,
-                comp_without: Type.Components,
 
-                pub fn with(self: @This(), comptime components: type) !NewEntityQuery(Get, utils_mod.tuple_union(With, components), Without) {
-                    const comps = component_ids_from(components);
-                    var comp_with = self.comp_with;
-                    comp_with.setUnion(Type.from(&comps).components);
-                    if (comp_with.intersectWith(self.comp_without).count() > 0) return error.BadTypeQuery;
-                    return .{ .ecs = self.ecs, .comp_with = comp_with, .comp_without = self.comp_without };
+                pub fn with(self: @This(), comptime components: type) NewEntityQuery(Get, utils_mod.tuple_union(With, components), Without) {
+                    comptime {
+                        const comp_ids_with = component_ids_from(utils_mod.tuple_union(Get, With));
+                        const comp_with = Type.from(&comp_ids_with).components;
+                        const comp_ids_without = component_ids_from(Without);
+                        const comp_without = Type.from(&comp_ids_without).components;
+                        if (comp_with.intersectWith(comp_without).count() > 0) @compileError("BadTypeQuery");
+                        return .{ .ecs = self.ecs };
+                    }
                 }
 
-                pub fn without(self: @This(), comptime components: type) !NewEntityQuery(Get, With, utils_mod.tuple_union(Without, components)) {
-                    const comps = component_ids_from(components);
-                    var comp_without = self.comp_without;
-                    comp_without.setUnion(Type.from(&comps).components);
-                    if (comp_without.intersectWith(self.comp_with).count() > 0) return error.BadTypeQuery;
-                    return .{ .ecs = self.ecs, .comp_with = self.comp_with, .comp_without = comp_without };
+                pub fn without(self: @This(), comptime components: type) NewEntityQuery(Get, With, utils_mod.tuple_union(Without, components)) {
+                    comptime {
+                        const comp_ids_with = component_ids_from(utils_mod.tuple_union(Get, With));
+                        const comp_with = Type.from(&comp_ids_with).components;
+                        const comp_ids_without = component_ids_from(Without);
+                        const comp_without = Type.from(&comp_ids_without).components;
+                        if (comp_with.intersectWith(comp_without).count() > 0) @compileError("BadTypeQuery");
+                        return .{ .ecs = self.ecs };
+                    }
                 }
 
-                pub fn filter(self: *@This(), components: Type.Components) bool {
-                    return self.comp_with.subsetOf(components) and self.comp_without.intersectWith(components).count() == 0;
+                pub fn filter(components: Type.Components) bool {
+                    if (comptime std.meta.fields(Without).len > 0) {
+                        const comp_ids_without = comptime component_ids_from(Without);
+                        const comp_without = comptime Type.from(&comp_ids_without).components;
+                        if (comp_without.intersectWith(components).count() > 0) return false;
+                    }
+
+                    const comp_ids_with = comptime component_ids_from(utils_mod.tuple_union(Get, With));
+                    const comp_with = comptime Type.from(&comp_ids_with).components;
+                    return comp_with.subsetOf(components);
                 }
 
                 pub fn iterator(self: *@This()) EntityIterator(@This()) {
-                    const ids = component_ids_from(utils_mod.tuple_union(Get, With));
-
                     return .{
-                        .ids = ids,
-                        .comp_query = self.*,
                         .archetype_it = self.ecs.archetype_map.iterator(),
                         .ecs = self.ecs,
                     };
@@ -726,13 +732,11 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
 
         pub fn EntityIterator(_query: type) type {
             return struct {
-                const fields = @typeInfo(_query.Get).@"struct".fields;
-                const len = fields.len;
+                pub const Query = _query;
+                const fields = @typeInfo(Query.Get).@"struct".fields;
+                const component_ids = component_ids_from(Query.Get);
 
                 ecs: *Ecs,
-                // same order as that of fields
-                ids: [len]ComponentId,
-                comp_query: _query,
                 archetype_it: ArchetypeMap.Iterator,
                 current: ?struct {
                     archetype: ArchetypeId,
@@ -751,9 +755,9 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                 pub fn next(self: *@This()) ?Type.pointer(_query.Get) {
                     outer: while (true) {
                         if (self.current) |*curr| inner: {
-                            var t: Type.pointer(_query.Get) = undefined;
+                            var t: Type.pointer(Query.Get) = undefined;
                             const archetype = &self.ecs.archetypes.items[curr.archetype];
-                            inline for (fields, self.ids) |field, compid| {
+                            inline for (fields, component_ids) |field, compid| {
                                 const ci = archetype.typ.index(compid).?;
                                 const slice = archetype.components[ci].items;
 
@@ -770,7 +774,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                         }
 
                         while (self.archetype_it.next()) |e| {
-                            if (!self.comp_query.filter(e.key_ptr.components)) {
+                            if (!Query.filter(e.key_ptr.components)) {
                                 continue;
                             }
 
