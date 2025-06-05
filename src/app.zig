@@ -2,11 +2,11 @@ const std = @import("std");
 
 const vk = @import("vulkan");
 
-const utils = @import("utils.zig");
-const Fuse = utils.Fuse;
-const ShaderUtils = utils.ShaderUtils;
-pub const Telemetry = utils.Tracy;
-const cast = utils.cast;
+const utils_mod = @import("utils.zig");
+const Fuse = utils_mod.Fuse;
+const ShaderUtils = utils_mod.ShaderUtils;
+const Telemetry = utils_mod.Tracy;
+const cast = utils_mod.cast;
 
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
@@ -126,7 +126,7 @@ const Handles = struct {
         var library = try assets_mod.Gltf.parse_glb("assets/exports/library.glb");
         errdefer library.deinit();
 
-        var image = try utils.StbImage.from_file(.unorm, "assets/images/mandlebulb.png");
+        var image = try utils_mod.StbImage.from_file(.unorm, "assets/images/mandlebulb.png");
         errdefer image.deinit();
 
         var cube = try assets_mod.Mesh.cube(allocator.*);
@@ -179,7 +179,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var ctx = &engine.graphics;
     const device = &ctx.device;
 
-    var telemetry = try utils.Tracy.init();
+    var telemetry = try utils_mod.Tracy.init();
     errdefer telemetry.deinit();
 
     const cmd_pool = try device.createCommandPool(&.{
@@ -237,7 +237,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var net_ctx = try NetworkingContext.init(.{});
     errdefer net_ctx.deinit();
     const net_server: ?*NetworkingContext.Server = net_ctx.server() catch |e| blk: {
-        utils.dump_error(e);
+        utils_mod.dump_error(e);
         break :blk null;
     };
     errdefer if (net_server) |s| s.deinit();
@@ -280,7 +280,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         t,
         C.Shooter{
             .audio = handles.audio.shot,
-            .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
+            .ticker = try utils_mod.Ticker.init(std.time.ns_per_ms * 100),
             .hold = true,
         },
         C.PlayerId{ .id = 0, .conn = 0 },
@@ -371,13 +371,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer desc_pool.deinit(device);
 
     var recorder = try world_mod.AudioRecorder.init(.{
-        .recorded = try utils.Channel([256]f32).init(allocator.*),
+        .recorded = try utils_mod.Channel([256]f32).init(allocator.*),
     }, .{});
-    errdefer recorder.deinit() catch |e| utils.dump_error(e);
+    errdefer recorder.deinit() catch |e| utils_mod.dump_error(e);
     try recorder.start();
 
     var audio = try world_mod.AudioPlayer.init(try .init(assets.audio.items), .{});
-    errdefer audio.deinit() catch |e| utils.dump_error(e);
+    errdefer audio.deinit() catch |e| utils_mod.dump_error(e);
     try audio.start();
 
     std.debug.print("waiting to connect to server...\n", .{});
@@ -447,8 +447,8 @@ pub fn deinit(self: *@This(), device: *Device) void {
     defer self.depth_image.deinit(device);
     defer self.resources.deinit(device);
     defer self.descriptor_pool.deinit(device);
-    defer self.recorder.deinit() catch |e| utils.dump_error(e);
-    defer self.audio.deinit() catch |e| utils.dump_error(e);
+    defer self.recorder.deinit() catch |e| utils_mod.dump_error(e);
+    defer self.audio.deinit() catch |e| utils_mod.dump_error(e);
     defer self.texture.deinit(device);
 
     defer self.telemetry.deinit();
@@ -600,7 +600,7 @@ pub const RendererState = struct {
         defer arena.deinit();
         const alloc = arena.allocator();
 
-        var shader_stages = std.ArrayList(utils.ShaderCompiler.ShaderInfo).init(alloc);
+        var shader_stages = std.ArrayList(utils_mod.ShaderCompiler.ShaderInfo).init(alloc);
         for (app.resources.assets.materials.items) |material| {
             const frag = try std.fmt.allocPrint(alloc, "{s}_FRAG_PASS", .{material.name});
             const vert = try std.fmt.allocPrint(alloc, "{s}_VERT_PASS", .{material.name});
@@ -792,15 +792,15 @@ pub const RendererState = struct {
 };
 
 const ShaderStageManager = struct {
-    shaders: utils.ShaderCompiler.Stages,
-    compiler: utils.ShaderCompiler.Compiler,
+    shaders: utils_mod.ShaderCompiler.Stages,
+    compiler: utils_mod.ShaderCompiler.Compiler,
 
-    pub fn init(stages: []const utils.ShaderCompiler.ShaderInfo) !@This() {
-        var comp = try utils.ShaderCompiler.Compiler.init(.{ .opt = .fast, .env = .vulkan1_3 }, stages);
+    pub fn init(stages: []const utils_mod.ShaderCompiler.ShaderInfo) !@This() {
+        var comp = try utils_mod.ShaderCompiler.Compiler.init(.{ .opt = .fast, .env = .vulkan1_3 }, stages);
         errdefer comp.deinit();
 
         return .{
-            .shaders = try utils.ShaderCompiler.Stages.init(&comp, stages),
+            .shaders = try utils_mod.ShaderCompiler.Stages.init(&comp, stages),
             .compiler = comp,
         };
     }
@@ -1054,7 +1054,7 @@ pub const AppState = struct {
                             C.PlayerId{ .id = id.id, .conn = e.conn },
                             C.Shooter{
                                 .audio = app.handles.audio.shot,
-                                .ticker = try utils.Ticker.init(std.time.ns_per_ms * 100),
+                                .ticker = try utils_mod.Ticker.init(std.time.ns_per_ms * 100),
                                 .hold = true,
                             },
                             try app.world.phy.add_character(.{
