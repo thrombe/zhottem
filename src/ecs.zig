@@ -270,719 +270,695 @@ pub const Entities = struct {
     }
 };
 
+const ComponentVtable = struct {
+    name: []const u8,
+    deinit: ?*const fn (ptr: *anyopaque) void = null,
+    deinit_with_context: ?*const fn (ptr: *anyopaque, ctx: *anyopaque) void = null,
+
+    fn from(component: type) @This() {
+        const vtable: @This() = switch (component) {
+            []const u8 => .{ .name = @typeName(component) },
+            else => .{
+                .name = @typeName(component),
+                // TODO: these will not update when hot reloaded.
+                //  - this can be made to work by adding .reload() methods to things that have pointers.
+                //  - just regester the components again :P
+                // tho maybe unloading earlier dylib might invalidate these ptrs? not sure.
+                // are new dylibs loaded in the similar memory locations as the older ones?
+                //  - this will also break these ptrs.
+                .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
+                .deinit_with_context = if (comptime @hasDecl(component, "deinit_with_context")) @ptrCast(&component.deinit_with_context) else null,
+            },
+        };
+
+        std.debug.print("{s}: {any}\n", .{ vtable.name, .{ vtable.deinit, vtable.deinit_with_context } });
+
+        return vtable;
+    }
+
+    fn maybe_deinit(self: *const @This(), ptr: *anyopaque, ctx: *anyopaque) void {
+        if (self.deinit_with_context) |deinitfn| {
+            deinitfn(ptr, ctx);
+        } else if (self.deinit) |deinitfn| {
+            deinitfn(ptr);
+        }
+    }
+};
+// arrayhashmap cuz ecs.iterate() needs to iterate this. (?)
+const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
+    pub fn hash(ctx: @This(), key: Type) u32 {
+        _ = ctx;
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(std.mem.asBytes(&key));
+        return @truncate(hasher.final());
+    }
+    pub fn eql(ctx: @This(), a: Type, b: Type, b_index: usize) bool {
+        _ = b_index;
+        _ = ctx;
+        return a.components.eql(b.components);
+    }
+}, true);
+
 // ECS lol
-pub const EntityComponentStore = struct {
-    // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
+pub fn EntityComponentStore(component_list: []type) type {
+    struct {
+        // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
 
-    entities: Entities,
-    archetypes: std.ArrayList(Archetype),
-    // not all types are components. we register components so that we can do cooler comptime stuff
-    // another idea could be to have a fixed enum of all possible components, and having a fixed enum varient per component
-    // directly defined in the component as 'const component_type = .transform'
-    //   - note: these enums can be merged into 1
-    // TODO: entity can be a component by simply allowing Component id to be mapped by either a type or an entity.
-    components: TypeComponents,
-    component_sizes: std.ArrayList(u16),
-    vtables: Vtables,
-    // Entity's component id
-    entityid_component_id: ComponentId,
+        entities: Entities,
+        archetypes: std.ArrayList(Archetype),
+        components: TypeComponents,
+        component_sizes: std.ArrayList(u16),
+        vtables: Vtables,
+        // Entity's component id
+        entityid_component_id: ComponentId,
 
-    archetype_map: ArchetypeMap,
-    // component_map: std.AutoHashMap(ComponentId, std.ArrayList(ArchetypeId)),
+        archetype_map: ArchetypeMap,
+        // component_map: std.AutoHashMap(ComponentId, std.ArrayList(ArchetypeId)),
 
-    const TypeComponents = std.AutoHashMap(TypeId, ComponentId);
-    const Vtables = std.ArrayList(ComponentVtable);
-    const ComponentVtable = struct {
-        name: []const u8,
-        deinit: ?*const fn (ptr: *anyopaque) void = null,
-        deinit_with_context: ?*const fn (ptr: *anyopaque, ctx: *anyopaque) void = null,
+        const TypeComponents = std.AutoHashMap(TypeId, ComponentId);
+        const Vtables = std.ArrayList(ComponentVtable);
 
-        fn from(component: type) @This() {
-            const vtable: @This() = switch (component) {
-                []const u8 => .{ .name = @typeName(component) },
-                else => .{
-                    .name = @typeName(component),
-                    // TODO: these will not update when hot reloaded.
-                    //  - this can be made to work by adding .reload() methods to things that have pointers.
-                    //  - just regester the components again :P
-                    // tho maybe unloading earlier dylib might invalidate these ptrs? not sure.
-                    // are new dylibs loaded in the similar memory locations as the older ones?
-                    //  - this will also break these ptrs.
-                    .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
-                    .deinit_with_context = if (comptime @hasDecl(component, "deinit_with_context")) @ptrCast(&component.deinit_with_context) else null,
-                },
+        pub fn init(ctx: *anyopaque) !@This() {
+            var self = @This(){
+                .entities = try .init(allocator.*),
+                .archetypes = .init(allocator.*),
+                .components = .init(allocator.*),
+                .component_sizes = .init(allocator.*),
+                .archetype_map = .init(allocator.*),
+                // .component_map = .init(allocator.*),
+                .vtables = .init(allocator.*),
+                .entityid_component_id = undefined,
             };
+            errdefer self.deinit(ctx);
 
-            std.debug.print("{s}: {any}\n", .{ vtable.name, .{ vtable.deinit, vtable.deinit_with_context } });
+            self.entityid_component_id = try self.register(Entity);
 
-            return vtable;
+            return self;
         }
 
-        fn maybe_deinit(self: *const @This(), ptr: *anyopaque, ctx: *anyopaque) void {
-            if (self.deinit_with_context) |deinitfn| {
-                deinitfn(ptr, ctx);
-            } else if (self.deinit) |deinitfn| {
-                deinitfn(ptr);
+        pub fn deinit(self: *@This(), ctx: *anyopaque) void {
+            self.entities.deinit();
+
+            for (self.archetypes.items) |*a| {
+                a.deinit(self.component_sizes.items, self.vtables.items, ctx);
             }
+            self.archetypes.deinit();
+
+            self.components.deinit();
+            self.component_sizes.deinit();
+            self.vtables.deinit();
+
+            self.archetype_map.deinit();
+
+            // for (self.component_map.values()) |*list| {
+            //     list.deinit();
+            // }
+            // self.component_map.deinit();
         }
-    };
-    // arrayhashmap cuz ecs.iterate() needs to iterate this. (?)
-    const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
-        pub fn hash(ctx: @This(), key: Type) u32 {
-            _ = ctx;
-            var hasher = std.hash.Wyhash.init(0);
-            hasher.update(std.mem.asBytes(&key));
-            return @truncate(hasher.final());
-        }
-        pub fn eql(ctx: @This(), a: Type, b: Type, b_index: usize) bool {
-            _ = b_index;
-            _ = ctx;
-            return a.components.eql(b.components);
-        }
-    }, true);
 
-    pub fn init(ctx: *anyopaque) !@This() {
-        var self = @This(){
-            .entities = try .init(allocator.*),
-            .archetypes = .init(allocator.*),
-            .components = .init(allocator.*),
-            .component_sizes = .init(allocator.*),
-            .archetype_map = .init(allocator.*),
-            // .component_map = .init(allocator.*),
-            .vtables = .init(allocator.*),
-            .entityid_component_id = undefined,
-        };
-        errdefer self.deinit(ctx);
-
-        self.entityid_component_id = try self.register(Entity);
-
-        return self;
-    }
-
-    pub fn deinit(self: *@This(), ctx: *anyopaque) void {
-        self.entities.deinit();
-
-        for (self.archetypes.items) |*a| {
-            a.deinit(self.component_sizes.items, self.vtables.items, ctx);
-        }
-        self.archetypes.deinit();
-
-        self.components.deinit();
-        self.component_sizes.deinit();
-        self.vtables.deinit();
-
-        self.archetype_map.deinit();
-
-        // for (self.component_map.values()) |*list| {
-        //     list.deinit();
-        // }
-        // self.component_map.deinit();
-    }
-
-    pub fn register(self: *@This(), component: type) !ComponentId {
-        const type_id = TypeId.from_type(component);
-        const comp_id = self.components.count();
-        const comp = try self.components.getOrPut(type_id);
-        const compid = ComponentId{
-            .id = @intCast(comp_id),
-            .size = @intCast(@sizeOf(component)),
-        };
-        if (!comp.found_existing) {
-            comp.value_ptr.* = compid;
-            const vtable = ComponentVtable.from(component);
-            try self.vtables.append(vtable);
-            try self.component_sizes.append(compid.size);
-        } else {
-            std.debug.print("duplicate type registered {s}\n", .{@typeName(component)});
-            return error.RegisterDuplicate;
-        }
-        return compid;
-    }
-
-    pub fn get_component_id(self: *@This(), component: type) !ComponentId {
-        const type_id = TypeId.from_type(component);
-        return self.components.get(type_id) orelse {
-            std.debug.print("type: '{s}' not a component\n", .{@typeName(component)});
-            return error.TypeNotAComponent;
-        };
-    }
-
-    fn component_ids_from(self: *@This(), typ: type) ![@typeInfo(typ).@"struct".fields.len]ComponentId {
-        const fields = @typeInfo(typ).@"struct".fields;
-        var components: [fields.len]ComponentId = undefined;
-
-        inline for (fields, 0..) |*field, i| {
-            const e = self.components.getEntry(TypeId.from_type(field.type));
-            if (e) |entry| {
-                components[i] = entry.value_ptr.*;
+        pub fn register(self: *@This(), component: type) !ComponentId {
+            const type_id = TypeId.from_type(component);
+            const comp_id = self.components.count();
+            const comp = try self.components.getOrPut(type_id);
+            const compid = ComponentId{
+                .id = @intCast(comp_id),
+                .size = @intCast(@sizeOf(component)),
+            };
+            if (!comp.found_existing) {
+                comp.value_ptr.* = compid;
+                const vtable = ComponentVtable.from(component);
+                try self.vtables.append(vtable);
+                try self.component_sizes.append(compid.size);
             } else {
-                std.debug.print("type: '{s}' not a component\n", .{@typeName(typ)});
-                return error.FieldNotAComponent;
+                std.debug.print("duplicate type registered {s}\n", .{@typeName(component)});
+                return error.RegisterDuplicate;
             }
+            return compid;
         }
 
-        return components;
-    }
+        pub fn get_component_id(self: *@This(), component: type) !ComponentId {
+            const type_id = TypeId.from_type(component);
+            return self.components.get(type_id) orelse {
+                std.debug.print("type: '{s}' not a component\n", .{@typeName(component)});
+                return error.TypeNotAComponent;
+            };
+        }
 
-    fn components_from(self: *@This(), typ: type) !Type.Components {
-        const components = try self.component_ids_from(typ);
-        return Type.from(&components).components;
-    }
+        fn component_ids_from(self: *@This(), typ: type) ![@typeInfo(typ).@"struct".fields.len]ComponentId {
+            const fields = @typeInfo(typ).@"struct".fields;
+            var components: [fields.len]ComponentId = undefined;
 
-    fn get_archetype(self: *@This(), typ: Type, ctx: *anyopaque) !ArchetypeId {
-        const archeid = self.archetype_map.get(typ) orelse blk: {
-            var archetype = try Archetype.from_type(typ);
-            errdefer archetype.deinit(self.component_sizes.items, self.vtables.items, ctx);
-
-            const archeid: ArchetypeId = @intCast(self.archetypes.items.len);
-            try self.archetypes.append(archetype);
-
-            try self.archetype_map.put(archetype.typ, @intCast(archeid));
-
-            break :blk archeid;
-        };
-        return archeid;
-    }
-
-    fn insert_reserved(self: *@This(), eid: Entity, components: anytype, ctx: *anyopaque) !void {
-        const component_ids = try self.components_from(@TypeOf(components));
-        const _typ = (Type{ .components = component_ids });
-        const typ = _typ.inserted(self.entityid_component_id).?;
-
-        const archeid = try self.get_archetype(typ, ctx);
-        const archetype = &self.archetypes.items[archeid];
-        defer archetype.count += 1;
-
-        inline for (@typeInfo(@TypeOf(components)).@"struct".fields) |field| {
-            const f = @field(components, field.name);
-            if (comptime field.type == Entity) {
-                std.debug.assert(std.meta.eql(eid, f));
+            inline for (fields, 0..) |*field, i| {
+                const e = self.components.getEntry(TypeId.from_type(field.type));
+                if (e) |entry| {
+                    components[i] = entry.value_ptr.*;
+                } else {
+                    std.debug.print("type: '{s}' not a component\n", .{@typeName(typ)});
+                    return error.FieldNotAComponent;
+                }
             }
 
-            const compid = try self.get_component_id(field.type);
-            const compi = archetype.typ.index(compid).?;
-            const bytes = std.mem.asBytes(&f);
-            try archetype.components[compi].appendSlice(bytes);
+            return components;
         }
 
-        if (!_typ.components.eql(typ.components)) {
-            const compi = archetype.typ.index(self.entityid_component_id).?;
-            const bytes = std.mem.asBytes(&eid);
-            try archetype.components[compi].appendSlice(bytes);
-            try self.entities.set(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
-        }
-    }
-
-    pub fn insert(self: *@This(), components: anytype, ctx: *anyopaque) !Entity {
-        const eid = try self.entities.new();
-        try self.insert_reserved(eid, components, ctx);
-        return eid;
-    }
-
-    pub fn get(self: *@This(), entity: Entity, comptime T: type) !Type.pointer(T) {
-        var t: Type.pointer(T) = undefined;
-
-        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
-        const archetype = &self.archetypes.items[ae.archetype];
-
-        inline for (@typeInfo(T).@"struct".fields) |field| {
-            const compid = try self.get_component_id(field.type);
-            const compi = archetype.typ.index(compid).?;
-            const val = std.mem.bytesAsValue(field.type, archetype.components[compi].items[ae.entity_index * compid.size ..][0..compid.size]);
-            @field(t, field.name) = @alignCast(val);
+        fn components_from(self: *@This(), typ: type) !Type.Components {
+            const components = try self.component_ids_from(typ);
+            return Type.from(&components).components;
         }
 
-        return t;
-    }
+        fn get_archetype(self: *@This(), typ: Type, ctx: *anyopaque) !ArchetypeId {
+            const archeid = self.archetype_map.get(typ) orelse blk: {
+                var archetype = try Archetype.from_type(typ);
+                errdefer archetype.deinit(self.component_sizes.items, self.vtables.items, ctx);
 
-    fn swap_remove(self: *@This(), ae: ArchetypeEntity, ctx: *anyopaque, deleted: bool) void {
-        const archetype = &self.archetypes.items[ae.archetype];
-        defer archetype.swap_remove(self.component_sizes.items, self.vtables.items, ae.entity_index, ctx, deleted);
+                const archeid: ArchetypeId = @intCast(self.archetypes.items.len);
+                try self.archetypes.append(archetype);
 
-        if (archetype.count - 1 != ae.entity_index) {
-            const entity_ci = archetype.typ.index(self.entityid_component_id).?;
-            const val = std.mem.bytesAsValue(Entity, archetype.components[entity_ci].items[(archetype.count - 1) * self.entityid_component_id.size ..]);
-            self.entities.get(val.*).?.entity_index = ae.entity_index;
-        }
-    }
+                try self.archetype_map.put(archetype.typ, @intCast(archeid));
 
-    pub fn delete(self: *@This(), entity: Entity, ctx: *anyopaque) !void {
-        const ae = (try self.entities.pop(entity)) orelse return error.EntityNotFound;
-        self.swap_remove(ae, ctx, true);
-    }
-
-    pub fn add_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
-        const compid = try self.get_component_id(@TypeOf(component));
-        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
-
-        const archeid = blk: {
-            const curr_archetype = &self.archetypes.items[ae.archetype];
-
-            const edge = try curr_archetype.edges.getOrPut(compid);
-            if (edge.found_existing) {
-                break :blk edge.value_ptr.*;
-            } else {
-                const typ = curr_archetype.typ.inserted(compid) orelse {
-                    std.debug.print("duplicate component on entity: {s}\n", .{@typeName(@TypeOf(component))});
-                    return error.ComponentAlreadyPresent;
-                };
-                const archeid = try self.get_archetype(typ, ctx);
-                edge.value_ptr.* = archeid;
                 break :blk archeid;
-            }
-        };
-
-        const curr_archetype = &self.archetypes.items[ae.archetype];
-        const archetype = &self.archetypes.items[archeid];
-        defer {
-            self.swap_remove(ae.*, ctx, false);
-            ae.* = .{
-                .archetype = archeid,
-                .entity_index = archetype.count,
             };
-            archetype.count += 1;
+            return archeid;
         }
 
-        var i: usize = 0;
-        var j: usize = 0;
-        var it = archetype.typ.iterator(self.component_sizes.items);
-        while (archetype.components.len > i) : (i += 1) {
-            const curr_compid = it.next().?;
+        fn insert_reserved(self: *@This(), eid: Entity, components: anytype, ctx: *anyopaque) !void {
+            const component_ids = try self.components_from(@TypeOf(components));
+            const _typ = (Type{ .components = component_ids });
+            const typ = _typ.inserted(self.entityid_component_id).?;
 
-            if (std.meta.eql(compid, curr_compid)) {
-                try archetype.components[i].appendSlice(std.mem.asBytes(&component));
-            } else {
-                defer j += 1;
-                const comp_mem = curr_archetype.components[j].items[ae.entity_index * curr_compid.size ..][0..curr_compid.size];
-                try archetype.components[i].appendSlice(comp_mem);
+            const archeid = try self.get_archetype(typ, ctx);
+            const archetype = &self.archetypes.items[archeid];
+            defer archetype.count += 1;
+
+            inline for (@typeInfo(@TypeOf(components)).@"struct".fields) |field| {
+                const f = @field(components, field.name);
+                if (comptime field.type == Entity) {
+                    std.debug.assert(std.meta.eql(eid, f));
+                }
+
+                const compid = try self.get_component_id(field.type);
+                const compi = archetype.typ.index(compid).?;
+                const bytes = std.mem.asBytes(&f);
+                try archetype.components[compi].appendSlice(bytes);
+            }
+
+            if (!_typ.components.eql(typ.components)) {
+                const compi = archetype.typ.index(self.entityid_component_id).?;
+                const bytes = std.mem.asBytes(&eid);
+                try archetype.components[compi].appendSlice(bytes);
+                try self.entities.set(eid, .{ .archetype = @intCast(archeid), .entity_index = @intCast(archetype.count) });
             }
         }
-    }
 
-    pub fn remove_component(self: *@This(), entity: Entity, component: type, ctx: *anyopaque) !void {
-        const compid = try self.get_component_id(component);
-        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
-        const archeid = blk: {
-            const curr_archetype = &self.archetypes.items[ae.archetype];
-
-            const edge = try curr_archetype.edges.getOrPut(compid);
-            if (edge.found_existing) {
-                break :blk edge.value_ptr.*;
-            } else {
-                const typ = (try curr_archetype.typ.removed(compid)) orelse return error.ComponentNotPresent;
-                const archeid = try self.get_archetype(typ, ctx);
-                edge.value_ptr.* = archeid;
-                break :blk archeid;
-            }
-        };
-
-        const curr_archetype = &self.archetypes.items[ae.archetype];
-        const archetype = &self.archetypes.items[archeid];
-        defer {
-            self.swap_remove(ae.*, ctx, false);
-            ae.* = .{
-                .archetype = archeid,
-                .entity_index = archetype.count,
-            };
-            archetype.count += 1;
+        pub fn insert(self: *@This(), components: anytype, ctx: *anyopaque) !Entity {
+            const eid = try self.entities.new();
+            try self.insert_reserved(eid, components, ctx);
+            return eid;
         }
 
-        var i: usize = 0;
-        var j: usize = 0;
-        var it = curr_archetype.typ.iterator(self.component_sizes.items);
-        while (curr_archetype.components.len > j) : (j += 1) {
-            const curr_compid = it.next().?;
-
-            const comp_mem = curr_archetype.components[j].items[ae.entity_index * curr_compid.size ..][0..curr_compid.size];
-            if (std.meta.eql(compid, curr_compid)) {
-                self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
-            } else {
-                defer i += 1;
-                try archetype.components[i].appendSlice(comp_mem);
-            }
-        }
-    }
-
-    pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
-        const compid = try self.get_component_id(@TypeOf(component));
-        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
-        const archetype = &self.archetypes.items[ae.archetype];
-
-        const ci = archetype.typ.index(compid).?;
-        const comp_mem = archetype.components[ci].items[ae.entity_index * compid.size ..][0..compid.size];
-        self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
-        @memcpy(comp_mem, std.mem.asBytes(&component));
-    }
-
-    pub fn query(self: *@This(), comptime components: type) !EntityQuery(components) {
-        const ids = try self.component_ids_from(components);
-        return .{ .ecs = self, .comp_with = Type.from(&ids).components, .comp_without = .initEmpty() };
-    }
-
-    pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(EntityQuery(typ)) {
-        var q = try self.query(typ);
-        return try q.iterator();
-    }
-
-    pub fn explorer(self: *@This(), entity: Entity) !EntityExplorer {
-        const ae = self.entities.get(entity) orelse return error.EntityNotFound;
-        const archetype = &self.archetypes.items[ae.archetype];
-
-        return .{
-            .ecs = self,
-            .archetype = archetype,
-            .entity_index = ae.entity_index,
-        };
-    }
-
-    pub fn deferred(self: *@This()) CmdBuf {
-        return CmdBuf.init(self);
-    }
-
-    pub const EntityExplorer = struct {
-        // for queries like (does this entity have this component)
-        // and for fast query of random components of this entity.
-
-        ecs: *EntityComponentStore,
-        archetype: *Archetype,
-        entity_index: usize,
-
-        pub fn get(self: *@This(), comptime T: type) !Type.pointer(T) {
+        pub fn get(self: *@This(), entity: Entity, comptime T: type) !Type.pointer(T) {
             var t: Type.pointer(T) = undefined;
+
+            const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+            const archetype = &self.archetypes.items[ae.archetype];
 
             inline for (@typeInfo(T).@"struct".fields) |field| {
                 const compid = try self.get_component_id(field.type);
-                const compi = self.archetype.typ.index(compid).?;
-                const val = std.mem.bytesAsValue(field.type, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
+                const compi = archetype.typ.index(compid).?;
+                const val = std.mem.bytesAsValue(field.type, archetype.components[compi].items[ae.entity_index * compid.size ..][0..compid.size]);
                 @field(t, field.name) = @alignCast(val);
             }
 
             return t;
         }
 
-        pub fn get_component(self: *@This(), typ: type) ?*typ {
-            const compid = self.ecs.components.get(TypeId.from_type(typ)).?;
-            const compi = self.archetype.typ.index(compid) orelse return null;
-            const val = std.mem.bytesAsValue(typ, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
-            return @alignCast(val);
+        fn swap_remove(self: *@This(), ae: ArchetypeEntity, ctx: *anyopaque, deleted: bool) void {
+            const archetype = &self.archetypes.items[ae.archetype];
+            defer archetype.swap_remove(self.component_sizes.items, self.vtables.items, ae.entity_index, ctx, deleted);
+
+            if (archetype.count - 1 != ae.entity_index) {
+                const entity_ci = archetype.typ.index(self.entityid_component_id).?;
+                const val = std.mem.bytesAsValue(Entity, archetype.components[entity_ci].items[(archetype.count - 1) * self.entityid_component_id.size ..]);
+                self.entities.get(val.*).?.entity_index = ae.entity_index;
+            }
         }
 
-        pub fn iterator(self: *@This()) ComponentIterator {
-            return .{ .explorer = self };
+        pub fn delete(self: *@This(), entity: Entity, ctx: *anyopaque) !void {
+            const ae = (try self.entities.pop(entity)) orelse return error.EntityNotFound;
+            self.swap_remove(ae, ctx, true);
         }
 
-        pub const ComponentIterator = struct {
-            explorer: *EntityExplorer,
-            it: Type.ComponentIterator,
-            component_index: u8 = 0,
+        pub fn add_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
+            const compid = try self.get_component_id(@TypeOf(component));
+            const ae = self.entities.get(entity) orelse return error.EntityNotFound;
 
-            pub const ComponentEntry = struct {
-                component: []u8,
-                vtable: *ComponentVtable,
-                compid: ComponentId,
+            const archeid = blk: {
+                const curr_archetype = &self.archetypes.items[ae.archetype];
+
+                const edge = try curr_archetype.edges.getOrPut(compid);
+                if (edge.found_existing) {
+                    break :blk edge.value_ptr.*;
+                } else {
+                    const typ = curr_archetype.typ.inserted(compid) orelse {
+                        std.debug.print("duplicate component on entity: {s}\n", .{@typeName(@TypeOf(component))});
+                        return error.ComponentAlreadyPresent;
+                    };
+                    const archeid = try self.get_archetype(typ, ctx);
+                    edge.value_ptr.* = archeid;
+                    break :blk archeid;
+                }
             };
 
-            pub fn next(self: *@This()) ?ComponentEntry {
-                const compid = self.it.next() orelse return null;
-                defer self.component_index += 1;
-
-                const component = self.explorer.archetype.components[self.component_index].items[self.explorer.entity_index * compid.size ..][0..compid.size];
-
-                return .{
-                    .component = component,
-                    .vtable = &self.explorer.ecs.vtables.items[self.component_index],
-                    .compid = compid,
+            const curr_archetype = &self.archetypes.items[ae.archetype];
+            const archetype = &self.archetypes.items[archeid];
+            defer {
+                self.swap_remove(ae.*, ctx, false);
+                ae.* = .{
+                    .archetype = archeid,
+                    .entity_index = archetype.count,
                 };
+                archetype.count += 1;
             }
 
-            pub fn reset(self: *@This()) void {
-                self.component_index = 0;
-                self.it = self.explorer.archetype.typ.iterator(self.explorer.ecs.component_sizes);
-            }
-        };
-    };
+            var i: usize = 0;
+            var j: usize = 0;
+            var it = archetype.typ.iterator(self.component_sizes.items);
+            while (archetype.components.len > i) : (i += 1) {
+                const curr_compid = it.next().?;
 
-    pub fn EntityQuery(_get: type) type {
-        return NewEntityQuery(_get, struct {}, struct {});
-    }
-
-    pub fn NewEntityQuery(_get: type, _with: type, _without: type) type {
-        return struct {
-            pub const Get = _get;
-            pub const With = _with;
-            pub const Without = _without;
-
-            ecs: *EntityComponentStore,
-            comp_with: Type.Components,
-            comp_without: Type.Components,
-
-            fn tuple_union(a: type, b: type) type {
-                comptime {
-                    const fields_a = std.meta.fields(a);
-                    const fields_b = std.meta.fields(b);
-                    var fields: [fields_a.len + fields_b.len]std.builtin.Type.StructField = undefined;
-                    for (fields_a, 0..) |field, i| {
-                        fields[i] = field;
-                        fields[i].name = std.fmt.comptimePrint("{d}", .{i});
-                    }
-                    for (fields_b, fields_a.len..) |*field, i| {
-                        fields[i] = field;
-                        fields[i].name = std.fmt.comptimePrint("{d}", .{i});
-                    }
-                    return @Type(.{ .@"struct" = .{
-                        .layout = .auto,
-                        .fields = &fields,
-                        .decls = &.{},
-                        .is_tuple = true,
-                    } });
+                if (std.meta.eql(compid, curr_compid)) {
+                    try archetype.components[i].appendSlice(std.mem.asBytes(&component));
+                } else {
+                    defer j += 1;
+                    const comp_mem = curr_archetype.components[j].items[ae.entity_index * curr_compid.size ..][0..curr_compid.size];
+                    try archetype.components[i].appendSlice(comp_mem);
                 }
             }
+        }
 
-            pub fn with(self: @This(), comptime components: type) !NewEntityQuery(Get, tuple_union(With, components), Without) {
-                const comps = try self.ecs.component_ids_from(components);
-                var comp_with = self.comp_with;
-                comp_with.setUnion(Type.from(&comps).components);
-                if (comp_with.intersectWith(self.comp_without).count() > 0) return error.BadTypeQuery;
-                return .{ .ecs = self.ecs, .comp_with = comp_with, .comp_without = self.comp_without };
-            }
+        pub fn remove_component(self: *@This(), entity: Entity, component: type, ctx: *anyopaque) !void {
+            const compid = try self.get_component_id(component);
+            const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+            const archeid = blk: {
+                const curr_archetype = &self.archetypes.items[ae.archetype];
 
-            pub fn without(self: @This(), comptime components: type) !NewEntityQuery(Get, With, tuple_union(Without, components)) {
-                const comps = try self.ecs.component_ids_from(components);
-                var comp_without = self.comp_without;
-                comp_without.setUnion(Type.from(&comps).components);
-                if (comp_without.intersectWith(self.comp_with).count() > 0) return error.BadTypeQuery;
-                return .{ .ecs = self.ecs, .comp_with = self.comp_with, .comp_without = comp_without };
-            }
+                const edge = try curr_archetype.edges.getOrPut(compid);
+                if (edge.found_existing) {
+                    break :blk edge.value_ptr.*;
+                } else {
+                    const typ = (try curr_archetype.typ.removed(compid)) orelse return error.ComponentNotPresent;
+                    const archeid = try self.get_archetype(typ, ctx);
+                    edge.value_ptr.* = archeid;
+                    break :blk archeid;
+                }
+            };
 
-            pub fn filter(self: *@This(), components: Type.Components) bool {
-                return self.comp_with.subsetOf(components) and self.comp_without.intersectWith(components).count() == 0;
-            }
-
-            pub fn iterator(self: *@This()) !EntityIterator(@This()) {
-                const ids = try self.ecs.component_ids_from(tuple_union(Get, With));
-
-                return .{
-                    .ids = ids,
-                    .comp_query = self.*,
-                    .archetype_it = self.ecs.archetype_map.iterator(),
-                    .ecs = self.ecs,
+            const curr_archetype = &self.archetypes.items[ae.archetype];
+            const archetype = &self.archetypes.items[archeid];
+            defer {
+                self.swap_remove(ae.*, ctx, false);
+                ae.* = .{
+                    .archetype = archeid,
+                    .entity_index = archetype.count,
                 };
+                archetype.count += 1;
             }
-        };
-    }
 
-    pub fn EntityIterator(_query: type) type {
-        return struct {
-            const fields = @typeInfo(_query.Get).@"struct".fields;
-            const len = fields.len;
+            var i: usize = 0;
+            var j: usize = 0;
+            var it = curr_archetype.typ.iterator(self.component_sizes.items);
+            while (curr_archetype.components.len > j) : (j += 1) {
+                const curr_compid = it.next().?;
+
+                const comp_mem = curr_archetype.components[j].items[ae.entity_index * curr_compid.size ..][0..curr_compid.size];
+                if (std.meta.eql(compid, curr_compid)) {
+                    self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
+                } else {
+                    defer i += 1;
+                    try archetype.components[i].appendSlice(comp_mem);
+                }
+            }
+        }
+
+        pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype, ctx: *anyopaque) !void {
+            const compid = try self.get_component_id(@TypeOf(component));
+            const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+            const archetype = &self.archetypes.items[ae.archetype];
+
+            const ci = archetype.typ.index(compid).?;
+            const comp_mem = archetype.components[ci].items[ae.entity_index * compid.size ..][0..compid.size];
+            self.vtables.items[compid.id].maybe_deinit(@ptrCast(comp_mem.ptr), ctx);
+            @memcpy(comp_mem, std.mem.asBytes(&component));
+        }
+
+        pub fn query(self: *@This(), comptime components: type) !EntityQuery(components) {
+            const ids = try self.component_ids_from(components);
+            return .{ .ecs = self, .comp_with = Type.from(&ids).components, .comp_without = .initEmpty() };
+        }
+
+        pub fn iterator(self: *@This(), comptime typ: type) !EntityIterator(EntityQuery(typ)) {
+            var q = try self.query(typ);
+            return try q.iterator();
+        }
+
+        pub fn explorer(self: *@This(), entity: Entity) !EntityExplorer {
+            const ae = self.entities.get(entity) orelse return error.EntityNotFound;
+            const archetype = &self.archetypes.items[ae.archetype];
+
+            return .{
+                .ecs = self,
+                .archetype = archetype,
+                .entity_index = ae.entity_index,
+            };
+        }
+
+        pub fn deferred(self: *@This()) CmdBuf {
+            return CmdBuf.init(self);
+        }
+
+        pub const EntityExplorer = struct {
+            // for queries like (does this entity have this component)
+            // and for fast query of random components of this entity.
 
             ecs: *EntityComponentStore,
-            // same order as that of fields
-            ids: [len]ComponentId,
-            comp_query: _query,
-            archetype_it: ArchetypeMap.Iterator,
-            current: ?struct {
-                archetype: ArchetypeId,
-                // current index into archetype.components[].items
-                index: usize = 0,
-            } = null,
+            archetype: *Archetype,
+            entity_index: usize,
 
-            pub fn current_entity_explorer(self: *@This()) EntityExplorer {
-                return .{
-                    .ecs = self.ecs,
-                    .archetype = &self.ecs.archetypes.items[self.current.?.archetype],
-                    .entity_index = self.current.?.index - 1,
-                };
+            pub fn get(self: *@This(), comptime T: type) !Type.pointer(T) {
+                var t: Type.pointer(T) = undefined;
+
+                inline for (@typeInfo(T).@"struct".fields) |field| {
+                    const compid = try self.get_component_id(field.type);
+                    const compi = self.archetype.typ.index(compid).?;
+                    const val = std.mem.bytesAsValue(field.type, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
+                    @field(t, field.name) = @alignCast(val);
+                }
+
+                return t;
             }
 
-            pub fn next(self: *@This()) ?Type.pointer(_query.Get) {
-                outer: while (true) {
-                    if (self.current) |*curr| inner: {
-                        var t: Type.pointer(_query.Get) = undefined;
-                        const archetype = &self.ecs.archetypes.items[curr.archetype];
-                        inline for (fields, self.ids) |field, compid| {
-                            const ci = archetype.typ.index(compid).?;
-                            const slice = archetype.components[ci].items;
+            pub fn get_component(self: *@This(), typ: type) ?*typ {
+                const compid = self.ecs.components.get(TypeId.from_type(typ)).?;
+                const compi = self.archetype.typ.index(compid) orelse return null;
+                const val = std.mem.bytesAsValue(typ, self.archetype.components[compi].items[self.entity_index * compid.size ..][0..compid.size]);
+                return @alignCast(val);
+            }
 
-                            if ((curr.index + 1) * compid.size > slice.len) {
-                                self.current = null;
-                                break :inner;
+            pub fn iterator(self: *@This()) ComponentIterator {
+                return .{ .explorer = self };
+            }
+
+            pub const ComponentIterator = struct {
+                explorer: *EntityExplorer,
+                it: Type.ComponentIterator,
+                component_index: u8 = 0,
+
+                pub const ComponentEntry = struct {
+                    component: []u8,
+                    vtable: *ComponentVtable,
+                    compid: ComponentId,
+                };
+
+                pub fn next(self: *@This()) ?ComponentEntry {
+                    const compid = self.it.next() orelse return null;
+                    defer self.component_index += 1;
+
+                    const component = self.explorer.archetype.components[self.component_index].items[self.explorer.entity_index * compid.size ..][0..compid.size];
+
+                    return .{
+                        .component = component,
+                        .vtable = &self.explorer.ecs.vtables.items[self.component_index],
+                        .compid = compid,
+                    };
+                }
+
+                pub fn reset(self: *@This()) void {
+                    self.component_index = 0;
+                    self.it = self.explorer.archetype.typ.iterator(self.explorer.ecs.component_sizes);
+                }
+            };
+        };
+
+        pub fn EntityQuery(_get: type) type {
+            return NewEntityQuery(_get, struct {}, struct {});
+        }
+
+        pub fn NewEntityQuery(_get: type, _with: type, _without: type) type {
+            return struct {
+                pub const Get = _get;
+                pub const With = _with;
+                pub const Without = _without;
+
+                ecs: *EntityComponentStore,
+                comp_with: Type.Components,
+                comp_without: Type.Components,
+
+                pub fn with(self: @This(), comptime components: type) !NewEntityQuery(Get, utils_mod.tuple_union(With, components), Without) {
+                    const comps = try self.ecs.component_ids_from(components);
+                    var comp_with = self.comp_with;
+                    comp_with.setUnion(Type.from(&comps).components);
+                    if (comp_with.intersectWith(self.comp_without).count() > 0) return error.BadTypeQuery;
+                    return .{ .ecs = self.ecs, .comp_with = comp_with, .comp_without = self.comp_without };
+                }
+
+                pub fn without(self: @This(), comptime components: type) !NewEntityQuery(Get, With, utils_mod.tuple_union(Without, components)) {
+                    const comps = try self.ecs.component_ids_from(components);
+                    var comp_without = self.comp_without;
+                    comp_without.setUnion(Type.from(&comps).components);
+                    if (comp_without.intersectWith(self.comp_with).count() > 0) return error.BadTypeQuery;
+                    return .{ .ecs = self.ecs, .comp_with = self.comp_with, .comp_without = comp_without };
+                }
+
+                pub fn filter(self: *@This(), components: Type.Components) bool {
+                    return self.comp_with.subsetOf(components) and self.comp_without.intersectWith(components).count() == 0;
+                }
+
+                pub fn iterator(self: *@This()) !EntityIterator(@This()) {
+                    const ids = try self.ecs.component_ids_from(utils_mod.tuple_union(Get, With));
+
+                    return .{
+                        .ids = ids,
+                        .comp_query = self.*,
+                        .archetype_it = self.ecs.archetype_map.iterator(),
+                        .ecs = self.ecs,
+                    };
+                }
+            };
+        }
+
+        pub fn EntityIterator(_query: type) type {
+            return struct {
+                const fields = @typeInfo(_query.Get).@"struct".fields;
+                const len = fields.len;
+
+                ecs: *EntityComponentStore,
+                // same order as that of fields
+                ids: [len]ComponentId,
+                comp_query: _query,
+                archetype_it: ArchetypeMap.Iterator,
+                current: ?struct {
+                    archetype: ArchetypeId,
+                    // current index into archetype.components[].items
+                    index: usize = 0,
+                } = null,
+
+                pub fn current_entity_explorer(self: *@This()) EntityExplorer {
+                    return .{
+                        .ecs = self.ecs,
+                        .archetype = &self.ecs.archetypes.items[self.current.?.archetype],
+                        .entity_index = self.current.?.index - 1,
+                    };
+                }
+
+                pub fn next(self: *@This()) ?Type.pointer(_query.Get) {
+                    outer: while (true) {
+                        if (self.current) |*curr| inner: {
+                            var t: Type.pointer(_query.Get) = undefined;
+                            const archetype = &self.ecs.archetypes.items[curr.archetype];
+                            inline for (fields, self.ids) |field, compid| {
+                                const ci = archetype.typ.index(compid).?;
+                                const slice = archetype.components[ci].items;
+
+                                if ((curr.index + 1) * compid.size > slice.len) {
+                                    self.current = null;
+                                    break :inner;
+                                }
+
+                                const val = std.mem.bytesAsValue(field.type, slice[curr.index * compid.size ..][0..compid.size]);
+                                @field(t, field.name) = @alignCast(val);
+                            }
+                            curr.index += 1;
+                            return t;
+                        }
+
+                        while (self.archetype_it.next()) |e| {
+                            if (!self.comp_query.filter(e.key_ptr.components)) {
+                                continue;
                             }
 
-                            const val = std.mem.bytesAsValue(field.type, slice[curr.index * compid.size ..][0..compid.size]);
-                            @field(t, field.name) = @alignCast(val);
-                        }
-                        curr.index += 1;
-                        return t;
-                    }
-
-                    while (self.archetype_it.next()) |e| {
-                        if (!self.comp_query.filter(e.key_ptr.components)) {
-                            continue;
+                            self.current = .{
+                                .archetype = e.value_ptr.*,
+                            };
+                            continue :outer;
                         }
 
-                        self.current = .{
-                            .archetype = e.value_ptr.*,
-                        };
-                        continue :outer;
+                        return null;
                     }
-
-                    return null;
                 }
-            }
 
-            pub fn reset(self: *@This()) void {
-                self.archetype_it.reset();
-                self.current = null;
-            }
-        };
-    }
-
-    pub const CmdBuf = struct {
-        ecs: *EntityComponentStore,
-        alloc: std.heap.ArenaAllocator,
-
-        impl: struct {
-            inserted: Inserted = .{},
-            deleted: Deleted = .{},
-            added_components: Added = .{},
-            overwritten_components: Overwritten = .{},
-            removed_components: Removed = .{},
-        } = .{},
-
-        const Inserted = std.ArrayListUnmanaged(struct {
-            entity: Entity,
-            bundle: *anyopaque,
-            insertfn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
-        });
-        const Deleted = std.ArrayListUnmanaged(Entity);
-        const Added = std.ArrayListUnmanaged(struct {
-            entity: Entity,
-            component: *anyopaque,
-            addfn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
-        });
-        const Overwritten = std.ArrayListUnmanaged(struct {
-            entity: Entity,
-            component: *anyopaque,
-            overwritefn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
-        });
-        const Removed = std.ArrayListUnmanaged(struct {
-            entity: Entity,
-            rmfn: *const fn (*EntityComponentStore, Entity, *anyopaque) anyerror!void,
-        });
-
-        pub fn init(ecs: *EntityComponentStore) @This() {
-            return .{
-                .ecs = ecs,
-                .alloc = std.heap.ArenaAllocator.init(allocator.*),
+                pub fn reset(self: *@This()) void {
+                    self.archetype_it.reset();
+                    self.current = null;
+                }
             };
         }
 
-        pub fn deinit(self: *@This()) void {
-            self.alloc.deinit();
-        }
+        pub const CmdBuf = struct {
+            ecs: *EntityComponentStore,
+            alloc: std.heap.ArenaAllocator,
 
-        fn reset(self: *@This()) void {
-            _ = self.alloc.reset(.retain_capacity);
-            self.impl = .{};
-        }
+            impl: struct {
+                inserted: Inserted = .{},
+                deleted: Deleted = .{},
+                added_components: Added = .{},
+                overwritten_components: Overwritten = .{},
+                removed_components: Removed = .{},
+            } = .{},
 
-        pub fn apply(self: *@This(), ctx: *anyopaque) !void {
-            defer self.reset();
-
-            for (self.impl.inserted.items) |*t| {
-                try t.insertfn(self.ecs, t.entity, t.bundle, ctx);
-            }
-
-            for (self.impl.added_components.items) |*t| {
-                try t.addfn(self.ecs, t.entity, t.component, ctx);
-            }
-
-            for (self.impl.overwritten_components.items) |*t| {
-                try t.overwritefn(self.ecs, t.entity, t.component, ctx);
-            }
-
-            for (self.impl.removed_components.items) |*t| {
-                try t.rmfn(self.ecs, t.entity, ctx);
-            }
-
-            for (self.impl.deleted.items) |t| {
-                try self.ecs.delete(t, ctx);
-            }
-        }
-
-        fn allocated(self: *@This(), thing: anytype) !*@TypeOf(thing) {
-            const alloc = self.alloc.allocator();
-            const mem = try alloc.create(@TypeOf(thing));
-            errdefer alloc.free(mem);
-            mem.* = thing;
-            return mem;
-        }
-
-        pub fn reserve(self: *@This()) !Entity {
-            return try self.ecs.entities.new();
-        }
-
-        pub fn insert(self: *@This(), components: anytype) !Entity {
-            const e = try self.reserve();
-            try self.insert_reserved(e, components);
-            return e;
-        }
-
-        pub fn insert_reserved(self: *@This(), e: Entity, components: anytype) !void {
-            const alloc = self.alloc.allocator();
-
-            try self.impl.inserted.append(alloc, .{
-                .entity = e,
-                .bundle = @ptrCast(try self.allocated(components)),
-                .insertfn = @ptrCast(&(struct {
-                    fn insert(ecs: *EntityComponentStore, entity: Entity, comp: *@TypeOf(components), ctx: *anyopaque) anyerror!void {
-                        try ecs.insert_reserved(entity, comp.*, ctx);
-                    }
-                }).insert),
+            const Inserted = std.ArrayListUnmanaged(struct {
+                entity: Entity,
+                bundle: *anyopaque,
+                insertfn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
             });
-        }
-
-        pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
-            const alloc = self.alloc.allocator();
-            try self.impl.added_components.append(alloc, .{
-                .entity = entity,
-                .component = @ptrCast(try self.allocated(component)),
-                .addfn = @ptrCast(&(struct {
-                    fn add_component(ecs: *EntityComponentStore, e: Entity, comp: *@TypeOf(component), ctx: *anyopaque) !void {
-                        try ecs.add_component(e, comp.*, ctx);
-                    }
-                }).add_component),
+            const Deleted = std.ArrayListUnmanaged(Entity);
+            const Added = std.ArrayListUnmanaged(struct {
+                entity: Entity,
+                component: *anyopaque,
+                addfn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
             });
-        }
-
-        pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype) !void {
-            const alloc = self.alloc.allocator();
-            try self.impl.overwritten_components.append(alloc, .{
-                .entity = entity,
-                .component = @ptrCast(try self.allocated(component)),
-                .overwritefn = @ptrCast(&(struct {
-                    fn overwrite_component(ecs: *EntityComponentStore, e: Entity, comp: *@TypeOf(component), ctx: *anyopaque) !void {
-                        try ecs.overwrite_component(e, comp.*, ctx);
-                    }
-                }).overwrite_component),
+            const Overwritten = std.ArrayListUnmanaged(struct {
+                entity: Entity,
+                component: *anyopaque,
+                overwritefn: *const fn (*EntityComponentStore, Entity, *anyopaque, *anyopaque) anyerror!void,
             });
-        }
-
-        pub fn remove_component(self: *@This(), entity: Entity, component: type) !void {
-            const alloc = self.alloc.allocator();
-            try self.impl.removed_components.append(alloc, .{
-                .entity = entity,
-                .rmfn = @ptrCast(&(struct {
-                    fn remove_component(ecs: *EntityComponentStore, e: Entity, ctx: *anyopaque) !void {
-                        try ecs.remove_component(e, component, ctx);
-                    }
-                }).remove_component),
+            const Removed = std.ArrayListUnmanaged(struct {
+                entity: Entity,
+                rmfn: *const fn (*EntityComponentStore, Entity, *anyopaque) anyerror!void,
             });
-        }
 
-        pub fn delete(self: *@This(), entity: Entity) !void {
-            try self.impl.deleted.append(self.alloc.allocator(), entity);
-        }
+            pub fn init(ecs: *EntityComponentStore) @This() {
+                return .{
+                    .ecs = ecs,
+                    .alloc = std.heap.ArenaAllocator.init(allocator.*),
+                };
+            }
+
+            pub fn deinit(self: *@This()) void {
+                self.alloc.deinit();
+            }
+
+            fn reset(self: *@This()) void {
+                _ = self.alloc.reset(.retain_capacity);
+                self.impl = .{};
+            }
+
+            pub fn apply(self: *@This(), ctx: *anyopaque) !void {
+                defer self.reset();
+
+                for (self.impl.inserted.items) |*t| {
+                    try t.insertfn(self.ecs, t.entity, t.bundle, ctx);
+                }
+
+                for (self.impl.added_components.items) |*t| {
+                    try t.addfn(self.ecs, t.entity, t.component, ctx);
+                }
+
+                for (self.impl.overwritten_components.items) |*t| {
+                    try t.overwritefn(self.ecs, t.entity, t.component, ctx);
+                }
+
+                for (self.impl.removed_components.items) |*t| {
+                    try t.rmfn(self.ecs, t.entity, ctx);
+                }
+
+                for (self.impl.deleted.items) |t| {
+                    try self.ecs.delete(t, ctx);
+                }
+            }
+
+            fn allocated(self: *@This(), thing: anytype) !*@TypeOf(thing) {
+                const alloc = self.alloc.allocator();
+                const mem = try alloc.create(@TypeOf(thing));
+                errdefer alloc.free(mem);
+                mem.* = thing;
+                return mem;
+            }
+
+            pub fn reserve(self: *@This()) !Entity {
+                return try self.ecs.entities.new();
+            }
+
+            pub fn insert(self: *@This(), components: anytype) !Entity {
+                const e = try self.reserve();
+                try self.insert_reserved(e, components);
+                return e;
+            }
+
+            pub fn insert_reserved(self: *@This(), e: Entity, components: anytype) !void {
+                const alloc = self.alloc.allocator();
+
+                try self.impl.inserted.append(alloc, .{
+                    .entity = e,
+                    .bundle = @ptrCast(try self.allocated(components)),
+                    .insertfn = @ptrCast(&(struct {
+                        fn insert(ecs: *EntityComponentStore, entity: Entity, comp: *@TypeOf(components), ctx: *anyopaque) anyerror!void {
+                            try ecs.insert_reserved(entity, comp.*, ctx);
+                        }
+                    }).insert),
+                });
+            }
+
+            pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
+                const alloc = self.alloc.allocator();
+                try self.impl.added_components.append(alloc, .{
+                    .entity = entity,
+                    .component = @ptrCast(try self.allocated(component)),
+                    .addfn = @ptrCast(&(struct {
+                        fn add_component(ecs: *EntityComponentStore, e: Entity, comp: *@TypeOf(component), ctx: *anyopaque) !void {
+                            try ecs.add_component(e, comp.*, ctx);
+                        }
+                    }).add_component),
+                });
+            }
+
+            pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype) !void {
+                const alloc = self.alloc.allocator();
+                try self.impl.overwritten_components.append(alloc, .{
+                    .entity = entity,
+                    .component = @ptrCast(try self.allocated(component)),
+                    .overwritefn = @ptrCast(&(struct {
+                        fn overwrite_component(ecs: *EntityComponentStore, e: Entity, comp: *@TypeOf(component), ctx: *anyopaque) !void {
+                            try ecs.overwrite_component(e, comp.*, ctx);
+                        }
+                    }).overwrite_component),
+                });
+            }
+
+            pub fn remove_component(self: *@This(), entity: Entity, component: type) !void {
+                const alloc = self.alloc.allocator();
+                try self.impl.removed_components.append(alloc, .{
+                    .entity = entity,
+                    .rmfn = @ptrCast(&(struct {
+                        fn remove_component(ecs: *EntityComponentStore, e: Entity, ctx: *anyopaque) !void {
+                            try ecs.remove_component(e, component, ctx);
+                        }
+                    }).remove_component),
+                });
+            }
+
+            pub fn delete(self: *@This(), entity: Entity) !void {
+                try self.impl.deleted.append(self.alloc.allocator(), entity);
+            }
+        };
     };
-};
+}

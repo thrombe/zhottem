@@ -123,7 +123,7 @@ pub const TypeId = extern struct {
     }
 };
 
-pub fn cast(typ: type, val: anytype) typ {
+pub inline fn cast(typ: type, val: anytype) typ {
     const E = @typeInfo(@TypeOf(val));
     const T = @typeInfo(typ);
     if (comptime (std.meta.activeTag(E) == .int and std.meta.activeTag(T) == .float)) {
@@ -152,6 +152,36 @@ pub fn cast(typ: type, val: anytype) typ {
     @compileError("can't cast from '" ++ @typeName(@TypeOf(val)) ++ "' to '" ++ @typeName(typ) ++ "'");
 }
 
+pub inline fn tuple_union(a: type, b: type) type {
+    comptime {
+        const fields_a = std.meta.fields(a);
+        const fields_b = std.meta.fields(b);
+        var fields: [fields_a.len + fields_b.len]std.builtin.Type.StructField = undefined;
+        for (fields_a, 0..) |field, i| {
+            fields[i] = field;
+            fields[i].name = std.fmt.comptimePrint("{d}", .{i});
+        }
+        for (fields_b, fields_a.len..) |*field, i| {
+            fields[i] = field;
+            fields[i].name = std.fmt.comptimePrint("{d}", .{i});
+        }
+        return @Type(.{ .@"struct" = .{
+            .layout = .auto,
+            .fields = &fields,
+            .decls = &.{},
+            .is_tuple = true,
+        } });
+    }
+}
+
+pub inline fn indexof_type(types: []type, typ: type) usize {
+    comptime {
+        for (types, 0..) |t, i| {
+            if (t == typ) return i;
+        }
+    }
+}
+
 pub inline fn dump_error(err: anyerror) void {
     std.debug.print("error: {any}\n", .{err});
     if (@errorReturnTrace()) |trace| {
@@ -159,7 +189,7 @@ pub inline fn dump_error(err: anyerror) void {
     }
 }
 
-pub fn deinit_fields(self: anytype) void {
+pub inline fn deinit_fields(self: anytype) void {
     inline for (@typeInfo(@This()).@"struct".fields) |field| {
         if (comptime @hasDecl(field.type, "deinit")) {
             @field(self, field.name).deinit();
