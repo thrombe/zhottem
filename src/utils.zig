@@ -1134,10 +1134,6 @@ pub const ShaderUtils = struct {
             }
         }
 
-        pub fn add_uniform(self: *@This(), ubo: anytype) !void {
-            try self.add_struct("Uniforms", @TypeOf(ubo));
-        }
-
         pub fn add_bind_enum(self: *@This(), bind: type) !void {
             if (try self.remember(bind)) {
                 return;

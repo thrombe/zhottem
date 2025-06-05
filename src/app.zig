@@ -1612,7 +1612,7 @@ pub const AppState = struct {
             var gen = try ShaderUtils.GlslBindingGenerator.init();
             defer gen.deinit();
 
-            try gen.add_uniform(ubo);
+            try gen.add_struct("Uniforms", @TypeOf(ubo));
             try gen.add_struct("Vertex", resources_mod.Vertex);
             try gen.add_struct("Instance", resources_mod.Instance);
             try gen.add_struct("DrawCtx", resources_mod.ResourceManager.InstanceResources.DrawCtx);
