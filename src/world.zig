@@ -12,7 +12,6 @@ const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
 
 const ecs_mod = @import("ecs.zig");
-const EntityComponentStore = ecs_mod.EntityComponentStore;
 
 const main = @import("main.zig");
 const allocator = main.allocator;
@@ -22,7 +21,29 @@ pub const C = struct {
     pub const Entity = ecs_mod.Entity;
     pub const BodyId = Jphysics.BodyId;
     pub const CharacterBody = Jphysics.CharacterBody;
+    pub const Camera = math.Camera;
 };
+pub const component_list: []const type = &.{
+    C.Entity,
+    C.Name,
+    C.Camera,
+    C.Controller,
+    C.Shooter,
+    C.Sound,
+    C.StaticSound,
+    C.Node,
+    C.LocalTransform,
+    C.GlobalTransform,
+    C.LastTransform,
+    C.TimeDespawn,
+    C.PlayerId,
+    C.StaticMesh,
+    C.AnimatedMesh,
+    C.BatchedRender,
+    C.BodyId,
+    C.CharacterBody,
+};
+pub const EntityComponentStore = ecs_mod.EntityComponentStore(component_list, *World);
 
 pub const Jphysics = struct {
     pub const jolt = @import("jolt/jolt.zig");
@@ -810,24 +831,6 @@ pub const World = struct {
         self.ecs = try EntityComponentStore.init(@ptrCast(&self));
         errdefer self.deinit();
 
-        _ = try self.ecs.register(Components.Name);
-        _ = try self.ecs.register(math.Camera);
-        _ = try self.ecs.register(Components.Controller);
-        _ = try self.ecs.register(Components.Shooter);
-        _ = try self.ecs.register(Components.Sound);
-        _ = try self.ecs.register(Components.StaticSound);
-        _ = try self.ecs.register(Components.Node);
-        _ = try self.ecs.register(Components.LocalTransform);
-        _ = try self.ecs.register(Components.GlobalTransform);
-        _ = try self.ecs.register(Components.LastTransform);
-        _ = try self.ecs.register(Components.TimeDespawn);
-        _ = try self.ecs.register(Components.PlayerId);
-        _ = try self.ecs.register(Components.StaticMesh);
-        _ = try self.ecs.register(Components.AnimatedMesh);
-        _ = try self.ecs.register(Components.BatchedRender);
-        _ = try self.ecs.register(Jphysics.BodyId);
-        _ = try self.ecs.register(Jphysics.CharacterBody);
-
         return self;
     }
 
@@ -839,13 +842,13 @@ pub const World = struct {
     pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
         try self.phy.update(sim_time, steps);
 
-        var it = try self.ecs.iterator(struct { t: Components.GlobalTransform, bid: Jphysics.BodyId });
+        var it = self.ecs.iterator(struct { t: Components.GlobalTransform, bid: Jphysics.BodyId });
         while (it.next()) |e| {
             const t = self.phy.get_transform(e.bid.*);
             e.t.set(.{ .pos = t.position, .rotation = t.rotation, .scale = e.t.transform.scale });
         }
 
-        var player_it = try self.ecs.iterator(struct { t: Components.GlobalTransform, char: Jphysics.CharacterBody });
+        var player_it = self.ecs.iterator(struct { t: Components.GlobalTransform, char: Jphysics.CharacterBody });
         while (player_it.next()) |e| {
             const char: *Jphysics.CharacterBody = e.char;
             char.force = .{};

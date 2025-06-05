@@ -174,11 +174,12 @@ pub inline fn tuple_union(a: type, b: type) type {
     }
 }
 
-pub inline fn indexof_type(types: []type, typ: type) usize {
+pub inline fn indexof_type(types: []const type, typ: type) ?usize {
     comptime {
         for (types, 0..) |t, i| {
             if (t == typ) return i;
         }
+        return null;
     }
 }
 

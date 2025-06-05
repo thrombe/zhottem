@@ -1002,7 +1002,7 @@ pub const AppState = struct {
     focus: bool = false,
     jolt_debug_render: bool = false,
 
-    cmdbuf: ecs_mod.EntityComponentStore.CmdBuf,
+    cmdbuf: world_mod.EntityComponentStore.CmdBuf,
 
     client_count: u8 = 0,
 
@@ -1142,7 +1142,7 @@ pub const AppState = struct {
                         try s.send_message(e.conn, 0, .{ .event = .{ .setid = .{ .id = self.client_count } } });
                     },
                     .spawn_player => {
-                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId, t: C.GlobalTransform });
+                        var it = app.world.ecs.iterator(struct { p: C.PlayerId, t: C.GlobalTransform });
                         while (it.next()) |p| {
                             // notify new player about all other players.
                             try s.send_message(e.conn, p.p.conn, .{ .event = .{ .spawn_player = .{ .id = p.p.id, .pos = .{
@@ -1157,21 +1157,21 @@ pub const AppState = struct {
                     },
                     .despawn_player => {
                         // tell everyone this player left
-                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
+                        var it = app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
                             try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .input => {
                         // send this player's inputs to everyone
-                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
+                        var it = app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
                             try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
                     },
                     .quit => {
                         // tell everyone to quit themselves
-                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId });
+                        var it = app.world.ecs.iterator(struct { p: C.PlayerId });
                         while (it.next()) |p| {
                             try s.send_message(p.p.conn, e.conn, .{ .event = e.event });
                         }
@@ -1222,7 +1222,7 @@ pub const AppState = struct {
                         });
                     },
                     .despawn_player => |id| {
-                        var it = try app.world.ecs.iterator(struct { p: C.PlayerId, entity: Entity });
+                        var it = app.world.ecs.iterator(struct { p: C.PlayerId, entity: Entity });
                         while (it.next()) |p| {
                             if (p.p.id == id.id) {
                                 try self.cmdbuf.delete(p.entity.*);
@@ -1230,7 +1230,7 @@ pub const AppState = struct {
                         }
                     },
                     .input => |pinput| {
-                        var pit = try app.world.ecs.iterator(struct {
+                        var pit = app.world.ecs.iterator(struct {
                             pid: C.PlayerId,
                             controller: C.Controller,
                             t: C.GlobalTransform,
@@ -1298,7 +1298,7 @@ pub const AppState = struct {
                             //     const T = struct { t: C.Transform, c: C.Collider };
                             //     var t_min: ?f32 = null;
                             //     var closest: ?ecs_mod.Type.pointer(T) = null;
-                            //     var it = try app.world.ecs.iterator(T);
+                            //     var it = app.world.ecs.iterator(T);
                             //     while (it.next()) |ent| {
                             //         if (!ent.r.flags.player and !ent.r.flags.pinned and mouse.left.pressed()) {
                             //             if (ent.c.raycast(ent.t, self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(1.1)), fwd)) |t| {
@@ -1394,7 +1394,7 @@ pub const AppState = struct {
                 self.physics.acctime -= self.physics.step * steps;
 
                 // {
-                //     var it = try app.world.ecs.iterator(struct { r: C.Rigidbody });
+                //     var it = app.world.ecs.iterator(struct { r: C.Rigidbody });
                 //     while (it.next()) |e| {
                 //         if (!e.r.flags.pinned) {
                 //             const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
@@ -1403,7 +1403,7 @@ pub const AppState = struct {
                 //     }
                 // }
 
-                var player_it = try app.world.ecs.iterator(struct { char: C.CharacterBody });
+                var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
                 while (player_it.next()) |e| {
                     app.telemetry.begin_sample(@src(), ".tick");
                     defer app.telemetry.end_sample();
@@ -1446,7 +1446,7 @@ pub const AppState = struct {
                     try app.world.step(self.physics.step * steps, @intFromFloat(steps));
 
                     self.physics.interpolation_acctime = self.physics.acctime;
-                    var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform });
+                    var it = app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform });
                     while (it.next()) |e| {
                         e.ft.transform = e.t.transform;
                     }
@@ -1459,7 +1459,7 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".alive_state");
             defer app.telemetry.end_sample();
 
-            var it = try app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });
+            var it = app.world.ecs.iterator(struct { id: Entity, ds: C.TimeDespawn });
             while (it.next()) |e| {
                 switch (e.ds.state) {
                     .alive => {
@@ -1563,7 +1563,7 @@ pub const AppState = struct {
                 }
             }.animate;
 
-            var it = try app.world.ecs.iterator(struct { m: C.AnimatedMesh });
+            var it = app.world.ecs.iterator(struct { m: C.AnimatedMesh });
             while (it.next()) |e| {
                 const a: *C.AnimatedMesh = e.m;
                 const armature = assets.ref(a.armature);
@@ -1581,7 +1581,7 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".add_missing_transforms");
             defer app.telemetry.end_sample();
 
-            var it = try app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
+            var it = app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
             while (it.next()) |e| {
                 var ee = it.current_entity_explorer();
                 if (ee.get_component(C.LastTransform) == null) {
@@ -1609,7 +1609,7 @@ pub const AppState = struct {
                 app.telemetry.begin_sample(@src(), ".static_mesh");
                 defer app.telemetry.end_sample();
 
-                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticMesh, b: C.BatchedRender });
+                var it = app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.StaticMesh, b: C.BatchedRender });
                 while (it.next()) |e| {
                     if (e.b.batch == null) {
                         e.b.batch = try instances.get_batch(e.m.mesh, e.m.material);
@@ -1627,7 +1627,7 @@ pub const AppState = struct {
                 app.telemetry.begin_sample(@src(), ".animated_mesh");
                 defer app.telemetry.end_sample();
 
-                var it = try app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedMesh, b: C.BatchedRender });
+                var it = app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform, m: C.AnimatedMesh, b: C.BatchedRender });
                 while (it.next()) |e| {
                     if (e.b.batch == null) {
                         e.b.batch = try instances.get_batch(e.m.mesh, e.m.material);
@@ -1666,7 +1666,7 @@ pub const AppState = struct {
 
             const player = try app.world.ecs.get(app.entities.player, struct { t: C.GlobalTransform });
             {
-                var it = try app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
+                var it = app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
                 while (it.next()) |e| {
                     try playing.samples_buf2.append(.{
                         .handle = e.sound.audio,
@@ -1677,7 +1677,7 @@ pub const AppState = struct {
                 }
             }
             {
-                var it = try app.world.ecs.iterator(struct { sound: C.StaticSound });
+                var it = app.world.ecs.iterator(struct { sound: C.StaticSound });
                 while (it.next()) |e| {
                     try playing.samples_buf2.append(.{
                         .handle = e.sound.audio,

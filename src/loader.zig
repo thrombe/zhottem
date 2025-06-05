@@ -9,9 +9,7 @@ const GltfInfo = assets_mod.Gltf.Info;
 
 const world_mod = @import("world.zig");
 const C = world_mod.C;
-
-const ecs_mod = @import("ecs.zig");
-const EntityComponentStore = ecs_mod.EntityComponentStore;
+const EntityComponentStore = world_mod.EntityComponentStore;
 
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
