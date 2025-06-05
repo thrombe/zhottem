@@ -381,11 +381,15 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
         // @clz()
         // @popCount()
         pub const Type = struct {
-            //  - it is a single vector instruction to do 'or' and 'and' with std.StaticBitSet(256).
-            //    source: i checked assembly: https://godbolt.org/z/MMaej9Yvx
             components: Components,
 
-            pub const Components = std.bit_set.ArrayBitSet(u64, 256);
+            pub const Components = std.StaticBitSet(component_list.len);
+
+            comptime {
+                //  - it is a single vector instruction to do 'or' and 'and' with std.StaticBitSet(256).
+                //    source: i checked assembly: https://godbolt.org/z/MMaej9Yvx
+                std.debug.assert(component_list.len <= 256);
+            }
 
             pub inline fn from(components: []const ComponentId) @This() {
                 var this: @This() = .{ .components = .initEmpty() };
