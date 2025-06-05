@@ -16,15 +16,13 @@ const ecs_mod = @import("ecs.zig");
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-pub const C = struct {
+pub const C = EntityComponentStore.component_decls;
+pub const EntityComponentStore = ecs_mod.EntityComponentStore(struct {
     pub usingnamespace Components;
-    pub const Entity = ecs_mod.Entity;
     pub const BodyId = Jphysics.BodyId;
     pub const CharacterBody = Jphysics.CharacterBody;
     pub const Camera = math.Camera;
-};
-pub const component_list: []const type = &utils_mod.type_array_from_struct_decls(C);
-pub const EntityComponentStore = ecs_mod.EntityComponentStore(component_list, *World);
+}, *World);
 
 pub const Jphysics = struct {
     pub const jolt = @import("jolt/jolt.zig");

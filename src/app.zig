@@ -34,14 +34,11 @@ const DescriptorPool = render_utils.DescriptorPool;
 const DescriptorSet = render_utils.DescriptorSet;
 const CmdBuffer = render_utils.CmdBuffer;
 
-const ecs_mod = @import("ecs.zig");
-const Entity = ecs_mod.Entity;
-
 const world_mod = @import("world.zig");
 const jolt = world_mod.Jphysics.jolt;
 const World = world_mod.World;
-const Components = world_mod.Components;
 const C = world_mod.C;
+const Entity = C.Entity;
 
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;

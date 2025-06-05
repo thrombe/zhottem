@@ -8,41 +8,19 @@ const utils_mod = @import("utils.zig");
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-pub const Entity = packed struct(u64) {
-    index: u32,
-    meta: Meta = .{},
-
-    const Meta = packed struct(u32) {
-        gen: u24 = 0,
-        // for Entity struct outside the ecs, flags will always be 0
-        // flags is there just for the ecs to track things.
-        // flags will be set to 0 outside just to avoid desync between
-        // actual Entity in ecs, and a random floating Entity struct
-        flags: Flags = .{},
-    };
-    const Flags = packed struct(u8) {
-        disabled: bool = false,
-        _reserved: u7 = 0,
-    };
-};
-
-pub const ArchetypeEntity = struct {
-    archetype: ArchetypeId,
-    // entity's index into archetype's components[i].items
-    entity_index: usize,
-};
-
-// index into self.archetypes
-pub const ArchetypeId = u32;
-
 // ECS lol
-pub fn EntityComponentStore(component_list: []const type, context_type: type) type {
+pub fn EntityComponentStore(_component_decls: type, context_type: type) type {
     return struct {
         // - [Building an ECS #1](https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742)
 
-        const component_sizes = get_component_sizes(component_list);
-        const component_vtables = get_component_vtables(component_list);
-        const entityid_component_id = get_component_id(Entity);
+        pub const component_decls = struct {
+            pub usingnamespace _component_decls;
+            pub const Entity = EntityId;
+        };
+        pub const component_list = &utils_mod.type_array_from_struct_decls(component_decls);
+        pub const component_sizes = get_component_sizes(component_list);
+        pub const component_vtables = get_component_vtables(component_list);
+        pub const entityid_component_id = get_component_id(EntityId);
 
         entities: Entities,
         archetypes: std.ArrayList(Archetype),
@@ -51,32 +29,6 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
 
         const Ecs = @This();
         const Ctx = context_type;
-        const ComponentVtable = struct {
-            name: []const u8,
-            deinit: ?*const fn (ptr: *anyopaque) void = null,
-            deinit_with_context: ?*const fn (ptr: *anyopaque, ctx: Ctx) void = null,
-
-            fn from(component: type) @This() {
-                const vtable: @This() = switch (component) {
-                    []const u8 => .{ .name = @typeName(component) },
-                    else => .{
-                        .name = @typeName(component),
-                        .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
-                        .deinit_with_context = if (comptime @hasDecl(component, "deinit_with_context")) @ptrCast(&component.deinit_with_context) else null,
-                    },
-                };
-
-                return vtable;
-            }
-
-            fn maybe_deinit(self: *const @This(), ptr: *anyopaque, ctx: Ctx) void {
-                if (self.deinit_with_context) |deinitfn| {
-                    deinitfn(ptr, ctx);
-                } else if (self.deinit) |deinitfn| {
-                    deinitfn(ptr);
-                }
-            }
-        };
 
         pub fn init(ctx: *anyopaque) !@This() {
             var self = @This(){
@@ -170,7 +122,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             return archeid;
         }
 
-        fn insert_reserved(self: *@This(), eid: Entity, components: anytype, ctx: Ctx) !void {
+        fn insert_reserved(self: *@This(), eid: EntityId, components: anytype, ctx: Ctx) !void {
             const component_ids = components_from(@TypeOf(components));
             const _typ = (Type{ .components = component_ids });
             const typ = _typ.inserted(entityid_component_id).?;
@@ -181,7 +133,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
 
             inline for (@typeInfo(@TypeOf(components)).@"struct".fields) |field| {
                 const f = @field(components, field.name);
-                if (comptime field.type == Entity) {
+                if (comptime field.type == EntityId) {
                     std.debug.assert(std.meta.eql(eid, f));
                 }
 
@@ -199,13 +151,13 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             }
         }
 
-        pub fn insert(self: *@This(), components: anytype, ctx: Ctx) !Entity {
+        pub fn insert(self: *@This(), components: anytype, ctx: Ctx) !EntityId {
             const eid = try self.entities.new();
             try self.insert_reserved(eid, components, ctx);
             return eid;
         }
 
-        pub fn get(self: *@This(), entity: Entity, comptime T: type) !Type.pointer(T) {
+        pub fn get(self: *@This(), entity: EntityId, comptime T: type) !Type.pointer(T) {
             var t: Type.pointer(T) = undefined;
 
             const ae = self.entities.get(entity) orelse return error.EntityNotFound;
@@ -227,17 +179,17 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
 
             if (archetype.count - 1 != ae.entity_index) {
                 const entity_ci = archetype.typ.index(entityid_component_id).?;
-                const val = std.mem.bytesAsValue(Entity, archetype.components[entity_ci].items[(archetype.count - 1) * entityid_component_id.size() ..]);
+                const val = std.mem.bytesAsValue(EntityId, archetype.components[entity_ci].items[(archetype.count - 1) * entityid_component_id.size() ..]);
                 self.entities.get(val.*).?.entity_index = ae.entity_index;
             }
         }
 
-        pub fn delete(self: *@This(), entity: Entity, ctx: Ctx) !void {
+        pub fn delete(self: *@This(), entity: EntityId, ctx: Ctx) !void {
             const ae = (try self.entities.pop(entity)) orelse return error.EntityNotFound;
             self.swap_remove(ae, ctx, true);
         }
 
-        pub fn add_component(self: *@This(), entity: Entity, component: anytype, ctx: Ctx) !void {
+        pub fn add_component(self: *@This(), entity: EntityId, component: anytype, ctx: Ctx) !void {
             const compid = get_component_id(@TypeOf(component));
             const ae = self.entities.get(entity) orelse return error.EntityNotFound;
 
@@ -285,7 +237,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             }
         }
 
-        pub fn remove_component(self: *@This(), entity: Entity, component: type, ctx: Ctx) !void {
+        pub fn remove_component(self: *@This(), entity: EntityId, component: type, ctx: Ctx) !void {
             const compid = get_component_id(component);
             const ae = self.entities.get(entity) orelse return error.EntityNotFound;
             const archeid = blk: {
@@ -329,7 +281,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             }
         }
 
-        pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype, ctx: Ctx) !void {
+        pub fn overwrite_component(self: *@This(), entity: EntityId, component: anytype, ctx: Ctx) !void {
             const compid = get_component_id(@TypeOf(component));
             const ae = self.entities.get(entity) orelse return error.EntityNotFound;
             const archetype = &self.archetypes.items[ae.archetype];
@@ -349,7 +301,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             return q.iterator();
         }
 
-        pub fn explorer(self: *@This(), entity: Entity) !EntityExplorer {
+        pub fn explorer(self: *@This(), entity: EntityId) !EntityExplorer {
             const ae = self.entities.get(entity) orelse return error.EntityNotFound;
             const archetype = &self.archetypes.items[ae.archetype];
 
@@ -364,6 +316,24 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             return CmdBuf.init(self);
         }
 
+        pub const EntityId = packed struct(u64) {
+            index: u32,
+            meta: Meta = .{},
+
+            const Meta = packed struct(u32) {
+                gen: u24 = 0,
+                // for Entity struct outside the ecs, flags will always be 0
+                // flags is there just for the ecs to track things.
+                // flags will be set to 0 outside just to avoid desync between
+                // actual Entity in ecs, and a random floating Entity struct
+                flags: Flags = .{},
+            };
+            const Flags = packed struct(u8) {
+                disabled: bool = false,
+                _reserved: u7 = 0,
+            };
+        };
+
         // represents 1 component
         pub const ComponentId = packed struct {
             id: u16,
@@ -374,6 +344,55 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
 
             pub fn size(self: @This()) usize {
                 return @intCast(component_sizes[self.id]);
+            }
+        };
+
+        // index into self.archetypes
+        pub const ArchetypeId = u32;
+        pub const ArchetypeEntity = struct {
+            archetype: ArchetypeId,
+            // entity's index into archetype's components[i].items
+            entity_index: usize,
+        };
+        // arrayhashmap cuz ecs.iterate() needs to iterate this. (?)
+        const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
+            pub fn hash(ctx: @This(), key: Type) u32 {
+                _ = ctx;
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update(std.mem.asBytes(&key));
+                return @truncate(hasher.final());
+            }
+            pub fn eql(ctx: @This(), a: Type, b: Type, b_index: usize) bool {
+                _ = b_index;
+                _ = ctx;
+                return a.components.eql(b.components);
+            }
+        }, true);
+
+        pub const ComponentVtable = struct {
+            name: []const u8,
+            deinit: ?*const fn (ptr: *anyopaque) void = null,
+            deinit_with_context: ?*const fn (ptr: *anyopaque, ctx: Ctx) void = null,
+
+            fn from(component: type) @This() {
+                const vtable: @This() = switch (component) {
+                    []const u8 => .{ .name = @typeName(component) },
+                    else => .{
+                        .name = @typeName(component),
+                        .deinit = if (comptime @hasDecl(component, "deinit")) @ptrCast(&component.deinit) else null,
+                        .deinit_with_context = if (comptime @hasDecl(component, "deinit_with_context")) @ptrCast(&component.deinit_with_context) else null,
+                    },
+                };
+
+                return vtable;
+            }
+
+            fn maybe_deinit(self: *const @This(), ptr: *anyopaque, ctx: Ctx) void {
+                if (self.deinit_with_context) |deinitfn| {
+                    deinitfn(ptr, ctx);
+                } else if (self.deinit) |deinitfn| {
+                    deinitfn(ptr);
+                }
             }
         };
 
@@ -541,7 +560,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
 
         pub const Entities = struct {
             values: std.ArrayList(struct {
-                meta: Entity.Meta = .{},
+                meta: EntityId.Meta = .{},
                 aid: ArchetypeEntity,
             }),
             free_list: utils_mod.Deque(u32),
@@ -558,7 +577,7 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                 self.free_list.deinit();
             }
 
-            pub fn new(self: *@This()) !Entity {
+            pub fn new(self: *@This()) !EntityId {
                 if (self.free_list.pop_front()) |index| {
                     const e = &self.values.items[index];
                     // we don't need protection against accessing null values right? right?
@@ -576,19 +595,19 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                 }
             }
 
-            pub fn set(self: *@This(), entity: Entity, aid: ArchetypeEntity) !void {
+            pub fn set(self: *@This(), entity: EntityId, aid: ArchetypeEntity) !void {
                 const e = &self.values.items[entity.index];
                 if (e.meta.gen != entity.meta.gen) return error.GenerationMismatch;
                 e.aid = aid;
             }
 
-            pub fn get(self: *@This(), entity: Entity) ?*ArchetypeEntity {
+            pub fn get(self: *@This(), entity: EntityId) ?*ArchetypeEntity {
                 const e = &self.values.items[entity.index];
                 if (e.meta.gen != entity.meta.gen) return null;
                 return &e.aid;
             }
 
-            pub fn pop(self: *@This(), entity: Entity) !?ArchetypeEntity {
+            pub fn pop(self: *@This(), entity: EntityId) !?ArchetypeEntity {
                 const e = &self.values.items[entity.index];
                 if (entity.meta.gen != e.meta.gen) return null;
                 const aid = e.aid;
@@ -603,20 +622,6 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                 return self.values.items.len;
             }
         };
-        // arrayhashmap cuz ecs.iterate() needs to iterate this. (?)
-        const ArchetypeMap = std.ArrayHashMap(Type, ArchetypeId, struct {
-            pub fn hash(ctx: @This(), key: Type) u32 {
-                _ = ctx;
-                var hasher = std.hash.Wyhash.init(0);
-                hasher.update(std.mem.asBytes(&key));
-                return @truncate(hasher.final());
-            }
-            pub fn eql(ctx: @This(), a: Type, b: Type, b_index: usize) bool {
-                _ = b_index;
-                _ = ctx;
-                return a.components.eql(b.components);
-            }
-        }, true);
 
         pub const EntityExplorer = struct {
             // for queries like (does this entity have this component)
@@ -812,24 +817,24 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
             } = .{},
 
             const Inserted = std.ArrayListUnmanaged(struct {
-                entity: Entity,
+                entity: EntityId,
                 bundle: *anyopaque,
-                insertfn: *const fn (*Ecs, Entity, *anyopaque, Ctx) anyerror!void,
+                insertfn: *const fn (*Ecs, EntityId, *anyopaque, Ctx) anyerror!void,
             });
-            const Deleted = std.ArrayListUnmanaged(Entity);
+            const Deleted = std.ArrayListUnmanaged(EntityId);
             const Added = std.ArrayListUnmanaged(struct {
-                entity: Entity,
+                entity: EntityId,
                 component: *anyopaque,
-                addfn: *const fn (*Ecs, Entity, *anyopaque, Ctx) anyerror!void,
+                addfn: *const fn (*Ecs, EntityId, *anyopaque, Ctx) anyerror!void,
             });
             const Overwritten = std.ArrayListUnmanaged(struct {
-                entity: Entity,
+                entity: EntityId,
                 component: *anyopaque,
-                overwritefn: *const fn (*Ecs, Entity, *anyopaque, Ctx) anyerror!void,
+                overwritefn: *const fn (*Ecs, EntityId, *anyopaque, Ctx) anyerror!void,
             });
             const Removed = std.ArrayListUnmanaged(struct {
-                entity: Entity,
-                rmfn: *const fn (*Ecs, Entity, Ctx) anyerror!void,
+                entity: EntityId,
+                rmfn: *const fn (*Ecs, EntityId, Ctx) anyerror!void,
             });
 
             pub fn init(ecs: *Ecs) @This() {
@@ -880,69 +885,69 @@ pub fn EntityComponentStore(component_list: []const type, context_type: type) ty
                 return mem;
             }
 
-            pub fn reserve(self: *@This()) !Entity {
+            pub fn reserve(self: *@This()) !EntityId {
                 return try self.ecs.entities.new();
             }
 
-            pub fn insert(self: *@This(), components: anytype) !Entity {
+            pub fn insert(self: *@This(), components: anytype) !EntityId {
                 const e = try self.reserve();
                 try self.insert_reserved(e, components);
                 return e;
             }
 
-            pub fn insert_reserved(self: *@This(), e: Entity, components: anytype) !void {
+            pub fn insert_reserved(self: *@This(), e: EntityId, components: anytype) !void {
                 const alloc = self.alloc.allocator();
 
                 try self.impl.inserted.append(alloc, .{
                     .entity = e,
                     .bundle = @ptrCast(try self.allocated(components)),
                     .insertfn = @ptrCast(&(struct {
-                        fn insert(ecs: *Ecs, entity: Entity, comp: *@TypeOf(components), ctx: Ctx) anyerror!void {
+                        fn insert(ecs: *Ecs, entity: EntityId, comp: *@TypeOf(components), ctx: Ctx) anyerror!void {
                             try ecs.insert_reserved(entity, comp.*, ctx);
                         }
                     }).insert),
                 });
             }
 
-            pub fn add_component(self: *@This(), entity: Entity, component: anytype) !void {
+            pub fn add_component(self: *@This(), entity: EntityId, component: anytype) !void {
                 const alloc = self.alloc.allocator();
                 try self.impl.added_components.append(alloc, .{
                     .entity = entity,
                     .component = @ptrCast(try self.allocated(component)),
                     .addfn = @ptrCast(&(struct {
-                        fn add_component(ecs: *Ecs, e: Entity, comp: *@TypeOf(component), ctx: Ctx) !void {
+                        fn add_component(ecs: *Ecs, e: EntityId, comp: *@TypeOf(component), ctx: Ctx) !void {
                             try ecs.add_component(e, comp.*, ctx);
                         }
                     }).add_component),
                 });
             }
 
-            pub fn overwrite_component(self: *@This(), entity: Entity, component: anytype) !void {
+            pub fn overwrite_component(self: *@This(), entity: EntityId, component: anytype) !void {
                 const alloc = self.alloc.allocator();
                 try self.impl.overwritten_components.append(alloc, .{
                     .entity = entity,
                     .component = @ptrCast(try self.allocated(component)),
                     .overwritefn = @ptrCast(&(struct {
-                        fn overwrite_component(ecs: *Ecs, e: Entity, comp: *@TypeOf(component), ctx: Ctx) !void {
+                        fn overwrite_component(ecs: *Ecs, e: EntityId, comp: *@TypeOf(component), ctx: Ctx) !void {
                             try ecs.overwrite_component(e, comp.*, ctx);
                         }
                     }).overwrite_component),
                 });
             }
 
-            pub fn remove_component(self: *@This(), entity: Entity, component: type) !void {
+            pub fn remove_component(self: *@This(), entity: EntityId, component: type) !void {
                 const alloc = self.alloc.allocator();
                 try self.impl.removed_components.append(alloc, .{
                     .entity = entity,
                     .rmfn = @ptrCast(&(struct {
-                        fn remove_component(ecs: *Ecs, e: Entity, ctx: Ctx) !void {
+                        fn remove_component(ecs: *Ecs, e: EntityId, ctx: Ctx) !void {
                             try ecs.remove_component(e, component, ctx);
                         }
                     }).remove_component),
                 });
             }
 
-            pub fn delete(self: *@This(), entity: Entity) !void {
+            pub fn delete(self: *@This(), entity: EntityId) !void {
                 try self.impl.deleted.append(self.alloc.allocator(), entity);
             }
         };
