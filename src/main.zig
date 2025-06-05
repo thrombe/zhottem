@@ -356,13 +356,13 @@ const HotApp = struct {
 
         self.timer = try std.time.Timer.start();
 
-        self.app_state = try AppState.init(self.engine.window, self.timer.read(), &self.app);
-        errdefer self.app_state.deinit();
-
         self.gui_state = GuiState{};
 
-        self.app = try App.init(&self.engine, &self.app_state);
+        self.app = try App.init(&self.engine);
         errdefer self.app.deinit(&self.engine.graphics.device);
+
+        self.app_state = try AppState.init(self.engine.window, self.timer.read(), &self.app);
+        errdefer self.app_state.deinit();
 
         self.renderer_state = try RendererState.init(&self.app, &self.engine, &self.app_state);
         errdefer self.renderer_state.deinit(&self.engine.graphics.device);
@@ -428,7 +428,7 @@ const HotApp = struct {
         try self.gui_state.tick(&self.app, &self.app_state, lap);
         try self.gui_renderer.render_end(&self.engine.graphics.device, &self.renderer_state.swapchain);
 
-        try self.app_state.tick(lap, &self.engine, &self.app);
+        try self.app_state.tick(lap, &self.engine, &self.app, &self.renderer_state);
 
         const present = try self.app.present(&self.renderer_state, &self.app_state, &self.gui_renderer, &self.engine);
         // IDK: this never triggers :/

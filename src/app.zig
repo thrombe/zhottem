@@ -58,7 +58,6 @@ pub const App = @This();
 
 world: World,
 
-uniforms: UniformBuffer,
 screen_image: Image,
 depth_image: Image,
 resources: ResourceManager,
@@ -74,13 +73,8 @@ net_client: *NetworkingContext.Client,
 texture: Image,
 
 handles: Handles,
-entities: Entities,
 
 telemetry: Telemetry,
-
-const Entities = struct {
-    player: Entity,
-};
 
 const Handles = struct {
     material: struct {
@@ -175,9 +169,11 @@ const Handles = struct {
     }
 };
 
-pub fn init(engine: *Engine, app_state: *AppState) !@This() {
+pub fn init(engine: *Engine) !@This() {
     var ctx = &engine.graphics;
     const device = &ctx.device;
+
+    const res = try engine.window.get_res();
 
     var telemetry = try utils_mod.Tracy.init();
     errdefer telemetry.deinit();
@@ -196,8 +192,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .format = .r16g16b16a16_sfloat,
         .layout = .color_attachment_optimal,
         .extent = .{
-            .width = app_state.monitor_rez.width,
-            .height = app_state.monitor_rez.height,
+            .width = res.width,
+            .height = res.height,
             .depth = 1,
         },
         .usage = .{
@@ -216,8 +212,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .format = .d32_sfloat,
         .layout = .depth_stencil_attachment_optimal,
         .extent = .{
-            .width = app_state.monitor_rez.width,
-            .height = app_state.monitor_rez.height,
+            .width = res.width,
+            .height = res.height,
             .depth = 1,
         },
         .usage = .{
@@ -263,107 +259,6 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     }, std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(mandlebulb.buffer)));
     errdefer gpu_img.deinit(device);
 
-    var cmdbuf = world.ecs.deferred();
-    defer cmdbuf.deinit();
-
-    var t: C.GlobalTransform = .{};
-    t.transform = .{
-        .pos = .{ .y = 5 },
-    };
-    const player_id = try cmdbuf.insert(.{
-        try C.Name.from("player"),
-        C.Camera.init(
-            C.Camera.constants.basis.vulkan,
-            C.Camera.constants.basis.opengl,
-        ),
-        C.Controller{},
-        t,
-        C.Shooter{
-            .audio = handles.audio.shot,
-            .ticker = try utils_mod.Ticker.init(std.time.ns_per_ms * 100),
-            .hold = true,
-        },
-        C.PlayerId{ .id = 0, .conn = 0 },
-        try world.phy.add_character(.{
-            .pos = t.transform.pos,
-            .rot = t.transform.rotation,
-        }),
-    });
-
-    _ = try loader_mod.spawn_node(
-        &world,
-        &assets,
-        &cmdbuf,
-        handles.gltf.library,
-        "background_quad",
-        .{},
-        handles.material.background,
-    );
-    _ = try loader_mod.spawn_node(
-        &world,
-        &assets,
-        &cmdbuf,
-        handles.gltf.library,
-        "ground",
-        .{},
-        handles.material.models,
-    );
-    _ = try loader_mod.spawn_node(
-        &world,
-        &assets,
-        &cmdbuf,
-        handles.gltf.library,
-        "wall",
-        .{},
-        handles.material.models,
-    );
-    _ = try loader_mod.spawn_node(
-        &world,
-        &assets,
-        &cmdbuf,
-        handles.gltf.library,
-        "castle",
-        .{},
-        handles.material.models,
-    );
-
-    for (0..10) |x| {
-        for (0..10) |z| {
-            _ = try loader_mod.spawn_node(
-                &world,
-                &assets,
-                &cmdbuf,
-                handles.gltf.library,
-                "person_ig",
-                .{ .pos = .{ .x = cast(f32, x) + 10, .z = cast(f32, z) + 10 }, .scale = .splat(0.5) },
-                handles.material.models,
-            );
-        }
-    }
-
-    // t.transform = .{
-    //     .pos = .{ .y = -5.5 },
-    //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
-    // };
-    // _ = try cmdbuf.insert(.{
-    //     try C.Name.from("floor"),
-    //     t,
-    //     C.StaticMesh{ .mesh = handles.mesh.plane, .material = handles.material.models },
-    //     C.BatchedRender{},
-    //     try world.phy.add_body(.{
-    //         .shape = .{ .box = .{ .size = t.transform.scale } },
-    //         .motion_type = .static,
-    //         .friction = 0.4,
-    //         .rotation = t.transform.rotation,
-    //     }),
-    // });
-
-    try cmdbuf.apply(@ptrCast(&world));
-
-    const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, t: C.GlobalTransform, camera: C.Camera, controller: C.Controller });
-    var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, &player.t.transform, player.camera, player.controller), ctx);
-    errdefer uniforms.deinit(device);
-
     var resources = try ResourceManager.init(assets, engine, cmd_pool);
     errdefer resources.deinit(device);
 
@@ -380,42 +275,8 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     errdefer audio.deinit() catch |e| utils_mod.dump_error(e);
     try audio.start();
 
-    std.debug.print("waiting to connect to server...\n", .{});
-    try net_client.wait_for_connection();
-    std.debug.print("connected to server...\n", .{});
-    try net_client.send_message(.{
-        .flags = .{ .reliable = true },
-        .event = .{ .join = {} },
-    });
-    while (!net_client.messages.can_recv()) {
-        if (net_server) |s| if (s.messages.try_recv()) |msg| switch (msg.event) {
-            .join => try s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } }),
-            else => @panic("unexpected message"),
-        };
-        try net_ctx.tick();
-        std.Thread.sleep(std.time.ns_per_ms * net_ctx.ctx.options.tick_fps_inv);
-    }
-    std.debug.print("waiting for server message...\n", .{});
-
-    const msg = net_client.messages.try_recv().?;
-    switch (msg.event) {
-        .setid => |e| {
-            player.pid.id = e.id;
-            player.pid.conn = msg.conn;
-
-            try net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
-                .x = player.t.transform.pos.x,
-                .y = player.t.transform.pos.y,
-                .z = player.t.transform.pos.z,
-            } } } });
-        },
-        else => @panic("unexpected message"),
-    }
-    std.debug.print("starting game...\n", .{});
-
     return @This(){
         .world = world,
-        .uniforms = uniforms,
         .screen_image = screen,
         .depth_image = depth,
         .resources = resources,
@@ -433,16 +294,12 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
         .texture = gpu_img,
 
         .handles = handles,
-        .entities = .{
-            .player = player_id,
-        },
     };
 }
 
 pub fn deinit(self: *@This(), device: *Device) void {
     defer device.destroyCommandPool(self.command_pool, null);
     defer self.world.deinit();
-    defer self.uniforms.deinit(device);
     defer self.screen_image.deinit(device);
     defer self.depth_image.deinit(device);
     defer self.resources.deinit(device);
@@ -504,7 +361,7 @@ pub fn present(
         self.telemetry.begin_sample(@src(), ".gpu_buffer_uploads");
         defer self.telemetry.end_sample();
 
-        try self.uniforms.upload(&ctx.device);
+        try dynamic_state.uniforms.upload(&ctx.device);
         const updates = try self.resources.instances.update(ctx, self.command_pool);
         if (updates.buffer_invalid) {
             _ = app_state.shader_fuse.fuse();
@@ -580,6 +437,9 @@ pub fn present(
 }
 
 pub const RendererState = struct {
+    // TODO: move uniforms' Buffer into app.resources
+    //  and store the []u8 inner buffer either in appstate
+    uniforms: UniformBuffer,
     swapchain: Swapchain,
     cmdbuffer: CmdBuffer,
     descriptor_set: DescriptorSet,
@@ -634,7 +494,16 @@ pub const RendererState = struct {
             try pipelines.put(handle, undefined);
         }
 
+        const player = try app.world.ecs.get(app_state.entities.player, struct {
+            t: C.GlobalTransform,
+            camera: C.Camera,
+            controller: C.Controller,
+        });
+        var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, &player.t.transform, player.camera, player.controller), ctx);
+        errdefer uniforms.deinit(device);
+
         var self: @This() = .{
+            .uniforms = uniforms,
             .stages = stages,
             .pipelines = pipelines,
             .descriptor_set = undefined,
@@ -683,7 +552,7 @@ pub const RendererState = struct {
 
         var desc_set_builder = app.descriptor_pool.set_builder();
         defer desc_set_builder.deinit();
-        try desc_set_builder.add(&app.uniforms, resources_mod.UniformBinds.camera.bind());
+        try desc_set_builder.add(&self.uniforms, resources_mod.UniformBinds.camera.bind());
         try desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
         try app.resources.add_binds(&desc_set_builder);
         var desc_set = try desc_set_builder.build(device);
@@ -775,6 +644,7 @@ pub const RendererState = struct {
     pub fn deinit(self: *@This(), device: *Device) void {
         try self.swapchain.waitForAllFences(device);
 
+        defer self.uniforms.deinit(device);
         defer self.swapchain.deinit(device);
         defer self.cmdbuffer.deinit(device);
 
@@ -848,19 +718,157 @@ pub const AppState = struct {
 
     client_count: u8 = 0,
 
+    entities: Entities,
+
+    const Entities = struct {
+        player: Entity,
+    };
+
     pub fn init(window: *Engine.Window, start_ts: u64, app: *App) !@This() {
         const mouse = window.poll_mouse();
         const sze = try window.get_res();
 
-        const rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        var cmdbuf = app.world.ecs.deferred();
+        errdefer cmdbuf.deinit();
+
+        var t: C.GlobalTransform = .{};
+        t.transform = .{
+            .pos = .{ .y = 5 },
+        };
+        const player_id = try cmdbuf.insert(.{
+            try C.Name.from("player"),
+            C.Camera.init(
+                C.Camera.constants.basis.vulkan,
+                C.Camera.constants.basis.opengl,
+            ),
+            C.Controller{},
+            t,
+            C.Shooter{
+                .audio = app.handles.audio.shot,
+                .ticker = try utils_mod.Ticker.init(std.time.ns_per_ms * 100),
+                .hold = true,
+            },
+            C.PlayerId{ .id = 0, .conn = 0 },
+            try app.world.phy.add_character(.{
+                .pos = t.transform.pos,
+                .rot = t.transform.rotation,
+            }),
+        });
+
+        _ = try loader_mod.spawn_node(
+            &app.world,
+            &app.resources.assets,
+            &cmdbuf,
+            app.handles.gltf.library,
+            "background_quad",
+            .{},
+            app.handles.material.background,
+        );
+        _ = try loader_mod.spawn_node(
+            &app.world,
+            &app.resources.assets,
+            &cmdbuf,
+            app.handles.gltf.library,
+            "ground",
+            .{},
+            app.handles.material.models,
+        );
+        _ = try loader_mod.spawn_node(
+            &app.world,
+            &app.resources.assets,
+            &cmdbuf,
+            app.handles.gltf.library,
+            "wall",
+            .{},
+            app.handles.material.models,
+        );
+        _ = try loader_mod.spawn_node(
+            &app.world,
+            &app.resources.assets,
+            &cmdbuf,
+            app.handles.gltf.library,
+            "castle",
+            .{},
+            app.handles.material.models,
+        );
+
+        for (0..10) |x| {
+            for (0..10) |z| {
+                _ = try loader_mod.spawn_node(
+                    &app.world,
+                    &app.resources.assets,
+                    &cmdbuf,
+                    app.handles.gltf.library,
+                    "person_ig",
+                    .{ .pos = .{ .x = cast(f32, x) + 10, .z = cast(f32, z) + 10 }, .scale = .splat(0.5) },
+                    app.handles.material.models,
+                );
+            }
+        }
+
+        // t.transform = .{
+        //     .pos = .{ .y = -5.5 },
+        //     .scale = .{ .x = 50, .y = 0.1, .z = 50 },
+        // };
+        // _ = try cmdbuf.insert(.{
+        //     try C.Name.from("floor"),
+        //     t,
+        //     C.StaticMesh{ .mesh = handles.mesh.plane, .material = handles.material.models },
+        //     C.BatchedRender{},
+        //     try world.phy.add_body(.{
+        //         .shape = .{ .box = .{ .size = t.transform.scale } },
+        //         .motion_type = .static,
+        //         .friction = 0.4,
+        //         .rotation = t.transform.rotation,
+        //     }),
+        // });
+
+        try cmdbuf.apply(&app.world);
+
+        std.debug.print("waiting to connect to server...\n", .{});
+        try app.net_client.wait_for_connection();
+        std.debug.print("connected to server...\n", .{});
+        try app.net_client.send_message(.{
+            .flags = .{ .reliable = true },
+            .event = .{ .join = {} },
+        });
+        while (!app.net_client.messages.can_recv()) {
+            if (app.net_server) |s| if (s.messages.try_recv()) |msg| switch (msg.event) {
+                .join => try s.send_message(msg.conn, msg.conn, .{ .event = .{ .setid = .{ .id = 0 } } }),
+                else => @panic("unexpected message"),
+            };
+            try app.net_ctx.tick();
+            std.Thread.sleep(std.time.ns_per_ms * app.net_ctx.ctx.options.tick_fps_inv);
+        }
+        std.debug.print("waiting for server message...\n", .{});
+
+        const msg = app.net_client.messages.try_recv().?;
+        switch (msg.event) {
+            .setid => |e| {
+                const player = try app.world.ecs.get(player_id, struct { pid: C.PlayerId, t: C.GlobalTransform });
+                player.pid.id = e.id;
+                player.pid.conn = msg.conn;
+
+                try app.net_client.send_message(.{ .event = .{ .spawn_player = .{ .id = e.id, .pos = .{
+                    .x = player.t.transform.pos.x,
+                    .y = player.t.transform.pos.y,
+                    .z = player.t.transform.pos.z,
+                } } } });
+            },
+            else => @panic("unexpected message"),
+        }
+        std.debug.print("starting game...\n", .{});
 
         return .{
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
-            .rng = rng,
+            .rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp())),
             .uniform_buffer = try allocator.alloc(u8, 0),
             .ts = start_ts,
-            .cmdbuf = app.world.ecs.deferred(),
+            .cmdbuf = cmdbuf,
+            .entities = .{
+                .player = player_id,
+            },
         };
     }
 
@@ -879,7 +887,7 @@ pub const AppState = struct {
         _ = self.cmdbuf_fuse.fuse();
     }
 
-    pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
+    pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App, render_state: *RendererState) !void {
         app.telemetry.begin_sample(@src(), "app_state.tick");
         defer app.telemetry.end_sample();
 
@@ -891,7 +899,7 @@ pub const AppState = struct {
 
         var input = window.input();
 
-        var pexp = try app.world.ecs.explorer(app.entities.player);
+        var pexp = try app.world.ecs.explorer(self.entities.player);
         const camera = pexp.get_component(C.Camera).?;
         const pid = pexp.get_component(C.PlayerId).?;
         const player_id = pid.id;
@@ -1506,7 +1514,7 @@ pub const AppState = struct {
 
             playing.samples_buf2.clearRetainingCapacity();
 
-            const player = try app.world.ecs.get(app.entities.player, struct { t: C.GlobalTransform });
+            const player = try app.world.ecs.get(self.entities.player, struct { t: C.GlobalTransform });
             {
                 var it = app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
                 while (it.next()) |e| {
@@ -1536,13 +1544,13 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".camera");
             defer app.telemetry.end_sample();
 
-            const player = try app.world.ecs.get(app.entities.player, struct {
+            const player = try app.world.ecs.get(self.entities.player, struct {
                 camera: C.Camera,
                 controller: C.Controller,
                 lt: C.LastTransform,
                 t: C.GlobalTransform,
             });
-            app.uniforms.uniform_buffer = try self.uniforms(
+            render_state.uniforms.uniform_buffer = try self.uniforms(
                 window,
                 &self.physics.interpolated(player.lt, player.t),
                 player.camera,
@@ -1641,7 +1649,7 @@ pub const GuiState = struct {
     pub fn tick(self: *@This(), app: *App, state: *AppState, lap: u64) !void {
         const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        const player = try app.world.ecs.get(app.entities.player, struct { controller: C.Controller });
+        const player = try app.world.ecs.get(state.entities.player, struct { controller: C.Controller });
 
         self.frame_times_i += 1;
         self.frame_times_i = @rem(self.frame_times_i, self.frame_times.len);
