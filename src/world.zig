@@ -11,6 +11,8 @@ const Engine = @import("engine.zig");
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
 
+const assets_mod = @import("assets.zig");
+
 const ecs_mod = @import("ecs.zig");
 
 const main = @import("main.zig");
@@ -796,6 +798,164 @@ pub const Jphysics = struct {
         };
     };
 };
+
+pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
+    const c = Engine.c;
+
+    // owned by ResourceManager.CpuResources
+    samples: []assets_mod.Wav,
+    frame_count: u64 = 0,
+    volume: f32 = 0.1,
+
+    playing: struct {
+        // only swap in callback.
+        // self.samples accessed only in callback.
+        // other thread can fill only when not fused.
+        // callback can only swap when fused
+
+        swap_fuse: utils_mod.Fuse = .{},
+
+        // NOTE: only audio thread may lock
+        lock: utils_mod.Fuse = .{},
+
+        samples: Samples,
+        samples_buf2: Samples,
+
+        fn fused_swap(self: *@This()) void {
+            _ = self.lock.fuse();
+            defer _ = self.lock.unfuse();
+
+            if (self.swap_fuse.unfuse()) {
+                std.mem.swap(Samples, &self.samples, &self.samples_buf2);
+            }
+        }
+    },
+
+    pub fn init(samples: []assets_mod.Wav) !@This() {
+        return @This(){
+            .samples = samples,
+            .playing = .{
+                .samples = try Samples.initCapacity(allocator.*, 200),
+                .samples_buf2 = try Samples.initCapacity(allocator.*, 200),
+            },
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        _ = self.playing.lock.fuse();
+        defer _ = self.playing.lock.unfuse();
+
+        self.playing.samples.deinit();
+        self.playing.samples_buf2.deinit();
+    }
+
+    pub fn callback(
+        self: *AudioPlayer.CallbackContext,
+        output: [][2]f32,
+        timeinfo: *c.PaStreamCallbackTimeInfo,
+        flags: c.PaStreamCallbackFlags,
+    ) !void {
+        _ = flags;
+        _ = timeinfo;
+
+        defer self.ctx.frame_count += output.len;
+
+        @memset(output, [2]f32{ 0, 0 });
+
+        self.ctx.playing.fused_swap();
+        for (self.ctx.playing.samples.items) |*ps| {
+            _ = ps.fill(self.ctx.volume, self.ctx.frame_count, self.ctx.samples, output);
+        }
+    }
+
+    pub const Samples = std.ArrayList(PlayingSample);
+    pub const PlayingSample = struct {
+        handle: ResourceManager.AudioHandle,
+        start_frame: u64,
+
+        // relative position of the sound. (listener +z fwd, +x right, -y up)
+        pos: Vec3,
+        volume: f32,
+
+        // the float values supplied to audio apis is the instantaneous amplitude of the wave
+        // power is proportional to the square of amplitude
+        // intensity is power carried by wave per unit area (perp to the area)
+        // percieved loudness is logarithmic in power
+        // delta dB = 10*log10(p2/p1)
+        // "twice as loud" is a diff of 10dB
+        //
+        // with distance - sound's intensity decreases (as area increases)
+        // so twice as far means a quarter the intensity
+        // which means quarter the power (per unit area (which is what we end up hearing ig. cuz the ear drums are constant in size))
+        // which means we just divide the amplitude by 2 to account for the distance
+
+        pub fn fill(self: *@This(), volume: f32, frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
+            const min = 1.0;
+            const max = 100.0;
+            const original_dist = self.pos.length();
+            const dist = @min(max, @max(min, original_dist));
+
+            const att = volume * self.volume / dist;
+
+            const right_dot = 0.5 * if (original_dist > 0.01) self.pos.x / original_dist else 0.0;
+            var left = 0.5 - right_dot;
+            var right = 0.5 + right_dot;
+
+            // rescale in [0, 1]
+            left *= 2;
+            right *= 2;
+
+            // 20% audio always leaks into the other ear
+            left = left * 0.8 + 0.2;
+            right = right * 0.8 + 0.2;
+
+            // if close, we leak more
+            left = @min(1.0, left + 1.0 / @max(0.01, original_dist));
+            right = @min(1.0, right + 1.0 / @max(0.01, original_dist));
+
+            const sample = samples[self.handle.index].data;
+            var index = frame_count - self.start_frame;
+            for (output) |*oframe| {
+                defer index += 1;
+
+                if (sample.len <= index) {
+                    return true;
+                }
+
+                const frame = sample[index];
+                oframe[0] = std.math.clamp(oframe[0] + frame[0] * left * att, -1, 1);
+                oframe[1] = std.math.clamp(oframe[1] + frame[1] * right * att, -1, 1);
+            }
+
+            return false;
+        }
+    };
+});
+
+pub const AudioRecorder = Engine.Audio.Stream(.input, struct {
+    const c = Engine.c;
+
+    recorded: utils_mod.Channel([256]f32),
+
+    pub fn callback(
+        self: *AudioRecorder.CallbackContext,
+        input: []const f32,
+        timeinfo: *c.PaStreamCallbackTimeInfo,
+        flags: c.PaStreamCallbackFlags,
+    ) !void {
+        _ = flags;
+        _ = timeinfo;
+        _ = self;
+
+        var buf: [256]f32 = undefined;
+        @memcpy(&buf, input);
+        // try self.ctx.recorded.send(buf);
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.recorded.deinit();
+    }
+});
 
 pub const World = struct {
     ecs: EntityComponentStore,

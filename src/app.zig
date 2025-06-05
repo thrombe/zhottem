@@ -64,8 +64,8 @@ depth_image: Image,
 resources: ResourceManager,
 descriptor_pool: DescriptorPool,
 command_pool: vk.CommandPool,
-recorder: AudioRecorder,
-audio: AudioPlayer,
+recorder: world_mod.AudioRecorder,
+audio: world_mod.AudioPlayer,
 
 net_ctx: NetworkingContext,
 net_server: ?*NetworkingContext.Server = null,
@@ -175,155 +175,6 @@ const Handles = struct {
     }
 };
 
-const AudioPlayer = Engine.Audio.Stream(.output, struct {
-    // owned by ResourceManager.CpuResources
-    samples: []assets_mod.Wav,
-    frame_count: u64 = 0,
-    volume: f32 = 0.1,
-
-    playing: struct {
-        // only swap in callback.
-        // self.samples accessed only in callback.
-        // other thread can fill only when not fused.
-        // callback can only swap when fused
-
-        swap_fuse: Fuse = .{},
-
-        // NOTE: only audio thread may lock
-        lock: Fuse = .{},
-
-        samples: Samples,
-        samples_buf2: Samples,
-
-        fn fused_swap(self: *@This()) void {
-            _ = self.lock.fuse();
-            defer _ = self.lock.unfuse();
-
-            if (self.swap_fuse.unfuse()) {
-                std.mem.swap(Samples, &self.samples, &self.samples_buf2);
-            }
-        }
-    },
-
-    pub fn init(samples: []assets_mod.Wav) !@This() {
-        return @This(){
-            .samples = samples,
-            .playing = .{
-                .samples = try Samples.initCapacity(allocator.*, 200),
-                .samples_buf2 = try Samples.initCapacity(allocator.*, 200),
-            },
-        };
-    }
-
-    pub fn deinit(self: *@This()) void {
-        _ = self.playing.lock.fuse();
-        defer _ = self.playing.lock.unfuse();
-
-        self.playing.samples.deinit();
-        self.playing.samples_buf2.deinit();
-    }
-
-    pub fn callback(
-        self: *AudioPlayer.CallbackContext,
-        output: [][2]f32,
-        timeinfo: *c.PaStreamCallbackTimeInfo,
-        flags: c.PaStreamCallbackFlags,
-    ) !void {
-        _ = flags;
-        _ = timeinfo;
-
-        defer self.ctx.frame_count += output.len;
-
-        @memset(output, [2]f32{ 0, 0 });
-
-        self.ctx.playing.fused_swap();
-        for (self.ctx.playing.samples.items) |*ps| {
-            _ = ps.fill(self.ctx.volume, self.ctx.frame_count, self.ctx.samples, output);
-        }
-    }
-
-    pub const Samples = std.ArrayList(PlayingSample);
-    pub const PlayingSample = struct {
-        handle: ResourceManager.AudioHandle,
-        start_frame: u64,
-
-        // relative position of the sound. (listener +z fwd, +x right, -y up)
-        pos: Vec3,
-        volume: f32,
-
-        // the float values supplied to audio apis is the instantaneous amplitude of the wave
-        // power is proportional to the square of amplitude
-        // intensity is power carried by wave per unit area (perp to the area)
-        // percieved loudness is logarithmic in power
-        // delta dB = 10*log10(p2/p1)
-        // "twice as loud" is a diff of 10dB
-        //
-        // with distance - sound's intensity decreases (as area increases)
-        // so twice as far means a quarter the intensity
-        // which means quarter the power (per unit area (which is what we end up hearing ig. cuz the ear drums are constant in size))
-        // which means we just divide the amplitude by 2 to account for the distance
-
-        pub fn fill(self: *@This(), volume: f32, frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
-            const min = 1.0;
-            const max = 100.0;
-            const original_dist = self.pos.length();
-            const dist = @min(max, @max(min, original_dist));
-
-            const att = volume * self.volume / dist;
-
-            const right_dot = 0.5 * if (original_dist > 0.01) self.pos.x / original_dist else 0.0;
-            var left = 0.5 - right_dot;
-            var right = 0.5 + right_dot;
-
-            // rescale in [0, 1]
-            left *= 2;
-            right *= 2;
-
-            // 20% audio always leaks into the other ear
-            left = left * 0.8 + 0.2;
-            right = right * 0.8 + 0.2;
-
-            // if close, we leak more
-            left = @min(1.0, left + 1.0 / @max(0.01, original_dist));
-            right = @min(1.0, right + 1.0 / @max(0.01, original_dist));
-
-            const sample = samples[self.handle.index].data;
-            var index = frame_count - self.start_frame;
-            for (output) |*oframe| {
-                defer index += 1;
-
-                if (sample.len <= index) {
-                    return true;
-                }
-
-                const frame = sample[index];
-                oframe[0] = std.math.clamp(oframe[0] + frame[0] * left * att, -1, 1);
-                oframe[1] = std.math.clamp(oframe[1] + frame[1] * right * att, -1, 1);
-            }
-
-            return false;
-        }
-    };
-});
-
-const AudioRecorder = Engine.Audio.Stream(.input, struct {
-    recorded: utils.Channel([256]f32),
-
-    pub fn callback(self: *AudioRecorder.CallbackContext, input: []const f32, timeinfo: *c.PaStreamCallbackTimeInfo, flags: c.PaStreamCallbackFlags) !void {
-        _ = flags;
-        _ = timeinfo;
-        _ = self;
-
-        var buf: [256]f32 = undefined;
-        @memcpy(&buf, input);
-        // try self.ctx.recorded.send(buf);
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.recorded.deinit();
-    }
-});
-
 pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var ctx = &engine.graphics;
     const device = &ctx.device;
@@ -378,7 +229,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     });
     errdefer depth.deinit(device);
 
-    var world = try World.init(math.Camera.constants.basis.opengl.up);
+    var world = try World.init(C.Camera.constants.basis.opengl.up);
     errdefer world.deinit();
     try loader_mod.generate_type_registry();
 
@@ -421,9 +272,9 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     };
     const player_id = try cmdbuf.insert(.{
         try C.Name.from("player"),
-        math.Camera.init(
-            math.Camera.constants.basis.vulkan,
-            math.Camera.constants.basis.opengl,
+        C.Camera.init(
+            C.Camera.constants.basis.vulkan,
+            C.Camera.constants.basis.opengl,
         ),
         C.Controller{},
         t,
@@ -509,7 +360,7 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
 
     try cmdbuf.apply(@ptrCast(&world));
 
-    const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, t: C.GlobalTransform, camera: math.Camera, controller: C.Controller });
+    const player = try world.ecs.get(player_id, struct { pid: C.PlayerId, t: C.GlobalTransform, camera: C.Camera, controller: C.Controller });
     var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, &player.t.transform, player.camera, player.controller), ctx);
     errdefer uniforms.deinit(device);
 
@@ -519,19 +370,13 @@ pub fn init(engine: *Engine, app_state: *AppState) !@This() {
     var desc_pool = try DescriptorPool.new(device);
     errdefer desc_pool.deinit(device);
 
-    var recorder = try AudioRecorder.init(.{
+    var recorder = try world_mod.AudioRecorder.init(.{
         .recorded = try utils.Channel([256]f32).init(allocator.*),
     }, .{});
     errdefer recorder.deinit() catch |e| utils.dump_error(e);
     try recorder.start();
 
-    // var audio = try AudioPlayer.init(.{
-    //     .recorded = &recorder.ctx.ctx.recorded,
-    // }, .{});
-    // errdefer audio.deinit() catch |e| utils.dump_error(e);
-    // try audio.start();
-
-    var audio = try AudioPlayer.init(try AudioPlayer.Ctx.init(assets.audio.items), .{});
+    var audio = try world_mod.AudioPlayer.init(try .init(assets.audio.items), .{});
     errdefer audio.deinit() catch |e| utils.dump_error(e);
     try audio.start();
 
@@ -1047,7 +892,7 @@ pub const AppState = struct {
         var input = window.input();
 
         var pexp = try app.world.ecs.explorer(app.entities.player);
-        const camera = pexp.get_component(math.Camera).?;
+        const camera = pexp.get_component(C.Camera).?;
         const pid = pexp.get_component(C.PlayerId).?;
         const player_id = pid.id;
 
@@ -1250,7 +1095,7 @@ pub const AppState = struct {
                             if (player.controller.did_rotate) {
                                 player.controller.yaw += mouse.dx * player.controller.sensitivity_scale * player.controller.sensitivity;
                                 player.controller.pitch += mouse.dy * player.controller.sensitivity_scale * player.controller.sensitivity;
-                                player.controller.pitch = std.math.clamp(player.controller.pitch, math.Camera.constants.pitch_min, math.Camera.constants.pitch_max);
+                                player.controller.pitch = std.math.clamp(player.controller.pitch, C.Camera.constants.pitch_min, C.Camera.constants.pitch_max);
                             }
 
                             const rot = camera.rot_quat(player.controller.pitch, player.controller.yaw);
@@ -1692,7 +1537,7 @@ pub const AppState = struct {
             defer app.telemetry.end_sample();
 
             const player = try app.world.ecs.get(app.entities.player, struct {
-                camera: math.Camera,
+                camera: C.Camera,
                 controller: C.Controller,
                 lt: C.LastTransform,
                 t: C.GlobalTransform,
@@ -1710,7 +1555,7 @@ pub const AppState = struct {
         self: *@This(),
         window: *Engine.Window,
         transform: *const C.Transform,
-        camera: *const math.Camera,
+        camera: *const C.Camera,
         controller: *const C.Controller,
     ) ![]u8 {
         const rot = camera.rot_quat(controller.pitch, controller.yaw);
