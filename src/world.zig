@@ -23,26 +23,7 @@ pub const C = struct {
     pub const CharacterBody = Jphysics.CharacterBody;
     pub const Camera = math.Camera;
 };
-pub const component_list: []const type = &.{
-    C.Entity,
-    C.Name,
-    C.Camera,
-    C.Controller,
-    C.Shooter,
-    C.Sound,
-    C.StaticSound,
-    C.Node,
-    C.LocalTransform,
-    C.GlobalTransform,
-    C.LastTransform,
-    C.TimeDespawn,
-    C.PlayerId,
-    C.StaticMesh,
-    C.AnimatedMesh,
-    C.BatchedRender,
-    C.BodyId,
-    C.CharacterBody,
-};
+pub const component_list: []const type = &utils_mod.type_array_from_struct_decls(C);
 pub const EntityComponentStore = ecs_mod.EntityComponentStore(component_list, *World);
 
 pub const Jphysics = struct {

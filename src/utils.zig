@@ -183,6 +183,16 @@ pub inline fn indexof_type(types: []const type, typ: type) ?usize {
     }
 }
 
+pub inline fn type_array_from_struct_decls(typ: type) [@typeInfo(typ).@"struct".decls.len]type {
+    comptime {
+        var types: [@typeInfo(typ).@"struct".decls.len]type = undefined;
+        for (@typeInfo(typ).@"struct".decls, 0..) |decl, i| {
+            types[i] = @field(typ, decl.name);
+        }
+        return types;
+    }
+}
+
 pub inline fn dump_error(err: anyerror) void {
     std.debug.print("error: {any}\n", .{err});
     if (@errorReturnTrace()) |trace| {
