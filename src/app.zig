@@ -1099,7 +1099,6 @@ pub const AppState = struct {
                             }
 
                             const rot = camera.rot_quat(player.controller.pitch, player.controller.yaw);
-                            const up = rot.rotate_vector(camera.world_basis.up);
                             const fwd = rot.rotate_vector(camera.world_basis.fwd);
                             const right = rot.rotate_vector(camera.world_basis.right);
 
@@ -1114,7 +1113,8 @@ pub const AppState = struct {
                                 speed *= 0.1;
                             }
 
-                            speed *= 50 * player.controller.speed;
+                            speed *= 5000 * player.controller.speed;
+                            speed *= delta;
 
                             if (char.character.getGroundState() == .on_ground) {
                                 if (kb.w.pressed()) {
@@ -1132,7 +1132,7 @@ pub const AppState = struct {
                             }
                             if (kb.space.pressed()) {
                                 if (char.character.getGroundState() == .on_ground) {
-                                    char.impulse = up.scale(10);
+                                    char.impulse = camera.world_basis.up.scale(10);
                                 }
                             }
 
