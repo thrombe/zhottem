@@ -765,7 +765,7 @@ pub const AppState = struct {
             t,
             C.Shooter{
                 .audio = app.handles.audio.shot,
-                .ticker = try utils_mod.Ticker.init(std.time.ns_per_ms * 100),
+                .ticker = utils_mod.Ticker.init(std.time.ns_per_ms * 100),
                 .hold = true,
             },
             C.PlayerId{ .id = 0, .conn = 0 },
@@ -1084,7 +1084,7 @@ pub const AppState = struct {
                             C.PlayerId{ .id = id.id, .conn = e.conn },
                             C.Shooter{
                                 .audio = app.handles.audio.shot,
-                                .ticker = try utils_mod.Ticker.init(std.time.ns_per_ms * 100),
+                                .ticker = utils_mod.Ticker.init(std.time.ns_per_ms * 100),
                                 .hold = true,
                             },
                             try app.world.phy.add_character(.{
@@ -1188,7 +1188,7 @@ pub const AppState = struct {
                             //     }
                             // }
 
-                            if (player.shooter.try_shoot(mouse.right)) {
+                            if (player.shooter.try_shoot(mouse.right, self.ticker.simulation.time_ns)) {
                                 // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
                                 const t = C.GlobalTransform{
                                     .transform = .{

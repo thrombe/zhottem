@@ -1100,8 +1100,8 @@ pub const Components = struct {
         ticker: utils_mod.Ticker,
         hold: bool,
 
-        pub fn try_shoot(self: *@This(), action: Engine.Window.Action) bool {
-            return ((action.pressed() and self.hold) or (action.just_pressed() and !self.hold)) and self.ticker.tick();
+        pub fn try_shoot(self: *@This(), action: Engine.Window.Action, time: u64) bool {
+            return ((action.pressed() and self.hold) or (action.just_pressed() and !self.hold)) and self.ticker.tick(time);
         }
     };
 

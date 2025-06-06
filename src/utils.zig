@@ -364,19 +364,19 @@ pub const SimulationTicker = struct {
 };
 
 pub const Ticker = struct {
-    timer: std.time.Timer,
+    last: u64 = 0,
     step: u64,
 
-    pub fn init(step: u64) !@This() {
+    pub fn init(step: u64) @This() {
         return .{
             .step = step,
-            .timer = try std.time.Timer.start(),
+            .last = 0,
         };
     }
 
-    pub fn tick(self: *@This()) bool {
-        if (self.timer.read() > self.step) {
-            self.timer.reset();
+    pub fn tick(self: *@This(), time: u64) bool {
+        if (time - self.last >= self.step) {
+            self.last = time;
             return true;
         } else {
             return false;
