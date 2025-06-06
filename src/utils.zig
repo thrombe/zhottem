@@ -291,6 +291,7 @@ pub const SimulationTicker = struct {
 
         acctime_ns: u64 = 0,
         acctime_f: f32 = 0,
+        interpolation_factor: f32 = 0,
 
         time_ns: u64 = 0,
         time_f: f32 = 0,
@@ -303,6 +304,14 @@ pub const SimulationTicker = struct {
             requested: u64 = 0,
             capped: u64 = 0,
         } = .{},
+    } = .{},
+
+    animation: struct {
+        delta: f32 = 0,
+        lap: u64 = 0,
+
+        time_ns: u64 = 0,
+        time_f: f32 = 0,
     } = .{},
 
     fn ns_to_s(t: u64) f32 {
@@ -331,14 +340,29 @@ pub const SimulationTicker = struct {
         self.simulation.acctime_ns += self.scaled.lap;
         self.simulation.ticks.requested = self.simulation.acctime_ns / self.simulation.step_ns;
         self.simulation.ticks.capped = @min(self.simulation.ticks.requested, self.simulation.ticks.max);
-
-        const handled = self.simulation.ticks.capped * self.simulation.step_ns;
-        self.simulation.lap = handled;
-        self.simulation.delta = ns_to_s(self.simulation.lap);
-        self.simulation.time_ns += handled;
-        self.simulation.time_f = ns_to_s(self.simulation.time_ns);
-        self.simulation.acctime_ns -= handled;
+        self.simulation.acctime_ns -= self.simulation.ticks.capped * self.simulation.step_ns;
         self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
+        self.simulation.interpolation_factor = @min(self.simulation.acctime_f / self.simulation.step_f, 1);
+
+        self.simulation.lap = self.simulation.ticks.capped * self.simulation.step_ns;
+        self.simulation.delta = ns_to_s(self.simulation.lap);
+        self.simulation.time_ns += self.simulation.lap;
+        self.simulation.time_f = ns_to_s(self.simulation.time_ns);
+
+        const anim_time = self.animation.time_ns;
+        // keep animation flowing smoothly as long as physics isn't lagging
+        if (self.simulation.ticks.requested == self.simulation.ticks.capped) {
+            self.animation.time_ns = self.scaled.time_ns;
+
+            // (optional) physics is interpolated each frame from last to current step's transform
+            // we can try to keep animation and interpolated simulation in sync
+            self.animation.time_ns -= self.simulation.step_ns;
+        } else {
+            self.animation.time_ns = self.simulation.time_ns;
+        }
+        self.animation.lap = self.animation.time_ns - anim_time;
+        self.animation.delta = ns_to_s(self.animation.lap);
+        self.animation.time_f = ns_to_s(self.animation.time_ns);
     }
 
     pub fn set_speed(self: *@This(), perc: f64) void {

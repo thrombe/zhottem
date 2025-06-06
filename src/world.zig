@@ -1212,9 +1212,8 @@ pub const Components = struct {
 
         animation_index: u32,
 
-        // relative to the start of this animation
-        // += dt each frame
-        time: f32 = 0,
+        // timestamp in ns when this animation started
+        start_time: u64,
         bones: []math.Mat4x4 = &[_]math.Mat4x4{},
 
         // animation indices for

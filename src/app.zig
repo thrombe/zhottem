@@ -742,7 +742,7 @@ pub const AppState = struct {
     };
 
     fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
-        return lt.transform.lerp(&t.transform, std.math.clamp(self.ticker.simulation.acctime_f / self.ticker.simulation.step_f, 0, 1));
+        return lt.transform.lerp(&t.transform, self.ticker.simulation.interpolation_factor);
     }
 
     pub fn init(window: *Engine.Window, app: *App) !@This() {
@@ -1475,10 +1475,9 @@ pub const AppState = struct {
             while (it.next()) |e| {
                 const a: *C.AnimatedMesh = e.m;
                 const armature = assets.ref(a.armature);
-                a.time += self.ticker.simulation.delta;
 
-                if (!animate(a, armature, a.time)) {
-                    a.time = 0;
+                if (!animate(a, armature, cast(f32, self.ticker.animation.time_ns - a.start_time) / std.time.ns_per_s)) {
+                    a.start_time = self.ticker.animation.time_ns;
                     @memset(a.indices, std.mem.zeroes(C.AnimatedMesh.AnimationIndices));
                 }
             }
