@@ -1388,7 +1388,10 @@ pub const AppState = struct {
                             updated = true;
                         }
 
-                        arb.* = math.Mat4x4.translation_mat(out_t.xyz()).mul_mat(math.Mat4x4.rot_mat_from_quat(out_r)).mul_mat(math.Mat4x4.scaling_mat(out_s.xyz()));
+                        arb.* = math.Mat4x4
+                            .translation_mat(out_t.xyz())
+                            .mul_mat(.rot_mat_from_quat(out_r))
+                            .mul_mat(.scaling_mat(out_s.xyz()));
                     }
 
                     const bones = armature.bones;
@@ -1408,7 +1411,7 @@ pub const AppState = struct {
                     // store
 
                     if (keyframes.len <= curr.*) return false;
-                    if (time > keyframes[curr.*].time and keyframes.len > curr.* + 1) curr.* += 1;
+                    if (keyframes.len > curr.* + 1 and time >= keyframes[curr.* + 1].time) curr.* += 1;
 
                     const curr_v = keyframes[curr.*];
 
@@ -1419,8 +1422,11 @@ pub const AppState = struct {
                     const next_v = keyframes[curr.* + 1];
 
                     const t = (time - curr_v.time) / (next_v.time - curr_v.time);
-
                     out.* = curr_v.value.mix(next_v.value, std.math.clamp(t, 0, 1));
+
+                    std.debug.assert(time >= curr_v.time);
+                    std.debug.assert(curr_v.time < next_v.time);
+                    std.debug.assert(curr.* + 1 < keyframes.len);
                     return true;
                 }
 
