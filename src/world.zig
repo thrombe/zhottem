@@ -5,6 +5,7 @@ const Vec4 = math.Vec4;
 const Vec3 = math.Vec3;
 
 const utils_mod = @import("utils.zig");
+const cast = utils_mod.cast;
 
 const Engine = @import("engine.zig");
 
@@ -805,7 +806,7 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
     // owned by ResourceManager.CpuResources
     samples: []assets_mod.Wav,
     frame_count: u64 = 0,
-    volume: f32 = 0.1,
+    offsets: []Offset = &.{},
 
     playing: struct {
         // only swap in callback.
@@ -818,25 +819,43 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         // NOTE: only audio thread may lock
         lock: utils_mod.Fuse = .{},
 
-        samples: Samples,
-        samples_buf2: Samples,
+        buf1: Buf,
+        buf2: Buf,
+
+        const Buf = struct {
+            samples: Samples,
+            volume: f32 = 1.0,
+            speed: f32 = 1.0,
+        };
 
         fn fused_swap(self: *@This()) void {
             _ = self.lock.fuse();
             defer _ = self.lock.unfuse();
 
             if (self.swap_fuse.unfuse()) {
-                std.mem.swap(Samples, &self.samples, &self.samples_buf2);
+                std.mem.swap(Buf, &self.buf1, &self.buf2);
             }
         }
     },
+
+    const Offset = struct {
+        // offset in sample buf starting from 0
+        offset: u32,
+
+        // for interpolation
+        t: f32,
+    };
 
     pub fn init(samples: []assets_mod.Wav) !@This() {
         return @This(){
             .samples = samples,
             .playing = .{
-                .samples = try Samples.initCapacity(allocator.*, 200),
-                .samples_buf2 = try Samples.initCapacity(allocator.*, 200),
+                .buf1 = .{
+                    .samples = try Samples.initCapacity(allocator.*, 200),
+                },
+                .buf2 = .{
+                    .samples = try Samples.initCapacity(allocator.*, 200),
+                },
             },
         };
     }
@@ -845,8 +864,9 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         _ = self.playing.lock.fuse();
         defer _ = self.playing.lock.unfuse();
 
-        self.playing.samples.deinit();
-        self.playing.samples_buf2.deinit();
+        allocator.free(self.offsets);
+        self.playing.buf1.samples.deinit();
+        self.playing.buf2.samples.deinit();
     }
 
     pub fn callback(
@@ -858,13 +878,31 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         _ = flags;
         _ = timeinfo;
 
-        defer self.ctx.frame_count += output.len;
+        if (output.len > self.ctx.offsets.len) {
+            allocator.free(self.ctx.offsets);
+            self.ctx.offsets = try allocator.alloc(Offset, output.len);
+        }
+
+        // stretch audio: mix(buf[floor(index * speed)], buf[ceil(index * speed)], fract(index * speed))
+        const offsets = self.ctx.offsets[0..output.len];
+        for (0..output.len) |i| {
+            const t = cast(f32, i) * self.ctx.playing.buf1.speed;
+            offsets[i] = .{ .offset = cast(u32, t), .t = t - @floor(t) };
+        }
+        defer self.ctx.frame_count += offsets[offsets.len - 1].offset;
 
         @memset(output, [2]f32{ 0, 0 });
 
         self.ctx.playing.fused_swap();
-        for (self.ctx.playing.samples.items) |*ps| {
-            _ = ps.fill(self.ctx.volume, self.ctx.frame_count, self.ctx.samples, output);
+        for (self.ctx.playing.buf1.samples.items) |*ps| {
+            _ = ps.fill(
+                self.ctx.playing.buf1.volume,
+                self.ctx.playing.buf1.speed,
+                self.ctx.frame_count,
+                offsets,
+                self.ctx.samples,
+                output,
+            );
         }
     }
 
@@ -889,7 +927,15 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         // which means quarter the power (per unit area (which is what we end up hearing ig. cuz the ear drums are constant in size))
         // which means we just divide the amplitude by 2 to account for the distance
 
-        pub fn fill(self: *@This(), volume: f32, frame_count: u64, samples: []assets_mod.Wav, output: [][2]f32) bool {
+        pub fn fill(
+            self: *@This(),
+            volume: f32,
+            speed: f32,
+            frame_count: u64,
+            offsets: []Offset,
+            samples: []assets_mod.Wav,
+            output: [][2]f32,
+        ) bool {
             const min = 1.0;
             const max = 100.0;
             const original_dist = self.pos.length();
@@ -913,18 +959,31 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
             left = @min(1.0, left + 1.0 / @max(0.01, original_dist));
             right = @min(1.0, right + 1.0 / @max(0.01, original_dist));
 
+            std.debug.assert(output.len == offsets.len);
+
             const sample = samples[self.handle.index].data;
-            var index = frame_count - self.start_frame;
-            for (output) |*oframe| {
-                defer index += 1;
+            const base = frame_count - self.start_frame;
+            for (output, 0..) |*oframe, i| {
+                const index = base + offsets[i].offset;
+                const t = offsets[i].t;
 
                 if (sample.len <= index) {
                     return true;
                 }
 
-                const frame = sample[index];
-                oframe[0] = std.math.clamp(oframe[0] + frame[0] * left * att, -1, 1);
-                oframe[1] = std.math.clamp(oframe[1] + frame[1] * right * att, -1, 1);
+                const curr_frame = sample[index];
+                if (speed >= 1.0 or index + 1 >= sample.len) {
+                    oframe[0] = std.math.clamp(oframe[0] + curr_frame[0] * left * att, -1, 1);
+                    oframe[1] = std.math.clamp(oframe[1] + curr_frame[1] * right * att, -1, 1);
+                    continue;
+                }
+
+                const next_frame = sample[index + 1];
+                const frame_l = std.math.lerp(curr_frame[0], next_frame[0], t);
+                const frame_r = std.math.lerp(curr_frame[1], next_frame[1], t);
+
+                oframe[0] = std.math.clamp(oframe[0] + frame_l * left * att, -1, 1);
+                oframe[1] = std.math.clamp(oframe[1] + frame_r * right * att, -1, 1);
             }
 
             return false;

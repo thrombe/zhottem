@@ -714,6 +714,7 @@ const ShaderStageManager = struct {
 
 pub const AppState = struct {
     ticker: utils_mod.SimulationTicker,
+    audio_volume: f32 = 0.1,
 
     monitor_rez: struct { width: u32, height: u32 },
     mouse: extern struct { x: i32 = 0, y: i32 = 0, left: bool = false, right: bool = false } = .{},
@@ -1569,13 +1570,15 @@ pub const AppState = struct {
             // this will not lock for more than the tiniest amount of time.
             while (playing.lock.check()) {}
 
-            playing.samples_buf2.clearRetainingCapacity();
+            playing.buf2.samples.clearRetainingCapacity();
+            playing.buf2.volume = self.audio_volume;
+            playing.buf2.speed = self.ticker.speed.perc;
 
             const player = try app.world.ecs.get(self.entities.player, struct { t: C.GlobalTransform });
             {
                 var it = app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
                 while (it.next()) |e| {
-                    try playing.samples_buf2.append(.{
+                    try playing.buf2.samples.append(.{
                         .handle = e.sound.audio,
                         .volume = e.sound.volume,
                         .start_frame = e.sound.start_frame,
@@ -1586,7 +1589,7 @@ pub const AppState = struct {
             {
                 var it = app.world.ecs.iterator(struct { sound: C.StaticSound });
                 while (it.next()) |e| {
-                    try playing.samples_buf2.append(.{
+                    try playing.buf2.samples.append(.{
                         .handle = e.sound.audio,
                         .volume = e.sound.volume,
                         .start_frame = e.sound.start_frame,
@@ -1715,13 +1718,14 @@ pub const GuiState = struct {
 
     fn editState(self: *@This(), app: *App, state: *AppState, controller: *C.Controller) void {
         _ = self;
+        _ = app;
 
         var reset = false;
 
         _ = c.ImGui_SliderFloat("Speed", &controller.speed, 0.1, 10.0);
         _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
-        _ = c.ImGui_SliderFloat("audio volume", @ptrCast(&app.audio.ctx.ctx.volume), 0.0, 1.0);
+        _ = c.ImGui_SliderFloat("audio volume", @ptrCast(&state.audio_volume), 0.0, 1.0);
 
         var sim_speed = state.ticker.speed.perc;
         if (c.ImGui_SliderFloat("simulation_speed", @ptrCast(&sim_speed), 0.0, 5.0)) {
