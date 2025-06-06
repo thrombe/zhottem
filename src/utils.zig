@@ -295,10 +295,13 @@ pub const SimulationTicker = struct {
         time_ns: u64 = 0,
         time_f: f32 = 0,
 
+        lap: u64 = 0,
+        delta: f32 = 0,
+
         ticks: struct {
             max: u64 = 5,
             requested: u64 = 0,
-            handled: u64 = 0,
+            capped: u64 = 0,
         } = .{},
     } = .{},
 
@@ -326,17 +329,16 @@ pub const SimulationTicker = struct {
         self.scaled.time_f = ns_to_s(self.scaled.time_ns);
 
         self.simulation.acctime_ns += self.scaled.lap;
-        self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
         self.simulation.ticks.requested = self.simulation.acctime_ns / self.simulation.step_ns;
-    }
+        self.simulation.ticks.capped = @min(self.simulation.ticks.requested, self.simulation.ticks.max);
 
-    pub fn update(self: *@This()) void {
-        const handled = self.simulation.ticks.handled * self.simulation.step_ns;
+        const handled = self.simulation.ticks.capped * self.simulation.step_ns;
+        self.simulation.lap = handled;
+        self.simulation.delta = ns_to_s(self.simulation.lap);
         self.simulation.time_ns += handled;
         self.simulation.time_f = ns_to_s(self.simulation.time_ns);
         self.simulation.acctime_ns -= handled;
         self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
-        self.simulation.ticks.handled = 0;
     }
 
     pub fn set_speed(self: *@This(), perc: f64) void {

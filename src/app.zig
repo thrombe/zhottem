@@ -920,8 +920,6 @@ pub const AppState = struct {
         const assets = &app.resources.assets;
         const window = engine.window;
 
-        const delta = self.ticker.scaled.delta;
-
         var input = window.input();
 
         var pexp = try app.world.ecs.explorer(self.entities.player);
@@ -1244,11 +1242,9 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".physics");
             defer app.telemetry.end_sample();
 
-            // TODO: simulation updates would also need other mechanics. not sure how to handle that :/
-            // after all simulation updates (like physice), update ticker
-            defer self.ticker.update();
             const ticks = &self.ticker.simulation.ticks;
-            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (capped)", .{}), ticks.requested);
+            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps", .{}), ticks.requested);
+            app.telemetry.plot(std.fmt.comptimePrint("executed physics steps", .{}), ticks.capped);
 
             // no more than x steps per frame
             if (ticks.requested > 0) {
@@ -1264,10 +1260,9 @@ pub const AppState = struct {
                     app.world.phy.render_tick();
                 };
 
-                for (0..@min(ticks.requested, ticks.max)) |step| {
+                for (0..ticks.capped) |step| {
                     app.telemetry.begin_sample(@src(), ".step");
                     defer app.telemetry.end_sample();
-                    ticks.handled += 1;
 
                     var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
                     while (player_it.next()) |e| {
@@ -1479,7 +1474,7 @@ pub const AppState = struct {
             while (it.next()) |e| {
                 const a: *C.AnimatedMesh = e.m;
                 const armature = assets.ref(a.armature);
-                a.time += delta;
+                a.time += self.ticker.simulation.delta;
 
                 if (!animate(a, armature, a.time)) {
                     a.time = 0;
