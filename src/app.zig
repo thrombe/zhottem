@@ -741,7 +741,7 @@ pub const AppState = struct {
     };
 
     fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
-        return lt.transform.lerp(&t.transform, std.math.clamp(self.ticker.physics.acctime_f / self.ticker.physics.step_f, 0, 1));
+        return lt.transform.lerp(&t.transform, std.math.clamp(self.ticker.simulation.acctime_f / self.ticker.simulation.step_f, 0, 1));
     }
 
     pub fn init(window: *Engine.Window, app: *App) !@This() {
@@ -1244,11 +1244,11 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".physics");
             defer app.telemetry.end_sample();
 
-            const steps = self.ticker.physics.steps();
-            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (capped)", .{}), steps.count);
+            const ticks = &self.ticker.simulation.ticks;
+            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (capped)", .{}), ticks.requested);
 
             // no more than x steps per frame
-            if (steps.capped > 0) {
+            if (ticks.requested > 0) {
                 app.telemetry.begin_sample(@src(), ".jolt");
                 defer app.telemetry.end_sample();
 
@@ -1261,9 +1261,10 @@ pub const AppState = struct {
                     app.world.phy.render_tick();
                 };
 
-                for (0..steps.capped) |step| {
+                for (0..@min(ticks.requested, ticks.max)) |step| {
                     app.telemetry.begin_sample(@src(), ".step");
                     defer app.telemetry.end_sample();
+                    defer ticks.handled += 1;
 
                     var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
                     while (player_it.next()) |e| {
@@ -1277,7 +1278,7 @@ pub const AppState = struct {
                         }
 
                         var vel = Vec3.from_buf(char.character.getLinearVelocity());
-                        vel = vel.add(char.force.scale(self.ticker.physics.step_f));
+                        vel = vel.add(char.force.scale(self.ticker.simulation.step_f));
 
                         if (char.character.getGroundState() == .on_ground) {
                             const ground = Vec3.from_buf(char.character.getGroundNormal());
@@ -1293,7 +1294,7 @@ pub const AppState = struct {
                         char.character.setLinearVelocity(vel.to_buf());
 
                         char.character.extendedUpdate(
-                            self.ticker.physics.step_f,
+                            self.ticker.simulation.step_f,
                             (Vec3{ .y = -1 }).to_buf(),
                             &update_settings,
                             .{
@@ -1305,7 +1306,7 @@ pub const AppState = struct {
                         );
                     }
 
-                    try app.world.phy.update(self.ticker.physics.step_f, 1);
+                    try app.world.phy.update(self.ticker.simulation.step_f, 1);
                 }
 
                 {
@@ -1735,7 +1736,7 @@ pub const GuiState = struct {
         reset = c.ImGui_Button("Reset render state") or reset;
 
         c.ImGui_Text("scaled time: %.3f", state.ticker.scaled.time_f);
-        c.ImGui_Text("physics acctime/step: %.3f", state.ticker.physics.acctime_f / state.ticker.physics.step_f);
+        c.ImGui_Text("physics acctime/step: %.3f", state.ticker.simulation.acctime_f / state.ticker.simulation.step_f);
 
         if (reset) {
             _ = state.cmdbuf_fuse.fuse();

@@ -295,23 +295,21 @@ pub const SimulationTicker = struct {
         time_f: f32 = 0,
     } = .{},
 
-    physics: struct {
+    simulation: struct {
         step_f: f32 = 1.0 / 60.0,
         step_ns: u64 = std.time.ns_per_s / 60,
+
         acctime_ns: u64 = 0,
         acctime_f: f32 = 0,
-        frame_ticks: u32 = 5,
 
-        pub fn steps(self: *@This()) struct { count: u32, capped: u32 } {
-            if (self.acctime_ns >= self.step_ns) {
-                const count = self.acctime_ns / self.step_ns;
-                const capped = @min(self.frame_ticks, count);
-                self.acctime_ns -= self.step_ns * capped;
-                self.acctime_f = ns_to_s(self.acctime_ns);
-                return .{ .capped = @intCast(capped), .count = @intCast(count) };
-            }
-            return .{ .capped = 0, .count = 0 };
-        }
+        delta: f32 = 0,
+        lap: u64 = 0,
+
+        ticks: struct {
+            max: u32 = 5,
+            requested: u32 = 0,
+            handled: u32 = 0,
+        } = .{},
     } = .{},
 
     fn ns_to_s(t: u64) f32 {
@@ -337,8 +335,16 @@ pub const SimulationTicker = struct {
         self.scaled.time_ns += self.scaled.lap;
         self.scaled.time_f = ns_to_s(self.scaled.time_ns);
 
-        self.physics.acctime_ns += self.scaled.lap;
-        self.physics.acctime_f = ns_to_s(self.physics.acctime_ns);
+        const handled = self.simulation.ticks.handled * self.simulation.step_ns;
+        self.simulation.lap += handled;
+        self.simulation.delta = ns_to_s(self.simulation.lap);
+        self.simulation.acctime_ns -= handled;
+        self.simulation.acctime_ns += self.scaled.lap;
+        self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
+        self.simulation.ticks.handled = 0;
+        if (self.simulation.acctime_ns >= self.simulation.step_ns) {
+            self.simulation.ticks.requested = @intCast(self.simulation.acctime_ns / self.simulation.step_ns);
+        }
     }
 
     pub fn reset(self: *@This()) void {
@@ -346,9 +352,10 @@ pub const SimulationTicker = struct {
         self.* = .{
             .speed = self.speed,
             .real = .{ .timer = self.real.timer },
-            .physics = .{
-                .step_ns = self.physics.step_ns,
-                .step_f = self.physics.step_f,
+            .simulation = .{
+                .step_ns = self.simulation.step_ns,
+                .step_f = self.simulation.step_f,
+                .ticks = .{ .max = self.simulation.ticks.max },
             },
         };
     }
