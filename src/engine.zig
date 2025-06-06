@@ -91,7 +91,7 @@ pub const Audio = struct {
         return struct {
             pub const Ctx = Ctxt;
             pub const Args = struct {
-                sample_rate: f64 = 48000,
+                sample_rate: u64 = 48000,
                 frames_per_buffer: u32 = 256,
             };
 
@@ -154,7 +154,7 @@ pub const Audio = struct {
                         .input => 0,
                     },
                     c.paFloat32,
-                    v.sample_rate,
+                    @floatFromInt(v.sample_rate),
                     v.frames_per_buffer,
                     @ptrCast(&@This().callback),
                     ctxt,
@@ -223,7 +223,7 @@ pub const Audio = struct {
                         .input => 0,
                     },
                     c.paFloat32,
-                    self.ctx.args.sample_rate,
+                    @floatFromInt(self.ctx.args.sample_rate),
                     self.ctx.args.frames_per_buffer,
                     @ptrCast(&@This().callback),
                     self.ctx,
