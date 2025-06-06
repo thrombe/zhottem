@@ -263,16 +263,6 @@ pub const SimulationTicker = struct {
         perc: f32 = 1.0,
         numerator: u64 = 1,
         denominator: u64 = 1,
-
-        pub fn set_speed(self: *@This(), perc: f64) void {
-            self.perc = @floatCast(perc);
-            self.numerator = @intFromFloat(std.time.ns_per_s * perc);
-            self.denominator = std.time.ns_per_s;
-
-            const gcd = std.math.gcd(self.numerator, self.denominator);
-            self.numerator /= gcd;
-            self.denominator /= gcd;
-        }
     } = .{},
 
     real: struct {
@@ -302,13 +292,13 @@ pub const SimulationTicker = struct {
         acctime_ns: u64 = 0,
         acctime_f: f32 = 0,
 
-        delta: f32 = 0,
-        lap: u64 = 0,
+        time_ns: u64 = 0,
+        time_f: f32 = 0,
 
         ticks: struct {
-            max: u32 = 5,
-            requested: u32 = 0,
-            handled: u32 = 0,
+            max: u64 = 5,
+            requested: u64 = 0,
+            handled: u64 = 0,
         } = .{},
     } = .{},
 
@@ -330,21 +320,33 @@ pub const SimulationTicker = struct {
         self.real.time_ns += self.real.lap;
         self.real.time_f = ns_to_s(self.real.time_ns);
 
-        self.scaled.lap = (self.real.lap * self.speed.numerator) / self.speed.denominator;
+        self.scaled.lap = cast(u64, (cast(u128, self.real.lap) * self.speed.numerator) / self.speed.denominator);
         self.scaled.delta = ns_to_s(self.scaled.lap);
         self.scaled.time_ns += self.scaled.lap;
         self.scaled.time_f = ns_to_s(self.scaled.time_ns);
 
-        const handled = self.simulation.ticks.handled * self.simulation.step_ns;
-        self.simulation.lap += handled;
-        self.simulation.delta = ns_to_s(self.simulation.lap);
-        self.simulation.acctime_ns -= handled;
         self.simulation.acctime_ns += self.scaled.lap;
         self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
+        self.simulation.ticks.requested = self.simulation.acctime_ns / self.simulation.step_ns;
+    }
+
+    pub fn update(self: *@This()) void {
+        const handled = self.simulation.ticks.handled * self.simulation.step_ns;
+        self.simulation.time_ns += handled;
+        self.simulation.time_f = ns_to_s(self.simulation.time_ns);
+        self.simulation.acctime_ns -= handled;
+        self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
         self.simulation.ticks.handled = 0;
-        if (self.simulation.acctime_ns >= self.simulation.step_ns) {
-            self.simulation.ticks.requested = @intCast(self.simulation.acctime_ns / self.simulation.step_ns);
-        }
+    }
+
+    pub fn set_speed(self: *@This(), perc: f64) void {
+        self.speed.perc = @floatCast(perc);
+        self.speed.numerator = @intFromFloat(std.time.ns_per_s * perc);
+        self.speed.denominator = std.time.ns_per_s;
+
+        const gcd = std.math.gcd(self.speed.numerator, self.speed.denominator);
+        self.speed.numerator /= gcd;
+        self.speed.denominator /= gcd;
     }
 
     pub fn reset(self: *@This()) void {

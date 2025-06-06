@@ -1244,6 +1244,9 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".physics");
             defer app.telemetry.end_sample();
 
+            // TODO: simulation updates would also need other mechanics. not sure how to handle that :/
+            // after all simulation updates (like physice), update ticker
+            defer self.ticker.update();
             const ticks = &self.ticker.simulation.ticks;
             app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (capped)", .{}), ticks.requested);
 
@@ -1264,7 +1267,7 @@ pub const AppState = struct {
                 for (0..@min(ticks.requested, ticks.max)) |step| {
                     app.telemetry.begin_sample(@src(), ".step");
                     defer app.telemetry.end_sample();
-                    defer ticks.handled += 1;
+                    ticks.handled += 1;
 
                     var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
                     while (player_it.next()) |e| {
@@ -1727,7 +1730,7 @@ pub const GuiState = struct {
 
         var sim_speed = state.ticker.speed.perc;
         if (c.ImGui_SliderFloat("simulation_speed", @ptrCast(&sim_speed), 0.0, 5.0)) {
-            state.ticker.speed.set_speed(sim_speed);
+            state.ticker.set_speed(sim_speed);
         }
 
         // 'or' short circuits :/
