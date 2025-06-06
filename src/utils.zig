@@ -258,11 +258,107 @@ pub const fspath = struct {
     }
 };
 
+pub const SimulationTicker = struct {
+    speed: struct {
+        perc: f32 = 1.0,
+        numerator: u64 = 1,
+        denominator: u64 = 1,
+
+        pub fn set_speed(self: *@This(), perc: f64) void {
+            self.perc = @floatCast(perc);
+            self.numerator = @intFromFloat(std.time.ns_per_s * perc);
+            self.denominator = std.time.ns_per_s;
+
+            const gcd = std.math.gcd(self.numerator, self.denominator);
+            self.numerator /= gcd;
+            self.denominator /= gcd;
+        }
+    } = .{},
+
+    real: struct {
+        timer: std.time.Timer,
+
+        // each frame we update these. lap is delta but in ns
+        delta: f32 = 0,
+        lap: u64 = 0,
+
+        time_ns: u64 = 0,
+        time_f: f32 = 0,
+    },
+
+    // real data scaled by speed
+    scaled: struct {
+        delta: f32 = 0,
+        lap: u64 = 0,
+
+        time_ns: u64 = 0,
+        time_f: f32 = 0,
+    } = .{},
+
+    physics: struct {
+        step_f: f32 = 1.0 / 60.0,
+        step_ns: u64 = std.time.ns_per_s / 60,
+        acctime_ns: u64 = 0,
+        acctime_f: f32 = 0,
+        frame_ticks: u32 = 5,
+
+        pub fn steps(self: *@This()) struct { count: u32, capped: u32 } {
+            if (self.acctime_ns >= self.step_ns) {
+                const count = self.acctime_ns / self.step_ns;
+                const capped = @min(self.frame_ticks, count);
+                self.acctime_ns -= self.step_ns * capped;
+                self.acctime_f = ns_to_s(self.acctime_ns);
+                return .{ .capped = @intCast(capped), .count = @intCast(count) };
+            }
+            return .{ .capped = 0, .count = 0 };
+        }
+    } = .{},
+
+    fn ns_to_s(t: u64) f32 {
+        return @floatCast(@as(f64, @floatFromInt(t)) / @as(f64, @floatFromInt(std.time.ns_per_s)));
+    }
+
+    pub fn init() !@This() {
+        return .{
+            .real = .{
+                .timer = try std.time.Timer.start(),
+            },
+        };
+    }
+
+    pub fn tick(self: *@This()) void {
+        self.real.lap = self.real.timer.lap();
+        self.real.delta = ns_to_s(self.real.lap);
+        self.real.time_ns += self.real.lap;
+        self.real.time_f = ns_to_s(self.real.time_ns);
+
+        self.scaled.lap = (self.real.lap * self.speed.numerator) / self.speed.denominator;
+        self.scaled.delta = ns_to_s(self.scaled.lap);
+        self.scaled.time_ns += self.scaled.lap;
+        self.scaled.time_f = ns_to_s(self.scaled.time_ns);
+
+        self.physics.acctime_ns += self.scaled.lap;
+        self.physics.acctime_f = ns_to_s(self.physics.acctime_ns);
+    }
+
+    pub fn reset(self: *@This()) void {
+        self.real.timer.reset();
+        self.* = .{
+            .speed = self.speed,
+            .real = .{ .timer = self.real.timer },
+            .physics = .{
+                .step_ns = self.physics.step_ns,
+                .step_f = self.physics.step_f,
+            },
+        };
+    }
+};
+
 pub const Ticker = struct {
     timer: std.time.Timer,
     step: u64,
 
-    pub fn init(step: u46) !@This() {
+    pub fn init(step: u64) !@This() {
         return .{
             .step = step,
             .timer = try std.time.Timer.start(),

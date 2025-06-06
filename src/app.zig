@@ -347,19 +347,19 @@ pub fn tick(
         return true;
     }
 
-    const frametime = @as(f32, @floatFromInt(app_state.timer.read())) / std.time.ns_per_ms;
+    const frametime = @as(f32, @floatFromInt(app_state.ticker.real.timer.read())) / std.time.ns_per_ms;
     const min_frametime = 1.0 / @as(f32, @floatFromInt(app_state.fps_cap)) * std.time.ms_per_s;
     if (frametime < min_frametime) {
         std.Thread.sleep(@intFromFloat(std.time.ns_per_ms * (min_frametime - frametime)));
     }
 
-    const lap = app_state.timer.lap();
+    app_state.ticker.tick();
 
     gui_renderer.render_start();
-    try gui_state.tick(self, app_state, lap);
+    try gui_state.tick(self, app_state);
     try gui_renderer.render_end(&engine.graphics.device, &renderer_state.swapchain);
 
-    try app_state.tick(lap, engine, self);
+    try app_state.tick(engine, self);
 
     const res = try self.present(renderer_state, app_state, gui_renderer, engine);
     // IDK: this never triggers :/
@@ -713,17 +713,13 @@ const ShaderStageManager = struct {
 };
 
 pub const AppState = struct {
+    ticker: utils_mod.SimulationTicker,
+
     monitor_rez: struct { width: u32, height: u32 },
     mouse: extern struct { x: i32 = 0, y: i32 = 0, left: bool = false, right: bool = false } = .{},
 
     frame: u32 = 0,
-    ts: u64,
-    time: f32 = 0,
-    deltatime: f32 = 0,
     fps_cap: u32 = 60,
-
-    simulation_speed: f32 = 1.0,
-    physics: Physics = .{},
 
     rng: std.Random.Xoshiro256,
     resize_fuse: Fuse = .{},
@@ -735,7 +731,6 @@ pub const AppState = struct {
 
     arena: std.heap.ArenaAllocator,
     cmdbuf: world_mod.EntityComponentStore.CmdBuf,
-    timer: std.time.Timer,
 
     client_count: u8 = 0,
 
@@ -745,16 +740,9 @@ pub const AppState = struct {
         player: Entity,
     };
 
-    const Physics = struct {
-        step: f32 = 1.0 / 60.0,
-        acctime: f32 = 0,
-
-        const max_steps_per_frame: u32 = 5;
-
-        fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
-            return lt.transform.lerp(&t.transform, std.math.clamp(self.acctime / self.step, 0, 1));
-        }
-    };
+    fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
+        return lt.transform.lerp(&t.transform, std.math.clamp(self.ticker.physics.acctime_f / self.ticker.physics.step_f, 0, 1));
+    }
 
     pub fn init(window: *Engine.Window, app: *App) !@This() {
         const mouse = window.poll_mouse();
@@ -891,13 +879,11 @@ pub const AppState = struct {
         }
         std.debug.print("starting game...\n", .{});
 
-        var timer = try std.time.Timer.start();
         return .{
+            .ticker = try .init(),
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp())),
-            .ts = timer.read(),
-            .timer = timer,
             .arena = std.heap.ArenaAllocator.init(allocator.*),
             .cmdbuf = cmdbuf,
             .entities = .{
@@ -921,7 +907,7 @@ pub const AppState = struct {
         _ = self.cmdbuf_fuse.fuse();
     }
 
-    pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
+    pub fn tick(self: *@This(), engine: *Engine, app: *App) !void {
         app.telemetry.begin_sample(@src(), "app_state.tick");
         defer app.telemetry.end_sample();
 
@@ -933,8 +919,8 @@ pub const AppState = struct {
 
         const assets = &app.resources.assets;
         const window = engine.window;
-        var delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
-        delta *= self.simulation_speed;
+
+        const delta = self.ticker.scaled.delta;
 
         var input = window.input();
 
@@ -998,9 +984,6 @@ pub const AppState = struct {
             self.mouse.y = @intFromFloat(mouse.y);
 
             self.frame += 1;
-            self.ts += lap;
-            self.time += delta;
-            self.deltatime = delta;
 
             if (!self.focus) {
                 mouse.dx = 0;
@@ -1209,7 +1192,7 @@ pub const AppState = struct {
                                 // const rng = math.Rng.init(self.rng.random()).with(.{ .min = 0.4, .max = 0.7 });
                                 const t = C.GlobalTransform{
                                     .transform = .{
-                                        .pos = self.physics.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)),
+                                        .pos = self.interpolated(player.lt, player.t).pos.add(fwd.scale(3.0)),
                                         .scale = .splat(1),
                                         .rotation = Vec4.quat_from_diff(.{ .y = 1 }, fwd),
                                     },
@@ -1223,7 +1206,7 @@ pub const AppState = struct {
                                     t.transform,
                                     app.handles.material.models,
                                 );
-                                try self.cmdbuf.add_component(entity, C.TimeDespawn{ .despawn_time = self.time + 10, .state = .alive });
+                                try self.cmdbuf.add_component(entity, C.TimeDespawn{ .despawn_time = self.ticker.scaled.time_f + 10, .state = .alive });
                                 try self.cmdbuf.add_component(entity, try C.Name.from("sword_bullet"));
                                 try self.cmdbuf.add_component(
                                     entity,
@@ -1240,7 +1223,7 @@ pub const AppState = struct {
                                 );
                                 _ = try self.cmdbuf.insert(.{
                                     C.TimeDespawn{
-                                        .despawn_time = self.time + assets.ref(app.handles.audio.shot).duration_sec(),
+                                        .despawn_time = self.ticker.scaled.time_f + assets.ref(app.handles.audio.shot).duration_sec(),
                                         .state = .alive,
                                     },
                                     C.StaticSound{ .audio = app.handles.audio.shot, .pos = player.t.transform.pos, .start_frame = app.audio.ctx.ctx.frame_count, .volume = 0.4 },
@@ -1261,12 +1244,11 @@ pub const AppState = struct {
             app.telemetry.begin_sample(@src(), ".physics");
             defer app.telemetry.end_sample();
 
-            self.physics.acctime += delta;
+            const steps = self.ticker.physics.steps();
+            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (capped)", .{}), steps.count);
 
-            var steps: usize = @intFromFloat(@divFloor(self.physics.acctime, self.physics.step));
-            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (cap={d})", .{Physics.max_steps_per_frame}), steps);
-            steps = @min(steps, Physics.max_steps_per_frame); // no more than x steps per frame
-            if (steps >= 1) {
+            // no more than x steps per frame
+            if (steps.capped > 0) {
                 app.telemetry.begin_sample(@src(), ".jolt");
                 defer app.telemetry.end_sample();
 
@@ -1279,9 +1261,7 @@ pub const AppState = struct {
                     app.world.phy.render_tick();
                 };
 
-                self.physics.acctime -= self.physics.step * cast(f32, steps);
-
-                for (0..steps) |step| {
+                for (0..steps.capped) |step| {
                     app.telemetry.begin_sample(@src(), ".step");
                     defer app.telemetry.end_sample();
 
@@ -1297,7 +1277,7 @@ pub const AppState = struct {
                         }
 
                         var vel = Vec3.from_buf(char.character.getLinearVelocity());
-                        vel = vel.add(char.force.scale(self.physics.step));
+                        vel = vel.add(char.force.scale(self.ticker.physics.step_f));
 
                         if (char.character.getGroundState() == .on_ground) {
                             const ground = Vec3.from_buf(char.character.getGroundNormal());
@@ -1313,7 +1293,7 @@ pub const AppState = struct {
                         char.character.setLinearVelocity(vel.to_buf());
 
                         char.character.extendedUpdate(
-                            self.physics.step,
+                            self.ticker.physics.step_f,
                             (Vec3{ .y = -1 }).to_buf(),
                             &update_settings,
                             .{
@@ -1325,7 +1305,7 @@ pub const AppState = struct {
                         );
                     }
 
-                    try app.world.phy.update(self.physics.step, 1);
+                    try app.world.phy.update(self.ticker.physics.step_f, 1);
                 }
 
                 {
@@ -1385,7 +1365,7 @@ pub const AppState = struct {
             while (it.next()) |e| {
                 switch (e.ds.state) {
                     .alive => {
-                        if (e.ds.despawn_time < self.time) {
+                        if (e.ds.despawn_time < self.ticker.scaled.time_f) {
                             e.ds.state = .dying;
 
                             try self.cmdbuf.add_component(e.id.*, C.Sound{
@@ -1546,7 +1526,7 @@ pub const AppState = struct {
                     if (instance) |ptr| {
                         const bones = try instances.reserve_bones(1);
                         ptr.bone_offset = bones.first;
-                        bones.buf[0] = self.physics.interpolated(e.ft, e.t).mat4();
+                        bones.buf[0] = self.interpolated(e.ft, e.t).mat4();
                     }
                 }
             }
@@ -1567,7 +1547,7 @@ pub const AppState = struct {
                         @memset(bones.buf, .{});
                         ptr.bone_offset = bones.first;
                         for (0..armature.bones.len) |index| {
-                            bones.buf[index] = self.physics.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(armature.bones[index].inverse_bind_matrix);
+                            bones.buf[index] = self.interpolated(e.ft, e.t).mat4().mul_mat(e.m.bones[index]).mul_mat(armature.bones[index].inverse_bind_matrix);
                         }
                     }
                 }
@@ -1630,7 +1610,7 @@ pub const AppState = struct {
             });
             app.resources.camera_uniform = try self.uniforms(
                 window,
-                &self.physics.interpolated(player.lt, player.t),
+                &self.interpolated(player.lt, player.t),
                 player.camera,
                 player.controller,
             );
@@ -1678,8 +1658,8 @@ pub const AppState = struct {
             }),
             .frame = .{
                 .frame = self.frame,
-                .time = self.time,
-                .deltatime = self.deltatime,
+                .time = self.ticker.scaled.time_f,
+                .deltatime = self.ticker.scaled.delta,
                 .width = @intCast(window.extent.width),
                 .height = @intCast(window.extent.height),
                 .monitor_width = @intCast(self.monitor_rez.width),
@@ -1707,8 +1687,7 @@ pub const AppState = struct {
     }
 
     pub fn reset_time(self: *@This()) void {
-        self.time = 0;
-        self.deltatime = 0;
+        self.ticker.reset();
         self.frame = 0;
     }
 };
@@ -1717,14 +1696,12 @@ pub const GuiState = struct {
     frame_times: [10]f32 = std.mem.zeroes([10]f32),
     frame_times_i: usize = 10,
 
-    pub fn tick(self: *@This(), app: *App, state: *AppState, lap: u64) !void {
-        const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
-
+    pub fn tick(self: *@This(), app: *App, state: *AppState) !void {
         const player = try app.world.ecs.get(state.entities.player, struct { controller: C.Controller });
 
         self.frame_times_i += 1;
         self.frame_times_i = @rem(self.frame_times_i, self.frame_times.len);
-        self.frame_times[self.frame_times_i] = delta * std.time.ms_per_s;
+        self.frame_times[self.frame_times_i] = state.ticker.real.delta * std.time.ms_per_s;
         const frametime = std.mem.max(f32, &self.frame_times);
 
         c.ImGui_SetNextWindowPos(.{ .x = 5, .y = 5 }, c.ImGuiCond_Once);
@@ -1746,16 +1723,19 @@ pub const GuiState = struct {
         _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
         _ = c.ImGui_SliderFloat("audio volume", @ptrCast(&app.audio.ctx.ctx.volume), 0.0, 1.0);
-        _ = c.ImGui_SliderFloat("simulation_speed", @ptrCast(&state.simulation_speed), 0.0, 5.0);
+
+        var sim_speed = state.ticker.speed.perc;
+        if (c.ImGui_SliderFloat("simulation_speed", @ptrCast(&sim_speed), 0.0, 5.0)) {
+            state.ticker.speed.set_speed(sim_speed);
+        }
+
         // 'or' short circuits :/
         reset = c.ImGui_Checkbox("Jolt debug renderer", @ptrCast(&state.jolt_debug_render)) or reset;
 
         reset = c.ImGui_Button("Reset render state") or reset;
 
-        c.ImGui_Text("time: %.3f", state.time);
-        c.ImGui_Text("deltatime: %.f", state.deltatime);
-        c.ImGui_Text("acctime: %f", state.physics.acctime);
-        c.ImGui_Text("acctime/step: %.3f", state.physics.acctime / state.physics.step);
+        c.ImGui_Text("scaled time: %.3f", state.ticker.scaled.time_f);
+        c.ImGui_Text("physics acctime/step: %.3f", state.ticker.physics.acctime_f / state.ticker.physics.step_f);
 
         if (reset) {
             _ = state.cmdbuf_fuse.fuse();
