@@ -977,6 +977,7 @@ pub const World = struct {
         self.ecs.deinit(@ptrCast(self));
         self.phy.deinit();
     }
+<<<<<<< Side #1 (Conflict 1 of 1)
 
     pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
         try self.phy.update(sim_time, steps);

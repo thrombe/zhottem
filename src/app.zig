@@ -679,15 +679,8 @@ pub const AppState = struct {
     deltatime: f32 = 0,
     fps_cap: u32 = 60,
 
-    physics: struct {
-        step: f32 = 1.0 / 60.0,
-        acctime: f32 = 0,
-        interpolation_acctime: f32 = 0,
-
-        fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
-            return lt.transform.lerp(&t.transform, self.interpolation_acctime / self.step);
-        }
-    } = .{},
+    simulation_speed: f32 = 1.0,
+    physics: Physics = .{},
 
     rng: std.Random.Xoshiro256,
     resize_fuse: Fuse = .{},
@@ -705,6 +698,17 @@ pub const AppState = struct {
 
     const Entities = struct {
         player: Entity,
+    };
+
+    const Physics = struct {
+        step: f32 = 1.0 / 60.0,
+        acctime: f32 = 0,
+
+        const max_steps_per_frame: u32 = 5;
+
+        fn interpolated(self: *const @This(), lt: *const C.LastTransform, t: *const C.GlobalTransform) C.Transform {
+            return lt.transform.lerp(&t.transform, std.math.clamp(self.acctime / self.step, 0, 1));
+        }
     };
 
     pub fn init(window: *Engine.Window, start_ts: u64, app: *App) !@This() {
@@ -876,7 +880,8 @@ pub const AppState = struct {
 
         const assets = &app.resources.assets;
         const window = engine.window;
-        const delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+        var delta = @as(f32, @floatFromInt(lap)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+        delta *= self.simulation_speed;
 
         var input = window.input();
 
@@ -1102,8 +1107,7 @@ pub const AppState = struct {
                                 speed *= 0.1;
                             }
 
-                            speed *= 5000 * player.controller.speed;
-                            speed *= delta;
+                            speed *= 100 * player.controller.speed;
 
                             if (char.character.getGroundState() == .on_ground) {
                                 if (kb.w.pressed()) {
@@ -1205,10 +1209,10 @@ pub const AppState = struct {
             defer app.telemetry.end_sample();
 
             self.physics.acctime += delta;
-            self.physics.interpolation_acctime += delta;
 
-            var steps = @divFloor(self.physics.acctime, self.physics.step);
-            steps = @min(steps, 5); // no more than 5 steps per frame
+            var steps: usize = @intFromFloat(@divFloor(self.physics.acctime, self.physics.step));
+            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps (cap={d})", .{Physics.max_steps_per_frame}), steps);
+            steps = @min(steps, Physics.max_steps_per_frame); // no more than x steps per frame
             if (steps >= 1) {
                 app.telemetry.begin_sample(@src(), ".jolt");
                 defer app.telemetry.end_sample();
@@ -1222,65 +1226,99 @@ pub const AppState = struct {
                     app.world.phy.render_tick();
                 };
 
-                self.physics.acctime -= self.physics.step * steps;
+                self.physics.acctime -= self.physics.step * cast(f32, steps);
 
-                // {
-                //     var it = app.world.ecs.iterator(struct { r: C.Rigidbody });
-                //     while (it.next()) |e| {
-                //         if (!e.r.flags.pinned) {
-                //             const g = camera.world_basis.up.scale(-9.8 / e.r.invmass);
-                //             e.r.force = e.r.force.add(g);
-                //         }
-                //     }
-                // }
-
-                var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
-                while (player_it.next()) |e| {
-                    app.telemetry.begin_sample(@src(), ".tick");
+                for (0..steps) |step| {
+                    app.telemetry.begin_sample(@src(), ".step");
                     defer app.telemetry.end_sample();
 
-                    const char: *C.CharacterBody = e.char;
-                    char.force = char.force.add(Vec3.from_buf(app.world.phy.phy.getGravity()));
+                    var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
+                    while (player_it.next()) |e| {
+                        app.telemetry.begin_sample(@src(), ".player");
+                        defer app.telemetry.end_sample();
 
-                    var vel = Vec3.from_buf(char.character.getLinearVelocity());
-                    vel = vel.add(char.force.scale(self.physics.step));
+                        const char: *C.CharacterBody = e.char;
+                        const update_settings: jolt.CharacterVirtual.ExtendedUpdateSettings = .{};
+                        if (step == 0) {
+                            char.force = char.force.add(Vec3.from_buf(app.world.phy.phy.getGravity()));
+                        }
 
-                    if (char.character.getGroundState() == .on_ground) {
-                        const ground = Vec3.from_buf(char.character.getGroundNormal());
-                        vel = vel.sub(ground.scale(vel.dot(ground)));
+                        var vel = Vec3.from_buf(char.character.getLinearVelocity());
+                        vel = vel.add(char.force.scale(self.physics.step));
 
-                        // friction
-                        vel = vel.scale(0.9);
+                        if (char.character.getGroundState() == .on_ground) {
+                            const ground = Vec3.from_buf(char.character.getGroundNormal());
+                            vel = vel.sub(ground.scale(vel.dot(ground)));
+
+                            // friction
+                            vel = vel.scale(0.9);
+                        }
+
+                        if (step == 0) {
+                            vel = vel.add(char.impulse);
+                        }
+                        char.character.setLinearVelocity(vel.to_buf());
+
+                        char.character.extendedUpdate(
+                            self.physics.step,
+                            (Vec3{ .y = -1 }).to_buf(),
+                            &update_settings,
+                            .{
+                                // .broad_phase_layer_filter = app.world.phy.state.broadphase_layer_filter.interface(),
+                                // .object_layer_filter = app.world.phy.state.object_layer_filter.interface(),
+                                // body_filter: ?*const BodyFilter = null,
+                                // shape_filter: ?*const ShapeFilter = null,
+                            },
+                        );
                     }
 
-                    vel = vel.add(char.impulse);
-                    char.character.setLinearVelocity(vel.to_buf());
-
-                    const update_settings: jolt.CharacterVirtual.ExtendedUpdateSettings = .{};
-                    char.character.extendedUpdate(
-                        self.physics.step * steps,
-                        (Vec3{ .y = -1 }).to_buf(),
-                        &update_settings,
-                        .{
-                            // .broad_phase_layer_filter = app.world.phy.state.broadphase_layer_filter.interface(),
-                            // .object_layer_filter = app.world.phy.state.object_layer_filter.interface(),
-                            // body_filter: ?*const BodyFilter = null,
-                            // shape_filter: ?*const ShapeFilter = null,
-                        },
-                    );
+                    try app.world.phy.update(self.physics.step, 1);
                 }
 
                 {
-                    app.telemetry.begin_sample(@src(), ".world_copy");
+                    app.telemetry.begin_sample(@src(), ".last_transform_copy");
                     defer app.telemetry.end_sample();
 
-                    try app.world.step(self.physics.step * steps, @intFromFloat(steps));
-
-                    self.physics.interpolation_acctime = self.physics.acctime;
                     var it = app.world.ecs.iterator(struct { t: C.GlobalTransform, ft: C.LastTransform });
                     while (it.next()) |e| {
                         e.ft.transform = e.t.transform;
                     }
+                }
+
+                {
+                    app.telemetry.begin_sample(@src(), ".physics_transform_copy");
+                    defer app.telemetry.end_sample();
+
+                    var it = app.world.ecs.iterator(struct { t: C.GlobalTransform, bid: C.BodyId });
+                    while (it.next()) |e| {
+                        const t = app.world.phy.get_transform(e.bid.*);
+                        e.t.set(.{ .pos = t.position, .rotation = t.rotation, .scale = e.t.transform.scale });
+                    }
+                }
+
+                {
+                    app.telemetry.begin_sample(@src(), ".char_transform_copy");
+                    defer app.telemetry.end_sample();
+
+                    var player_it = app.world.ecs.iterator(struct { t: C.GlobalTransform, char: C.CharacterBody });
+                    while (player_it.next()) |e| {
+                        const char: *C.CharacterBody = e.char;
+                        const pos = Vec3.from_buf(char.character.getPosition());
+                        const rot = Vec4.from_buf(char.character.getRotation());
+                        e.t.set(.{ .pos = pos, .rotation = rot, .scale = e.t.transform.scale });
+                    }
+                }
+            }
+
+            {
+                app.telemetry.begin_sample(@src(), ".char_attr_clear");
+                defer app.telemetry.end_sample();
+
+                var player_it = app.world.ecs.iterator(struct { char: C.CharacterBody });
+                while (player_it.next()) |e| {
+                    const char: *C.CharacterBody = e.char;
+                    char.force = .{};
+                    char.impulse = .{};
                 }
             }
         }
@@ -1331,7 +1369,7 @@ pub const AppState = struct {
                     const animation = &armature.animations[ar.animation_index];
 
                     for (ar.bones) |*t| {
-                        t.* = math.Mat4x4.scaling_mat(.splat(1));
+                        t.* = .scaling_mat(.splat(1));
                     }
 
                     var updated = false;
@@ -1649,10 +1687,16 @@ pub const GuiState = struct {
         _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
         _ = c.ImGui_SliderFloat("audio volume", @ptrCast(&app.audio.ctx.ctx.volume), 0.0, 1.0);
+        _ = c.ImGui_SliderFloat("simulation_speed", @ptrCast(&state.simulation_speed), 0.0, 5.0);
         // 'or' short circuits :/
         reset = c.ImGui_Checkbox("Jolt debug renderer", @ptrCast(&state.jolt_debug_render)) or reset;
 
         reset = c.ImGui_Button("Reset render state") or reset;
+
+        c.ImGui_Text("time: %.3f", state.time);
+        c.ImGui_Text("deltatime: %.f", state.deltatime);
+        c.ImGui_Text("acctime: %f", state.physics.acctime);
+        c.ImGui_Text("acctime/step: %.3f", state.physics.acctime / state.physics.step);
 
         if (reset) {
             _ = state.cmdbuf_fuse.fuse();
