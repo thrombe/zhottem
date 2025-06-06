@@ -22,10 +22,7 @@
      uint right;
  };
 
- struct Uniforms {
-     Camera camera;
-     Mouse mouse;
-     mat4 world_to_screen;
+ struct Frame {
      uint frame;
      float time;
      float deltatime;
@@ -33,6 +30,13 @@
      int height;
      int monitor_width;
      int monitor_height;
+ };
+
+ struct Uniforms {
+     Camera camera;
+     Mouse mouse;
+     mat4 world_to_screen;
+     Frame frame;
  };
 
  struct Vertex {

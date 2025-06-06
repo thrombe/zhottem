@@ -24,8 +24,6 @@ const GuiEngine = gui.GuiEngine;
 
 const render_utils = @import("render_utils.zig");
 const Swapchain = render_utils.Swapchain;
-const UniformBuffer = render_utils.UniformBuffer;
-const DynamicUniformBuffer = render_utils.DynamicUniformBuffer;
 const Buffer = render_utils.Buffer;
 const Image = render_utils.Image;
 const GraphicsPipeline = render_utils.GraphicsPipeline;
@@ -361,7 +359,7 @@ pub fn present(
         self.telemetry.begin_sample(@src(), ".gpu_buffer_uploads");
         defer self.telemetry.end_sample();
 
-        try dynamic_state.uniforms.upload(&ctx.device);
+        try self.resources.update_uniforms(&ctx.device);
         const updates = try self.resources.instances.update(ctx, self.command_pool);
         if (updates.buffer_invalid) {
             _ = app_state.shader_fuse.fuse();
@@ -437,9 +435,6 @@ pub fn present(
 }
 
 pub const RendererState = struct {
-    // TODO: move uniforms' Buffer into app.resources
-    //  and store the []u8 inner buffer either in appstate
-    uniforms: UniformBuffer,
     swapchain: Swapchain,
     cmdbuffer: CmdBuffer,
     descriptor_set: DescriptorSet,
@@ -494,16 +489,7 @@ pub const RendererState = struct {
             try pipelines.put(handle, undefined);
         }
 
-        const player = try app.world.ecs.get(app_state.entities.player, struct {
-            t: C.GlobalTransform,
-            camera: C.Camera,
-            controller: C.Controller,
-        });
-        var uniforms = try UniformBuffer.new(try app_state.uniforms(engine.window, &player.t.transform, player.camera, player.controller), ctx);
-        errdefer uniforms.deinit(device);
-
         var self: @This() = .{
-            .uniforms = uniforms,
             .stages = stages,
             .pipelines = pipelines,
             .descriptor_set = undefined,
@@ -552,7 +538,6 @@ pub const RendererState = struct {
 
         var desc_set_builder = app.descriptor_pool.set_builder();
         defer desc_set_builder.deinit();
-        try desc_set_builder.add(&self.uniforms, resources_mod.UniformBinds.camera.bind());
         try desc_set_builder.add(&app.texture, resources_mod.UniformBinds.texture.bind());
         try app.resources.add_binds(&desc_set_builder);
         var desc_set = try desc_set_builder.build(device);
@@ -644,7 +629,6 @@ pub const RendererState = struct {
     pub fn deinit(self: *@This(), device: *Device) void {
         try self.swapchain.waitForAllFences(device);
 
-        defer self.uniforms.deinit(device);
         defer self.swapchain.deinit(device);
         defer self.cmdbuffer.deinit(device);
 
@@ -709,7 +693,6 @@ pub const AppState = struct {
     resize_fuse: Fuse = .{},
     cmdbuf_fuse: Fuse = .{},
     shader_fuse: Fuse = .{},
-    uniform_buffer: []u8,
     uniform_shader_dumped: bool = false,
     focus: bool = false,
     jolt_debug_render: bool = false,
@@ -863,7 +846,6 @@ pub const AppState = struct {
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp())),
-            .uniform_buffer = try allocator.alloc(u8, 0),
             .ts = start_ts,
             .cmdbuf = cmdbuf,
             .entities = .{
@@ -873,7 +855,6 @@ pub const AppState = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        allocator.free(self.uniform_buffer);
         self.cmdbuf.deinit();
     }
 
@@ -887,7 +868,7 @@ pub const AppState = struct {
         _ = self.cmdbuf_fuse.fuse();
     }
 
-    pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App, render_state: *RendererState) !void {
+    pub fn tick(self: *@This(), lap: u64, engine: *Engine, app: *App) !void {
         app.telemetry.begin_sample(@src(), "app_state.tick");
         defer app.telemetry.end_sample();
 
@@ -1550,7 +1531,7 @@ pub const AppState = struct {
                 lt: C.LastTransform,
                 t: C.GlobalTransform,
             });
-            render_state.uniforms.uniform_buffer = try self.uniforms(
+            app.resources.camera_uniform = try self.uniforms(
                 window,
                 &self.physics.interpolated(player.lt, player.t),
                 player.camera,
@@ -1565,7 +1546,7 @@ pub const AppState = struct {
         transform: *const C.Transform,
         camera: *const C.Camera,
         controller: *const C.Controller,
-    ) ![]u8 {
+    ) !resources_mod.CameraUniform {
         const rot = camera.rot_quat(controller.pitch, controller.yaw);
 
         const fwd = rot.rotate_vector(camera.world_basis.fwd);
@@ -1573,8 +1554,8 @@ pub const AppState = struct {
         const up = rot.rotate_vector(camera.world_basis.up);
         const eye = transform.pos;
 
-        const uniform = .{
-            .camera = ShaderUtils.Camera{
+        const uniform = resources_mod.CameraUniform{
+            .camera = .{
                 .eye = eye,
                 .fwd = fwd,
                 .right = right,
@@ -1585,7 +1566,7 @@ pub const AppState = struct {
                     .did_change = @intCast(@intFromBool(controller.did_rotate or controller.did_move)),
                 },
             },
-            .mouse = ShaderUtils.Mouse{
+            .mouse = .{
                 .x = self.mouse.x,
                 .y = self.mouse.y,
                 .left = @intCast(@intFromBool(self.mouse.left)),
@@ -1598,21 +1579,16 @@ pub const AppState = struct {
                 .pitch = controller.pitch,
                 .yaw = controller.yaw,
             }),
-            .frame = self.frame,
-            .time = self.time,
-            .deltatime = self.deltatime,
-            .width = @as(i32, @intCast(window.extent.width)),
-            .height = @as(i32, @intCast(window.extent.height)),
-            .monitor_width = @as(i32, @intCast(self.monitor_rez.width)),
-            .monitor_height = @as(i32, @intCast(self.monitor_rez.height)),
+            .frame = .{
+                .frame = self.frame,
+                .time = self.time,
+                .deltatime = self.deltatime,
+                .width = @intCast(window.extent.width),
+                .height = @intCast(window.extent.height),
+                .monitor_width = @intCast(self.monitor_rez.width),
+                .monitor_height = @intCast(self.monitor_rez.height),
+            },
         };
-        const ubo = ShaderUtils.create_uniform_object(@TypeOf(uniform), uniform);
-        const ubo_buffer = std.mem.asBytes(&ubo);
-
-        if (self.uniform_buffer.len != ubo_buffer.len) {
-            allocator.free(self.uniform_buffer);
-            self.uniform_buffer = try allocator.alloc(u8, ubo_buffer.len);
-        }
 
         if (!self.uniform_shader_dumped) {
             self.uniform_shader_dumped = true;
@@ -1620,19 +1596,17 @@ pub const AppState = struct {
             var gen = try ShaderUtils.GlslBindingGenerator.init();
             defer gen.deinit();
 
-            try gen.add_struct("Uniforms", @TypeOf(ubo));
+            try gen.add_struct("Uniforms", resources_mod.CameraUniform);
             try gen.add_struct("Vertex", resources_mod.Vertex);
             try gen.add_struct("Instance", resources_mod.Instance);
             try gen.add_struct("DrawCtx", resources_mod.ResourceManager.InstanceResources.DrawCtx);
             try gen.add_struct("PushConstants", resources_mod.PushConstants);
             try gen.add_struct("LineVertex", resources_mod.ResourceManager.JoltDebugResources.LineVertex);
-            try gen.add_bind_enum(resources_mod.UniformBinds);
+            try gen.add_enum("_bind", resources_mod.UniformBinds);
             try gen.dump_shader("src/uniforms.glsl");
         }
 
-        @memcpy(self.uniform_buffer, ubo_buffer);
-
-        return self.uniform_buffer;
+        return uniform;
     }
 
     pub fn reset_time(self: *@This()) void {

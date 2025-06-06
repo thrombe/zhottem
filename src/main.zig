@@ -428,7 +428,7 @@ const HotApp = struct {
         try self.gui_state.tick(&self.app, &self.app_state, lap);
         try self.gui_renderer.render_end(&self.engine.graphics.device, &self.renderer_state.swapchain);
 
-        try self.app_state.tick(lap, &self.engine, &self.app, &self.renderer_state);
+        try self.app_state.tick(lap, &self.engine, &self.app);
 
         const present = try self.app.present(&self.renderer_state, &self.app_state, &self.gui_renderer, &self.engine);
         // IDK: this never triggers :/

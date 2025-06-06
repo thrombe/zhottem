@@ -12,7 +12,7 @@ layout(set = 0, binding = _bind_camera) uniform Ubo {
 };
 
 void set_seed(int id) {
-    seed = int(ubo.frame) ^ id ^ floatBitsToInt(ubo.time);
+    seed = int(ubo.frame.frame) ^ id ^ floatBitsToInt(ubo.frame.time);
 }
 
 layout(push_constant) uniform PushConstantsUniform {
@@ -80,7 +80,7 @@ layout(set = 0, binding = _bind_line_vertex_buffer) readonly restrict buffer Lin
     layout(location = 3) in float light;
     layout(location = 0) out vec4 fcolor;
     void main() {
-        vec2 res = vec2(ubo.width, ubo.height);
+        vec2 res = vec2(ubo.frame.width, ubo.frame.height);
         
         vec3 color = texture(tex, uv).xyz;
         fcolor = vec4(color * max(pow(light, 0.2), 0.2), 1.0);
@@ -108,7 +108,7 @@ layout(set = 0, binding = _bind_line_vertex_buffer) readonly restrict buffer Lin
 #ifdef BG_FRAG_PASS
     layout(location = 0) out vec4 fcolor;
     void main() {
-        float y = gl_FragCoord.y/float(ubo.height) - 0.5;
+        float y = gl_FragCoord.y/float(ubo.frame.height) - 0.5;
         y -= ubo.camera.fwd.y;
 
         vec3 color = mix(vec3(1.0, 0.6, 0.6), vec3(0.2, 0.2, 0.3), y * 0.5 + 0.5);
@@ -135,7 +135,7 @@ layout(set = 0, binding = _bind_line_vertex_buffer) readonly restrict buffer Lin
     layout(location = 0) in vec4 vcolor;
     layout(location = 0) out vec4 fcolor;
     void main() {
-        vec2 res = vec2(ubo.width, ubo.height);
+        vec2 res = vec2(ubo.frame.width, ubo.frame.height);
 
         vec2 screen_uv = gl_FragCoord.xy/res.xy;
         vec2 center = step(-abs(screen_uv * 2.0 - 1.0), vec2(-0.004) * res.yx/min(res.x, res.y));

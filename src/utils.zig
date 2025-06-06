@@ -987,10 +987,10 @@ pub const ShaderUtils = struct {
         frame: u32,
         time: f32,
         deltatime: f32,
-        width: u32,
-        height: u32,
-        monitor_width: u32,
-        monitor_height: u32,
+        width: i32,
+        height: i32,
+        monitor_width: i32,
+        monitor_height: i32,
     };
 
     // TODO: maybe enforce this
@@ -1134,7 +1134,7 @@ pub const ShaderUtils = struct {
             }
         }
 
-        pub fn add_bind_enum(self: *@This(), bind: type) !void {
+        pub fn add_enum(self: *@This(), prefix: []const u8, bind: type) !void {
             if (try self.remember(bind)) {
                 return;
             }
@@ -1143,9 +1143,9 @@ pub const ShaderUtils = struct {
 
             inline for (@typeInfo(bind).@"enum".fields) |field| {
                 try w.print(
-                    \\ const int _bind_{s} = {d};
+                    \\ const int {s}_{s} = {d};
                     \\
-                , .{ field.name, field.value });
+                , .{ prefix, field.name, field.value });
             }
 
             try w.print(

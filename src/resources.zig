@@ -18,6 +18,13 @@ const CmdBuffer = render_utils.CmdBuffer;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
+pub const CameraUniform = extern struct {
+    camera: utils_mod.ShaderUtils.Camera,
+    mouse: utils_mod.ShaderUtils.Mouse,
+    world_to_screen: math.Mat4x4,
+    frame: utils_mod.ShaderUtils.Frame,
+};
+
 pub const PushConstants = extern struct {
     first_draw_ctx: u32,
 };
@@ -54,6 +61,10 @@ pub const ResourceManager = struct {
     assets: Assets,
     asset_buffers: AssetBuffers,
 
+    // uniforms
+    camera_uniform: CameraUniform = std.mem.zeroes(CameraUniform),
+    camera_uniform_buf: Buffer,
+
     // dynamic as instances vary at runtime
     instances: InstanceResources,
 
@@ -61,9 +72,28 @@ pub const ResourceManager = struct {
     jolt_debug_resources: JoltDebugResources,
 
     pub fn init(assets: Assets, engine: *Engine, pool: vk.CommandPool) !@This() {
+        var camera_uniform_buf = try Buffer.new_initialized(&engine.graphics, .{
+            .size = @sizeOf(CameraUniform),
+            .usage = .{
+                .uniform_buffer_bit = true,
+            },
+            .memory_type = .{
+                // https://community.khronos.org/t/memory-type-practice-for-an-mvp-uniform-buffer/109458/7
+                // we ideally want device local for cpu to gpu, but instance transforms are not a bottleneck (generally)
+                // so we save this memory (device_local + host_visible) for more useful things
+                // .device_local_bit = true,
+
+                .host_visible_bit = true,
+                .host_coherent_bit = true,
+            },
+            .desc_type = .uniform_buffer,
+        }, std.mem.zeroes(CameraUniform), pool);
+        errdefer camera_uniform_buf.deinit(&engine.graphics.device);
+
         return .{
             .assets = assets,
             .asset_buffers = try assets.upload(engine, pool),
+            .camera_uniform_buf = camera_uniform_buf,
             .instances = try .init(engine, pool, .{}),
             .jolt_debug_resources = try .init(engine, pool, .{}),
         };
@@ -72,6 +102,7 @@ pub const ResourceManager = struct {
     pub fn deinit(self: *@This(), device: *Device) void {
         self.assets.deinit();
         self.asset_buffers.deinit(device);
+        self.camera_uniform_buf.deinit(device);
         self.instances.deinit(device);
         self.jolt_debug_resources.deinit(device);
     }
@@ -83,6 +114,7 @@ pub const ResourceManager = struct {
             }
         }.func;
 
+        try add_to_set(builder, &self.camera_uniform_buf, .camera);
         try add_to_set(builder, &self.asset_buffers.vertex_buffer, .vertices);
         try add_to_set(builder, &self.asset_buffers.index_buffer, .indices);
         try add_to_set(builder, &self.instances.instance_buffer.current.buffer, .instances);
@@ -90,6 +122,19 @@ pub const ResourceManager = struct {
         try add_to_set(builder, &self.instances.draw_ctx_buffer.current.buffer, .call_ctxts);
 
         try add_to_set(builder, &self.jolt_debug_resources.line_buffer.current.buffer, .line_vertex_buffer);
+    }
+
+    pub fn update_uniforms(self: *@This(), device: *Device) !void {
+        const maybe_mapped = try device.mapMemory(self.camera_uniform_buf.memory, 0, vk.WHOLE_SIZE, .{});
+        const mapped = maybe_mapped orelse return error.MappingMemoryFailed;
+        // keeping memory mapped is not bad in vulkan
+        defer device.unmapMemory(self.camera_uniform_buf.memory);
+
+        const mem: *CameraUniform = @ptrCast(@alignCast(mapped));
+        mem.* = self.camera_uniform;
+
+        // flush manually + host_coherent_bit = false
+        // device.flushMappedMemoryRanges(memory_range_count: u32, p_memory_ranges: [*]const MappedMemoryRange)
     }
 
     const BufferWithCapacity = struct {
