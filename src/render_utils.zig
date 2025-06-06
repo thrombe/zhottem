@@ -1001,9 +1001,10 @@ pub const Buffer = struct {
     dbi: vk.DescriptorBufferInfo,
     desc_type: vk.DescriptorType,
 
-    const Args = struct {
+    pub const Args = struct {
         size: u64,
         usage: vk.BufferUsageFlags = .{},
+        // TODO: don't use staging buffer to init if it can be avoided
         memory_type: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
         desc_type: vk.DescriptorType = .storage_buffer,
     };

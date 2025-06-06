@@ -92,8 +92,130 @@ pub const ResourceManager = struct {
         try add_to_set(builder, &self.jolt_debug_resources.line_buffer.current.buffer, .line_vertex_buffer);
     }
 
+    const BufferWithCapacity = struct {
+        buffer: Buffer,
+        capacity: u32,
+        mapped_buffer_mem: ?*anyopaque = null,
+
+        pub fn map(self: *@This(), device: *Device) !void {
+            if (self.mapped_buffer_mem) |_| return;
+            self.mapped_buffer_mem = try device.mapMemory(self.buffer.memory, 0, vk.WHOLE_SIZE, .{});
+        }
+
+        pub fn unmap(self: *@This(), device: *Device) void {
+            if (self.mapped_buffer_mem) |_| device.unmapMemory(self.buffer.memory);
+            self.mapped_buffer_mem = null;
+        }
+
+        pub fn deinit(self: *@This(), device: *Device) void {
+            self.unmap(device);
+            self.buffer.deinit(device);
+        }
+    };
+    const ElementDoubleBuffer = struct {
+        current: BufferWithCapacity,
+        count: u32 = 0,
+        back: ?BufferWithCapacity = null,
+        usage: vk.BufferUsageFlags,
+        memory_type: vk.MemoryPropertyFlags,
+        desc_type: vk.DescriptorType,
+        state: enum {
+            enough,
+            out_of_space,
+            back_allocated,
+        } = .enough,
+
+        pub fn init(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: Buffer.Args, val: anytype) !@This() {
+            const device = &ctx.device;
+
+            var buf = try Buffer.new_initialized(ctx, v, val, pool);
+            errdefer buf.deinit(device);
+
+            var buf_with_cap = BufferWithCapacity{ .buffer = buf, .capacity = @intCast(v.size) };
+            errdefer buf_with_cap.unmap(device);
+
+            if (v.memory_type.host_visible_bit and v.memory_type.host_coherent_bit) {
+                try buf_with_cap.map(device);
+            }
+
+            return .{
+                .current = buf_with_cap,
+                .usage = v.usage,
+                .memory_type = v.memory_type,
+                .desc_type = v.desc_type,
+            };
+        }
+
+        pub fn deinit(self: *@This(), device: *Device) void {
+            self.current.deinit(device);
+            if (self.back) |*back| back.deinit(device);
+        }
+
+        pub fn alloc(self: *@This(), buf: anytype) u32 {
+            const E = std.meta.Elem(@TypeOf(buf));
+
+            var gpu_items: [*c]E = @ptrCast(@alignCast(self.current.mapped_buffer_mem.?));
+
+            const can_alloc = @min(self.current.capacity - self.count, buf.len);
+            @memcpy(gpu_items[self.count..][0..can_alloc], buf[0..can_alloc]);
+            self.count += can_alloc;
+
+            if (can_alloc < buf.len and self.state == .enough) {
+                self.state = .out_of_space;
+            }
+
+            return can_alloc;
+        }
+
+        pub fn reset(self: *@This()) void {
+            self.count = 0;
+        }
+
+        pub fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool, val: anytype) !void {
+            const device = &ctx.device;
+
+            switch (self.state) {
+                .enough, .back_allocated => {},
+                .out_of_space => {
+                    const cap = self.current.capacity;
+                    const new_cap = cap + cap / 2;
+                    var buf = try Buffer.new_initialized(ctx, .{
+                        .size = new_cap,
+                        .usage = self.usage,
+                        .memory_type = self.memory_type,
+                        .desc_type = self.desc_type,
+                    }, val, pool);
+                    errdefer buf.deinit(device);
+
+                    self.back = .{
+                        .buffer = buf,
+                        .capacity = new_cap,
+                    };
+                    errdefer self.back.?.unmap(device);
+                    try self.back.?.map(device);
+
+                    self.state = .back_allocated;
+                },
+            }
+        }
+
+        pub fn swap_tick(self: *@This(), device: *Device) bool {
+            switch (self.state) {
+                .enough, .out_of_space => return false,
+                .back_allocated => {
+                    // this is okay cuz we have an empty queue every frame
+                    self.current.buffer.deinit(device);
+                    self.current = self.back.?;
+                    self.back = null;
+                    self.state = .enough;
+                    return true;
+                },
+            }
+        }
+    };
+
     pub const JoltDebugResources = struct {
-        line_buffer: InstanceResources.DoubleBuffer,
+        line_buffer: ElementDoubleBuffer,
 
         pub const LineVertex = extern struct {
             pos: math.Vec3,
@@ -106,7 +228,7 @@ pub const ResourceManager = struct {
             const ctx = &engine.graphics;
             const device = &ctx.device;
 
-            var line_buffer = try Buffer.new_initialized(ctx, .{
+            var line_buffer = try ElementDoubleBuffer.init(ctx, pool, .{
                 .size = v.line_vertex_cap,
                 .usage = .{ .storage_buffer_bit = true },
                 .memory_type = .{
@@ -114,22 +236,18 @@ pub const ResourceManager = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
-            }, std.mem.zeroes(LineVertex), pool);
+            }, std.mem.zeroes(LineVertex));
             errdefer line_buffer.deinit(device);
 
-            return .{ .line_buffer = .{ .current = .{ .buffer = line_buffer, .capacity = v.line_vertex_cap } } };
+            return .{ .line_buffer = line_buffer };
         }
 
         pub fn deinit(self: *@This(), device: *Device) void {
-            {
-                const buf = &self.line_buffer;
-                buf.current.buffer.deinit(device);
-                if (buf.back) |*back| back.buffer.deinit(device);
-            }
+            self.line_buffer.deinit(device);
         }
 
         pub fn reset(self: *@This()) void {
-            self.line_buffer.count = 0;
+            self.line_buffer.reset();
         }
 
         pub fn update(
@@ -146,7 +264,7 @@ pub const ResourceManager = struct {
             // try to swap the buffer created in the last frame
             const swapped = self.swap_tick(&ctx.device);
 
-            try self.update_vertices(&ctx.device, v.line_buffer);
+            try self.update_vertices(v.line_buffer);
 
             // start allocation of new buffer asap after we know current buffer is not enough
             try self.alloc_tick(ctx, command_pool);
@@ -154,71 +272,16 @@ pub const ResourceManager = struct {
             return .{ .buffer_invalid = swapped, .cmdbuf_invalid = true };
         }
 
-        fn update_vertices(self: *@This(), device: *Device, vertices: []LineVertex) !void {
-            const buf = &self.line_buffer;
-            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(buf.current.buffer.memory);
-
-            const gpu_items: [*]LineVertex = @ptrCast(@alignCast(data));
-
-            const can_alloc = @min(buf.current.capacity - buf.count, vertices.len);
-            @memcpy(gpu_items[buf.count..][0..can_alloc], vertices[0..can_alloc]);
-            buf.count = can_alloc;
-
-            if (can_alloc < vertices.len and buf.state == .enough) {
-                buf.state = .out_of_objects;
-            }
+        fn update_vertices(self: *@This(), vertices: []LineVertex) !void {
+            _ = self.line_buffer.alloc(vertices);
         }
 
         fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool) !void {
-            const device = &ctx.device;
-
-            {
-                const buf = &self.line_buffer;
-                switch (buf.state) {
-                    .enough, .back_allocated => {},
-                    .out_of_objects => {
-                        const instance_cap = buf.current.capacity;
-                        const new_instance_cap = instance_cap + instance_cap / 2;
-                        var instance_buffer = try Buffer.new_initialized(ctx, .{
-                            .size = new_instance_cap,
-                            .usage = .{ .storage_buffer_bit = true },
-                            .memory_type = .{
-                                .device_local_bit = true,
-                                .host_visible_bit = true,
-                                .host_coherent_bit = true,
-                            },
-                        }, std.mem.zeroes(LineVertex), pool);
-                        errdefer instance_buffer.deinit(device);
-
-                        buf.back = .{
-                            .buffer = instance_buffer,
-                            .capacity = new_instance_cap,
-                        };
-                        buf.state = .back_allocated;
-                    },
-                }
-            }
+            try self.line_buffer.alloc_tick(ctx, pool, std.mem.zeroes(LineVertex));
         }
 
         fn swap_tick(self: *@This(), device: *Device) bool {
-            var did_swap = false;
-            {
-                const buf = &self.line_buffer;
-
-                switch (buf.state) {
-                    .enough, .out_of_objects => {},
-                    .back_allocated => {
-                        // this is okay cuz we have an empty queue every frame
-                        buf.current.buffer.deinit(device);
-                        buf.current = buf.back.?;
-                        buf.back = null;
-                        buf.state = .enough;
-                        did_swap = true;
-                    },
-                }
-            }
-            return did_swap;
+            return self.line_buffer.swap_tick(device);
         }
 
         pub fn draw(
@@ -256,10 +319,10 @@ pub const ResourceManager = struct {
 
         // gpu side buffers
         // (double buffered for reallocation)
-        instance_buffer: DoubleBuffer,
-        bone_buffer: DoubleBuffer,
-        draw_call_buffer: DoubleBuffer,
-        draw_ctx_buffer: DoubleBuffer,
+        instance_buffer: ElementDoubleBuffer,
+        bone_buffer: ElementDoubleBuffer,
+        draw_call_buffer: ElementDoubleBuffer,
+        draw_ctx_buffer: ElementDoubleBuffer,
 
         hash: u64 = 0,
 
@@ -287,20 +350,6 @@ pub const ResourceManager = struct {
             // but for some reason i can't get a bugfree result unless i make it live longer
             push: PushConstants,
         });
-        const BufferWithCapacity = struct {
-            buffer: Buffer,
-            capacity: u32,
-        };
-        const DoubleBuffer = struct {
-            current: BufferWithCapacity,
-            count: u32 = 0,
-            back: ?BufferWithCapacity = null,
-            state: enum {
-                enough,
-                out_of_objects,
-                back_allocated,
-            } = .enough,
-        };
 
         pub fn init(engine: *Engine, pool: vk.CommandPool, v: struct {
             instance_cap: u32 = 500,
@@ -310,7 +359,7 @@ pub const ResourceManager = struct {
             const ctx = &engine.graphics;
             const device = &ctx.device;
 
-            var instance_buffer = try Buffer.new_initialized(ctx, .{
+            var instance_buffer = try ElementDoubleBuffer.init(ctx, pool, .{
                 .size = v.instance_cap,
                 .usage = .{ .storage_buffer_bit = true },
                 .memory_type = .{
@@ -318,10 +367,10 @@ pub const ResourceManager = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
-            }, std.mem.zeroes(Instance), pool);
+            }, std.mem.zeroes(Instance));
             errdefer instance_buffer.deinit(device);
 
-            var bone_buffer = try Buffer.new_initialized(ctx, .{
+            var bone_buffer = try ElementDoubleBuffer.init(ctx, pool, .{
                 .size = v.bone_cap,
                 .usage = .{ .storage_buffer_bit = true },
                 .memory_type = .{
@@ -329,10 +378,10 @@ pub const ResourceManager = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
-            }, std.mem.zeroes(math.Mat4x4), pool);
+            }, std.mem.zeroes(math.Mat4x4));
             errdefer bone_buffer.deinit(device);
 
-            var draw_call_buffer = try Buffer.new_initialized(ctx, .{
+            var draw_call_buffer = try ElementDoubleBuffer.init(ctx, pool, .{
                 .size = v.call_cap,
                 .usage = .{ .indirect_buffer_bit = true },
                 .memory_type = .{
@@ -340,10 +389,10 @@ pub const ResourceManager = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
-            }, std.mem.zeroes(DrawCall), pool);
+            }, std.mem.zeroes(DrawCall));
             errdefer draw_call_buffer.deinit(device);
 
-            var draw_ctx_buffer = try Buffer.new_initialized(ctx, .{
+            var draw_ctx_buffer = try ElementDoubleBuffer.init(ctx, pool, .{
                 .size = v.bone_cap,
                 .usage = .{ .storage_buffer_bit = true },
                 .memory_type = .{
@@ -351,29 +400,17 @@ pub const ResourceManager = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 },
-            }, std.mem.zeroes(DrawCtx), pool);
+            }, std.mem.zeroes(DrawCtx));
             errdefer draw_ctx_buffer.deinit(device);
 
             return @This(){
                 .bones = .init(allocator.*),
                 .batches = .init(allocator.*),
                 .material_batches = .init(allocator.*),
-                .instance_buffer = .{ .current = .{
-                    .buffer = instance_buffer,
-                    .capacity = v.instance_cap,
-                } },
-                .bone_buffer = .{ .current = .{
-                    .buffer = bone_buffer,
-                    .capacity = v.bone_cap,
-                } },
-                .draw_call_buffer = .{ .current = .{
-                    .buffer = draw_call_buffer,
-                    .capacity = v.call_cap,
-                } },
-                .draw_ctx_buffer = .{ .current = .{
-                    .buffer = draw_ctx_buffer,
-                    .capacity = v.call_cap,
-                } },
+                .instance_buffer = instance_buffer,
+                .bone_buffer = bone_buffer,
+                .draw_call_buffer = draw_call_buffer,
+                .draw_ctx_buffer = draw_ctx_buffer,
             };
         }
 
@@ -395,29 +432,10 @@ pub const ResourceManager = struct {
                 self.batches.deinit();
             }
 
-            {
-                const buf = &self.instance_buffer;
-                buf.current.buffer.deinit(device);
-                if (buf.back) |*back| back.buffer.deinit(device);
-            }
-
-            {
-                const buf = &self.bone_buffer;
-                buf.current.buffer.deinit(device);
-                if (buf.back) |*back| back.buffer.deinit(device);
-            }
-
-            {
-                const buf = &self.draw_call_buffer;
-                buf.current.buffer.deinit(device);
-                if (buf.back) |*back| back.buffer.deinit(device);
-            }
-
-            {
-                const buf = &self.draw_ctx_buffer;
-                buf.current.buffer.deinit(device);
-                if (buf.back) |*back| back.buffer.deinit(device);
-            }
+            self.instance_buffer.deinit(device);
+            self.bone_buffer.deinit(device);
+            self.draw_call_buffer.deinit(device);
+            self.draw_ctx_buffer.deinit(device);
         }
 
         pub fn reset(self: *@This()) void {
@@ -428,10 +446,10 @@ pub const ResourceManager = struct {
             }
             self.bones.clearRetainingCapacity();
 
-            self.instance_buffer.count = 0;
-            self.bone_buffer.count = 0;
-            self.draw_call_buffer.count = 0;
-            self.draw_ctx_buffer.count = 0;
+            self.instance_buffer.reset();
+            self.bone_buffer.reset();
+            self.draw_call_buffer.reset();
+            self.draw_ctx_buffer.reset();
         }
 
         fn did_change(self: *@This()) bool {
@@ -493,183 +511,20 @@ pub const ResourceManager = struct {
 
         // call asap after reserving all instances of a frame
         fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool) !void {
-            const device = &ctx.device;
-
-            {
-                const buf = &self.instance_buffer;
-                switch (buf.state) {
-                    .enough, .back_allocated => {},
-                    .out_of_objects => {
-                        const instance_cap = buf.current.capacity;
-                        const new_instance_cap = instance_cap + instance_cap / 2;
-                        var instance_buffer = try Buffer.new_initialized(ctx, .{
-                            .size = new_instance_cap,
-                            .usage = .{ .storage_buffer_bit = true },
-                            .memory_type = .{
-                                .device_local_bit = true,
-                                .host_visible_bit = true,
-                                .host_coherent_bit = true,
-                            },
-                        }, std.mem.zeroes(Instance), pool);
-                        errdefer instance_buffer.deinit(device);
-
-                        buf.back = .{
-                            .buffer = instance_buffer,
-                            .capacity = new_instance_cap,
-                        };
-                        buf.state = .back_allocated;
-                    },
-                }
-            }
-
-            {
-                const buf = &self.bone_buffer;
-
-                switch (buf.state) {
-                    .enough, .back_allocated => {},
-                    .out_of_objects => {
-                        const bone_cap = buf.current.capacity;
-                        const new_bone_cap = bone_cap + bone_cap / 2;
-                        var bone_buffer = try Buffer.new_initialized(ctx, .{
-                            .size = new_bone_cap,
-                            .usage = .{ .storage_buffer_bit = true },
-                            .memory_type = .{
-                                .device_local_bit = true,
-                                .host_visible_bit = true,
-                                .host_coherent_bit = true,
-                            },
-                        }, std.mem.zeroes(math.Mat4x4), pool);
-                        errdefer bone_buffer.deinit(device);
-
-                        buf.back = .{
-                            .buffer = bone_buffer,
-                            .capacity = new_bone_cap,
-                        };
-                        buf.state = .back_allocated;
-                    },
-                }
-            }
-
-            {
-                const buf = &self.draw_call_buffer;
-
-                switch (buf.state) {
-                    .enough, .back_allocated => {},
-                    .out_of_objects => {
-                        const bone_cap = buf.current.capacity;
-                        const new_bone_cap = bone_cap + bone_cap / 2;
-                        var bone_buffer = try Buffer.new_initialized(ctx, .{
-                            .size = new_bone_cap,
-                            .usage = .{ .indirect_buffer_bit = true },
-                            .memory_type = .{
-                                .device_local_bit = true,
-                                .host_visible_bit = true,
-                                .host_coherent_bit = true,
-                            },
-                        }, std.mem.zeroes(DrawCall), pool);
-                        errdefer bone_buffer.deinit(device);
-
-                        buf.back = .{
-                            .buffer = bone_buffer,
-                            .capacity = new_bone_cap,
-                        };
-                        buf.state = .back_allocated;
-                    },
-                }
-            }
-
-            {
-                const buf = &self.draw_ctx_buffer;
-
-                switch (buf.state) {
-                    .enough, .back_allocated => {},
-                    .out_of_objects => {
-                        const bone_cap = buf.current.capacity;
-                        const new_bone_cap = bone_cap + bone_cap / 2;
-                        var bone_buffer = try Buffer.new_initialized(ctx, .{
-                            .size = new_bone_cap,
-                            .usage = .{ .storage_buffer_bit = true },
-                            .memory_type = .{
-                                .device_local_bit = true,
-                                .host_visible_bit = true,
-                                .host_coherent_bit = true,
-                            },
-                        }, std.mem.zeroes(DrawCtx), pool);
-                        errdefer bone_buffer.deinit(device);
-
-                        buf.back = .{
-                            .buffer = bone_buffer,
-                            .capacity = new_bone_cap,
-                        };
-                        buf.state = .back_allocated;
-                    },
-                }
-            }
+            try self.instance_buffer.alloc_tick(ctx, pool, std.mem.zeroes(Instance));
+            try self.bone_buffer.alloc_tick(ctx, pool, std.mem.zeroes(math.Mat4x4));
+            try self.draw_call_buffer.alloc_tick(ctx, pool, std.mem.zeroes(DrawCall));
+            try self.draw_ctx_buffer.alloc_tick(ctx, pool, std.mem.zeroes(DrawCtx));
         }
 
         // call when the buffers are not in use
         fn swap_tick(self: *@This(), device: *Device) bool {
             var did_swap = false;
-            {
-                const buf = &self.instance_buffer;
-
-                switch (buf.state) {
-                    .enough, .out_of_objects => {},
-                    .back_allocated => {
-                        // this is okay cuz we have an empty queue every frame
-                        buf.current.buffer.deinit(device);
-                        buf.current = buf.back.?;
-                        buf.back = null;
-                        buf.state = .enough;
-                        did_swap = true;
-                    },
-                }
-            }
-            {
-                const buf = &self.bone_buffer;
-
-                switch (buf.state) {
-                    .enough, .out_of_objects => {},
-                    .back_allocated => {
-                        // this is okay cuz we have an empty queue every frame
-                        buf.current.buffer.deinit(device);
-                        buf.current = buf.back.?;
-                        buf.back = null;
-                        buf.state = .enough;
-                        did_swap = true;
-                    },
-                }
-            }
-            {
-                const buf = &self.draw_call_buffer;
-
-                switch (buf.state) {
-                    .enough, .out_of_objects => {},
-                    .back_allocated => {
-                        // this is okay cuz we have an empty queue every frame
-                        buf.current.buffer.deinit(device);
-                        buf.current = buf.back.?;
-                        buf.back = null;
-                        buf.state = .enough;
-                        did_swap = true;
-                    },
-                }
-            }
-            {
-                const buf = &self.draw_ctx_buffer;
-
-                switch (buf.state) {
-                    .enough, .out_of_objects => {},
-                    .back_allocated => {
-                        // this is okay cuz we have an empty queue every frame
-                        buf.current.buffer.deinit(device);
-                        buf.current = buf.back.?;
-                        buf.back = null;
-                        buf.state = .enough;
-                        did_swap = true;
-                    },
-                }
-            }
+            // 'or' short circuits :/
+            did_swap = self.instance_buffer.swap_tick(device) or did_swap;
+            did_swap = self.bone_buffer.swap_tick(device) or did_swap;
+            did_swap = self.draw_call_buffer.swap_tick(device) or did_swap;
+            did_swap = self.draw_ctx_buffer.swap_tick(device) or did_swap;
             return did_swap;
         }
 
@@ -680,10 +535,10 @@ pub const ResourceManager = struct {
             // try to swap the buffer created in the last frame
             const swapped = self.swap_tick(&ctx.device);
 
-            try self.update_instances(&ctx.device);
-            try self.update_bones(&ctx.device);
-            try self.update_draw_calls(&ctx.device);
-            try self.update_draw_ctxts(&ctx.device);
+            self.update_instances();
+            self.update_bones();
+            self.update_draw_calls();
+            self.update_draw_ctxts();
 
             const changed = self.did_change();
 
@@ -693,97 +548,58 @@ pub const ResourceManager = struct {
             return .{ .buffer_invalid = swapped, .cmdbuf_invalid = changed };
         }
 
-        fn update_instances(self: *@This(), device: *Device) !void {
+        fn update_instances(self: *@This()) void {
             const buf = &self.instance_buffer;
-            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(buf.current.buffer.memory);
-
-            const gpu_items: [*]Instance = @ptrCast(@alignCast(data));
 
             for (self.batches.items) |*batch| {
                 const instances = batch.instances.items;
-                const can_alloc = @min(buf.current.capacity - buf.count, instances.len);
                 batch.first_draw = buf.count;
-                batch.can_draw = can_alloc;
-                @memcpy(gpu_items[buf.count..][0..can_alloc], instances[0..can_alloc]);
-                buf.count += can_alloc;
-
-                if (can_alloc < instances.len and buf.state == .enough) {
-                    buf.state = .out_of_objects;
-                }
+                batch.can_draw = buf.alloc(instances);
             }
         }
 
-        fn update_bones(self: *@This(), device: *Device) !void {
+        fn update_bones(self: *@This()) void {
             const buf = &self.bone_buffer;
-            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(buf.current.buffer.memory);
-
-            const gpu_items: [*]math.Mat4x4 = @ptrCast(@alignCast(data));
 
             const bones = self.bones.items;
-            const can_alloc = @min(buf.current.capacity - buf.count, bones.len);
-            @memcpy(gpu_items[buf.count..][0..can_alloc], bones[0..can_alloc]);
-            buf.count = can_alloc;
-
-            if (can_alloc < bones.len and buf.state == .enough) {
-                buf.state = .out_of_objects;
-            }
+            _ = buf.alloc(bones);
         }
 
-        fn update_draw_calls(self: *@This(), device: *Device) !void {
+        fn update_draw_calls(self: *@This()) void {
             const buf = &self.draw_call_buffer;
-            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(buf.current.buffer.memory);
-
-            const gpu_items: [*]DrawCall = @ptrCast(@alignCast(data));
 
             var it = self.material_batches.iterator();
             while (it.next()) |mbatch| for (mbatch.value_ptr.batch.items) |hbatch| {
-                if (buf.count >= buf.current.capacity) {
-                    if (buf.state == .enough) {
-                        buf.state = .out_of_objects;
-                    }
-                    break;
-                }
-
                 const batch = &self.batches.items[hbatch.index];
-
-                gpu_items[buf.count] = .{
+                const call_buf: [1]DrawCall = .{.{
                     .index_count = batch.mesh.regions.index.count,
                     .instance_count = @intCast(batch.instances.items.len),
                     .first_index = 0,
                     .vertex_offset = 0,
                     .first_instance = 0,
-                };
-                buf.count += 1;
+                }};
+                const count = buf.alloc(&call_buf);
+                if (count == 0) {
+                    break;
+                }
             };
         }
 
-        fn update_draw_ctxts(self: *@This(), device: *Device) !void {
+        fn update_draw_ctxts(self: *@This()) void {
             const buf = &self.draw_ctx_buffer;
-            const data = try device.mapMemory(buf.current.buffer.memory, 0, vk.WHOLE_SIZE, .{});
-            defer device.unmapMemory(buf.current.buffer.memory);
-
-            const gpu_items: [*]DrawCtx = @ptrCast(@alignCast(data));
 
             var it = self.material_batches.iterator();
             while (it.next()) |mbatch| for (mbatch.value_ptr.batch.items) |hbatch| {
-                if (buf.count >= buf.current.capacity) {
-                    if (buf.state == .enough) {
-                        buf.state = .out_of_objects;
-                    }
-                    break;
-                }
-
                 const batch = &self.batches.items[hbatch.index];
-
-                gpu_items[buf.count] = .{
+                const ctx_buf: [1]DrawCtx = .{.{
                     .first_vertex = batch.mesh.regions.vertex.first,
                     .first_index = batch.mesh.regions.index.first,
                     .first_instance = batch.first_draw,
-                };
-                buf.count += 1;
+                }};
+                const count = buf.alloc(&ctx_buf);
+                if (count == 0) {
+                    break;
+                }
             };
         }
 
