@@ -347,12 +347,6 @@ pub fn tick(
         return true;
     }
 
-    const frametime = @as(f32, @floatFromInt(app_state.ticker.real.timer.read())) / std.time.ns_per_ms;
-    const min_frametime = 1.0 / @as(f32, @floatFromInt(app_state.fps_cap)) * std.time.ms_per_s;
-    if (frametime < min_frametime) {
-        std.Thread.sleep(@intFromFloat(std.time.ns_per_ms * (min_frametime - frametime)));
-    }
-
     app_state.ticker.tick();
 
     gui_renderer.render_start();
@@ -396,6 +390,17 @@ pub fn present(
         // big buffers that depends on the last frame's big buffer + multiple framebuffers => me sad
         // so just wait for one frame's queue to be empty before trying to render another frame
         try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
+    }
+
+    {
+        self.telemetry.begin_sample(@src(), ".framerate_cap_sleep");
+        defer self.telemetry.end_sample();
+
+        const frametime = @as(f32, @floatFromInt(app_state.ticker.real.timer.read())) / std.time.ns_per_ms;
+        const min_frametime = 1.0 / @as(f32, @floatFromInt(app_state.fps_cap)) * std.time.ms_per_s;
+        if (frametime < min_frametime) {
+            std.Thread.sleep(@intFromFloat(std.time.ns_per_ms * (min_frametime - frametime)));
+        }
     }
 
     {
