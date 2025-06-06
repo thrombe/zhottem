@@ -3,10 +3,6 @@
 #include <common.glsl>
 #include <uniforms.glsl>
 
-// TODO: prevent desync of this set
-//   by defining a fixed number of sets that are always bound
-//   even if not used by pipelines.
-//   prob prevents some optimization from vulkan's side, but it should be fine :P
 layout(set = 0, binding = _bind_camera) uniform Ubo {
     Uniforms ubo;
 };
