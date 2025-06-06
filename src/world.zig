@@ -843,7 +843,7 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         offset: u32,
 
         // for interpolation
-        t: f32,
+        t: ?f32,
     };
 
     pub fn init(samples: []assets_mod.Wav) !@This() {
@@ -884,10 +884,15 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         }
 
         // stretch audio: mix(buf[floor(index * speed)], buf[ceil(index * speed)], fract(index * speed))
+        const speed = self.ctx.playing.buf1.speed;
         const offsets = self.ctx.offsets[0..output.len];
         for (0..output.len) |i| {
-            const t = cast(f32, i) * self.ctx.playing.buf1.speed;
-            offsets[i] = .{ .offset = cast(u32, t), .t = t - @floor(t) };
+            const t = cast(f32, i) * speed;
+            offsets[i] = .{
+                .offset = cast(u32, t),
+                // no need to interpolate when speed > 1
+                .t = if (speed < 1.0) t - @floor(t) else null,
+            };
         }
         defer self.ctx.frame_count += offsets[offsets.len - 1].offset;
 
@@ -897,7 +902,6 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         for (self.ctx.playing.buf1.samples.items) |*ps| {
             _ = ps.fill(
                 self.ctx.playing.buf1.volume,
-                self.ctx.playing.buf1.speed,
                 self.ctx.frame_count,
                 offsets,
                 self.ctx.samples,
@@ -930,7 +934,6 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         pub fn fill(
             self: *@This(),
             volume: f32,
-            speed: f32,
             frame_count: u64,
             offsets: []Offset,
             samples: []assets_mod.Wav,
@@ -972,15 +975,15 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
                 }
 
                 const curr_frame = sample[index];
-                if (speed >= 1.0 or index + 1 >= sample.len) {
+                if (t == null or index + 1 >= sample.len) {
                     oframe[0] = std.math.clamp(oframe[0] + curr_frame[0] * left * att, -1, 1);
                     oframe[1] = std.math.clamp(oframe[1] + curr_frame[1] * right * att, -1, 1);
                     continue;
                 }
 
                 const next_frame = sample[index + 1];
-                const frame_l = std.math.lerp(curr_frame[0], next_frame[0], t);
-                const frame_r = std.math.lerp(curr_frame[1], next_frame[1], t);
+                const frame_l = std.math.lerp(curr_frame[0], next_frame[0], t.?);
+                const frame_r = std.math.lerp(curr_frame[1], next_frame[1], t.?);
 
                 oframe[0] = std.math.clamp(oframe[0] + frame_l * left * att, -1, 1);
                 oframe[1] = std.math.clamp(oframe[1] + frame_r * right * att, -1, 1);
