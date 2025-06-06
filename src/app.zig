@@ -690,6 +690,7 @@ pub const AppState = struct {
     focus: bool = false,
     jolt_debug_render: bool = false,
 
+    arena: std.heap.ArenaAllocator,
     cmdbuf: world_mod.EntityComponentStore.CmdBuf,
 
     client_count: u8 = 0,
@@ -851,6 +852,7 @@ pub const AppState = struct {
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp())),
             .ts = start_ts,
+            .arena = std.heap.ArenaAllocator.init(allocator.*),
             .cmdbuf = cmdbuf,
             .entities = .{
                 .player = player_id,
@@ -859,6 +861,7 @@ pub const AppState = struct {
     }
 
     pub fn deinit(self: *@This()) void {
+        self.arena.deinit();
         self.cmdbuf.deinit();
     }
 
@@ -877,6 +880,10 @@ pub const AppState = struct {
         defer app.telemetry.end_sample();
 
         app.telemetry.plot("num_entities", app.world.ecs.entities.count());
+
+        const temp = self.arena.allocator();
+        defer _ = self.arena.reset(.retain_capacity);
+        _ = temp;
 
         const assets = &app.resources.assets;
         const window = engine.window;

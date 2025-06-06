@@ -977,27 +977,6 @@ pub const World = struct {
         self.ecs.deinit(@ptrCast(self));
         self.phy.deinit();
     }
-<<<<<<< Side #1 (Conflict 1 of 1)
-
-    pub fn step(self: *@This(), sim_time: f32, steps: u32) !void {
-        try self.phy.update(sim_time, steps);
-
-        var it = self.ecs.iterator(struct { t: Components.GlobalTransform, bid: Jphysics.BodyId });
-        while (it.next()) |e| {
-            const t = self.phy.get_transform(e.bid.*);
-            e.t.set(.{ .pos = t.position, .rotation = t.rotation, .scale = e.t.transform.scale });
-        }
-
-        var player_it = self.ecs.iterator(struct { t: Components.GlobalTransform, char: Jphysics.CharacterBody });
-        while (player_it.next()) |e| {
-            const char: *Jphysics.CharacterBody = e.char;
-            char.force = .{};
-            char.impulse = .{};
-            const pos = Vec3.from_buf(char.character.getPosition());
-            const rot = Vec4.from_buf(char.character.getRotation());
-            e.t.set(.{ .pos = pos, .rotation = rot, .scale = e.t.transform.scale });
-        }
-    }
 };
 
 pub const Components = struct {
