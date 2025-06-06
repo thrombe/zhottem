@@ -327,6 +327,49 @@ pub fn post_reload(self: *@This()) !void {
     try self.net_ctx.post_reload();
 }
 
+pub fn tick(
+    self: *@This(),
+    engine: *Engine,
+    app_state: *AppState,
+    gui_renderer: *GuiEngine.GuiRenderer,
+    gui_state: *GuiState,
+    renderer_state: *RendererState,
+) !bool {
+    self.telemetry.mark_frame() catch |e| utils_mod.dump_error(e);
+    self.telemetry.begin_sample(@src(), "frame.tick");
+    defer self.telemetry.end_sample();
+
+    if (engine.window.should_close()) return false;
+
+    defer engine.window.tick();
+
+    if (engine.window.is_minimized()) {
+        return true;
+    }
+
+    const frametime = @as(f32, @floatFromInt(app_state.timer.read())) / std.time.ns_per_ms;
+    const min_frametime = 1.0 / @as(f32, @floatFromInt(app_state.fps_cap)) * std.time.ms_per_s;
+    if (frametime < min_frametime) {
+        std.Thread.sleep(@intFromFloat(std.time.ns_per_ms * (min_frametime - frametime)));
+    }
+
+    const lap = app_state.timer.lap();
+
+    gui_renderer.render_start();
+    try gui_state.tick(self, app_state, lap);
+    try gui_renderer.render_end(&engine.graphics.device, &renderer_state.swapchain);
+
+    try app_state.tick(lap, engine, self);
+
+    const res = try self.present(renderer_state, app_state, gui_renderer, engine);
+    // IDK: this never triggers :/
+    if (res == .suboptimal) {
+        std.debug.print("{any}\n", .{res});
+    }
+
+    return true;
+}
+
 pub fn present(
     self: *@This(),
     dynamic_state: *RendererState,
@@ -692,6 +735,7 @@ pub const AppState = struct {
 
     arena: std.heap.ArenaAllocator,
     cmdbuf: world_mod.EntityComponentStore.CmdBuf,
+    timer: std.time.Timer,
 
     client_count: u8 = 0,
 
@@ -712,7 +756,7 @@ pub const AppState = struct {
         }
     };
 
-    pub fn init(window: *Engine.Window, start_ts: u64, app: *App) !@This() {
+    pub fn init(window: *Engine.Window, app: *App) !@This() {
         const mouse = window.poll_mouse();
         const sze = try window.get_res();
 
@@ -847,11 +891,13 @@ pub const AppState = struct {
         }
         std.debug.print("starting game...\n", .{});
 
+        var timer = try std.time.Timer.start();
         return .{
             .monitor_rez = .{ .width = sze.width, .height = sze.height },
             .mouse = .{ .x = mouse.x, .y = mouse.y, .left = mouse.left },
             .rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp())),
-            .ts = start_ts,
+            .ts = timer.read(),
+            .timer = timer,
             .arena = std.heap.ArenaAllocator.init(allocator.*),
             .cmdbuf = cmdbuf,
             .entities = .{
