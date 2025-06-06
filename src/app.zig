@@ -1699,16 +1699,19 @@ pub const AppState = struct {
 };
 
 pub const GuiState = struct {
-    frame_times: [10]f32 = std.mem.zeroes([10]f32),
-    frame_times_i: usize = 10,
+    const frame_times_len = 60;
+    frame_times: [frame_times_len]f32 = std.mem.zeroes([frame_times_len]f32),
+    frame_times_i: usize = 0,
+    total: f32 = 0,
 
     pub fn tick(self: *@This(), app: *App, state: *AppState) !void {
         const player = try app.world.ecs.get(state.entities.player, struct { controller: C.Controller });
 
-        self.frame_times_i += 1;
-        self.frame_times_i = @rem(self.frame_times_i, self.frame_times.len);
+        self.frame_times_i = @rem(self.frame_times_i + 1, self.frame_times.len);
+        self.total -= self.frame_times[self.frame_times_i];
         self.frame_times[self.frame_times_i] = state.ticker.real.delta * std.time.ms_per_s;
-        const frametime = std.mem.max(f32, &self.frame_times);
+        self.total += self.frame_times[self.frame_times_i];
+        const frametime = self.total / cast(f32, self.frame_times.len);
 
         c.ImGui_SetNextWindowPos(.{ .x = 5, .y = 5 }, c.ImGuiCond_Once);
         defer c.ImGui_End();
