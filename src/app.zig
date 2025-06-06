@@ -1649,9 +1649,10 @@ pub const GuiState = struct {
         _ = c.ImGui_SliderFloat("Sensitivity", &controller.sensitivity, 0.001, 2.0);
         _ = c.ImGui_SliderInt("FPS cap", @ptrCast(&state.fps_cap), 5, 500);
         _ = c.ImGui_SliderFloat("audio volume", @ptrCast(&app.audio.ctx.ctx.volume), 0.0, 1.0);
-        reset = reset or c.ImGui_Checkbox("Jolt debug renderer", @ptrCast(&state.jolt_debug_render));
+        // 'or' short circuits :/
+        reset = c.ImGui_Checkbox("Jolt debug renderer", @ptrCast(&state.jolt_debug_render)) or reset;
 
-        reset = reset or c.ImGui_Button("Reset render state");
+        reset = c.ImGui_Button("Reset render state") or reset;
 
         if (reset) {
             _ = state.cmdbuf_fuse.fuse();
