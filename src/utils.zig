@@ -375,6 +375,14 @@ pub const SimulationTicker = struct {
         self.speed.denominator /= gcd;
     }
 
+    pub fn drop_pending_simtime(self: *@This()) void {
+        // if simulation is lagging, this function will drop the extra time
+        if (self.simulation.ticks.requested != self.simulation.ticks.capped) {
+            self.simulation.acctime_ns = 0;
+            self.scaled.time_ns = self.simulation.time_ns;
+        }
+    }
+
     pub fn reset(self: *@This()) void {
         self.real.timer.reset();
         self.* = .{

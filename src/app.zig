@@ -1739,6 +1739,7 @@ pub const GuiState = struct {
         var sim_speed = state.ticker.speed.perc;
         if (c.ImGui_SliderFloat("simulation_speed", @ptrCast(&sim_speed), 0.0, 5.0)) {
             state.ticker.set_speed(sim_speed);
+            state.ticker.drop_pending_simtime();
         }
 
         // 'or' short circuits :/
