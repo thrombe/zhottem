@@ -123,7 +123,7 @@ pub const GuiEngine = struct {
                 .color_attachment_count = 1,
                 .p_color_attachments = @ptrCast(&color_attachment_ref),
             };
-            const pass = try device.createRenderPass(&.{
+            var pass = try device.createRenderPass(&.{
                 .attachment_count = 1,
                 .p_attachments = @ptrCast(&color_attachment),
                 .subpass_count = 1,
@@ -167,14 +167,27 @@ pub const GuiEngine = struct {
             }, cmdbufs.ptr);
             errdefer device.freeCommandBuffers(cmd_pool, @intCast(cmdbufs.len), cmdbufs.ptr);
 
+            vulkan_init(engine, swapchain, &desc_pool, &pass);
+            errdefer vulkan_deinit();
+
+            return .{
+                .desc_pool = desc_pool,
+                .cmd_pool = cmd_pool,
+                .pass = pass,
+                .framebuffers = framebuffers,
+                .cmd_bufs = cmdbufs,
+            };
+        }
+
+        fn vulkan_init(engine: *Engine, swapchain: *Swapchain, desc_pool: *vk.DescriptorPool, pass: *vk.RenderPass) void {
             var info = c.ImGui_ImplVulkan_InitInfo{
                 .Instance = @as(*c.VkInstance, @ptrCast(&engine.graphics.instance.handle)).*,
                 .PhysicalDevice = @as(*c.VkPhysicalDevice, @ptrCast(&engine.graphics.pdev)).*,
                 .Device = @as(*c.VkDevice, @ptrCast(&engine.graphics.device.handle)).*,
                 .QueueFamily = engine.graphics.graphics_queue.family,
                 .Queue = @as(*c.VkQueue, @ptrCast(&engine.graphics.graphics_queue.handle)).*,
-                .DescriptorPool = @as(*c.VkDescriptorPool, @ptrCast(&desc_pool)).*,
-                .RenderPass = @as(*c.VkRenderPass, @ptrCast(@constCast(&pass))).*,
+                .DescriptorPool = @as(*c.VkDescriptorPool, @ptrCast(desc_pool)).*,
+                .RenderPass = @as(*c.VkRenderPass, @ptrCast(@constCast(pass))).*,
                 .MinImageCount = 2,
                 .ImageCount = @intCast(swapchain.swap_images.len),
                 // .MSAASamples: VkSampleCountFlagBits = @import("std").mem.zeroes(VkSampleCountFlagBits),
@@ -187,15 +200,10 @@ pub const GuiEngine = struct {
                 // .MinAllocationSize: VkDeviceSize = @import("std").mem.zeroes(VkDeviceSize),
             };
             _ = c.cImGui_ImplVulkan_Init(&info);
-            errdefer c.cImGui_ImplVulkan_Shutdown();
+        }
 
-            return .{
-                .desc_pool = desc_pool,
-                .cmd_pool = cmd_pool,
-                .pass = pass,
-                .framebuffers = framebuffers,
-                .cmd_bufs = cmdbufs,
-            };
+        fn vulkan_deinit() void {
+            c.cImGui_ImplVulkan_Shutdown();
         }
 
         pub fn render_start(_: *@This()) void {
@@ -244,6 +252,14 @@ pub const GuiEngine = struct {
                 allocator.free(self.cmd_bufs);
             }
             defer c.cImGui_ImplVulkan_Shutdown();
+        }
+
+        pub fn pre_reload(_: *@This()) void {
+            vulkan_deinit();
+        }
+
+        pub fn post_reload(self: *@This(), engine: *Engine, swapchain: *Swapchain) void {
+            vulkan_init(engine, swapchain, &self.desc_pool, &self.pass);
         }
     };
 };

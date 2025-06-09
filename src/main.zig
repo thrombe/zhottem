@@ -388,6 +388,16 @@ const HotApp = struct {
     }
 
     fn pre_reload(self: *@This()) !void {
+        {
+            // imgui bugs out on reload, so we deinit it on pre_reload, and reinit it on load :/
+
+            try self.renderer_state.swapchain.waitForAllFences(&self.engine.graphics.device);
+            try self.engine.graphics.device.deviceWaitIdle();
+
+            self.gui_renderer.pre_reload();
+            self.gui_engine.deinit();
+        }
+
         try self.app_state.pre_reload();
         try self.app.pre_reload();
         try self.engine.pre_reload();
@@ -398,6 +408,10 @@ const HotApp = struct {
         try self.engine.post_reload();
         try self.app.post_reload();
         try self.app_state.post_reload();
+
+        self.gui_engine = try GuiEngine.init(self.engine.window);
+        errdefer self.gui_engine.deinit();
+        self.gui_renderer.post_reload(&self.engine, &self.renderer_state.swapchain);
     }
 
     fn tick(self: *@This()) !bool {
