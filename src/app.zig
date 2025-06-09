@@ -1578,15 +1578,17 @@ pub const AppState = struct {
             playing.buf2.volume = self.audio_volume;
             playing.buf2.speed = self.ticker.speed.perc;
 
-            const player = try app.world.ecs.get(self.entities.player, struct { t: C.GlobalTransform });
+            const player = try app.world.ecs.get(self.entities.player, struct { t: C.GlobalTransform, lt: C.LastTransform });
+            const itp = self.interpolated(player.lt, player.t);
             {
-                var it = app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform });
+                var it = app.world.ecs.iterator(struct { sound: C.Sound, t: C.GlobalTransform, lt: C.LastTransform });
                 while (it.next()) |e| {
+                    const ite = self.interpolated(e.lt, e.t);
                     try playing.buf2.samples.append(.{
                         .handle = e.sound.audio,
                         .volume = e.sound.volume,
                         .start_frame = e.sound.start_frame,
-                        .pos = player.t.transform.rotation.inverse_rotate_vector(e.t.transform.pos.sub(player.t.transform.pos)),
+                        .pos = itp.rotation.inverse_rotate_vector(ite.pos.sub(itp.pos)),
                     });
                 }
             }
@@ -1597,7 +1599,7 @@ pub const AppState = struct {
                         .handle = e.sound.audio,
                         .volume = e.sound.volume,
                         .start_frame = e.sound.start_frame,
-                        .pos = player.t.transform.rotation.inverse_rotate_vector(e.sound.pos.sub(player.t.transform.pos)),
+                        .pos = itp.rotation.inverse_rotate_vector(e.sound.pos.sub(itp.pos)),
                     });
                 }
             }
