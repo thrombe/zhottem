@@ -876,7 +876,14 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
         flags: c.PaStreamCallbackFlags,
     ) !void {
         _ = flags;
-        _ = timeinfo;
+
+        const start_time = std.time.nanoTimestamp();
+        defer {
+            const end_time = std.time.nanoTimestamp();
+            const max_diff = timeinfo.outputBufferDacTime - timeinfo.currentTime;
+            const real_diff = cast(f64, end_time - start_time) / @as(f64, std.time.ns_per_s);
+            std.debug.assert(real_diff <= max_diff);
+        }
 
         if (output.len > self.ctx.offsets.len) {
             allocator.free(self.ctx.offsets);
