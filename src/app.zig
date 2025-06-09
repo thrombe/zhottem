@@ -339,6 +339,8 @@ pub fn tick(
     self.telemetry.begin_sample(@src(), "frame.tick");
     defer self.telemetry.end_sample();
 
+    const ctx = &engine.graphics;
+
     if (engine.window.should_close()) return false;
 
     if (engine.window.is_minimized()) {
@@ -360,31 +362,6 @@ pub fn tick(
         defer self.telemetry.end_sample();
 
         try gui_renderer.render_end(&engine.graphics.device, &renderer_state.swapchain);
-    }
-
-    const res = try self.present(renderer_state, app_state, gui_renderer, engine);
-    // IDK: this never triggers :/
-    if (res == .suboptimal) {
-        std.debug.print("{any}\n", .{res});
-    }
-
-    return true;
-}
-
-pub fn present(
-    self: *@This(),
-    dynamic_state: *RendererState,
-    app_state: *AppState,
-    gui_renderer: *GuiEngine.GuiRenderer,
-    engine: *Engine,
-) !Swapchain.PresentState {
-    self.telemetry.begin_sample(@src(), "app.present");
-    defer self.telemetry.end_sample();
-
-    const ctx = &engine.graphics;
-
-    if (engine.window.resize_fuse.unfuse()) {
-        _ = app_state.resize_fuse.fuse();
     }
 
     {
@@ -440,37 +417,50 @@ pub fn present(
         }
     };
 
-    if (dynamic_state.stages.update()) {
+    if (renderer_state.stages.update()) {
         _ = app_state.shader_fuse.fuse();
     }
 
     if (app_state.shader_fuse.unfuse()) {
         self.telemetry.begin_sample(@src(), ".recreating_pipelins");
         defer self.telemetry.end_sample();
-        try dynamic_state.recreate_pipelines(engine, self, app_state);
+        try renderer_state.recreate_pipelines(engine, self, app_state);
     }
 
     if (app_state.cmdbuf_fuse.unfuse()) {
         self.telemetry.begin_sample(@src(), ".recreating_command_buffers");
         defer self.telemetry.end_sample();
-        try dynamic_state.recreate_cmdbuf(engine, self, app_state);
+        try renderer_state.recreate_cmdbuf(engine, self, app_state);
     }
 
-    const current_si = try dynamic_state.swapchain.present_start(ctx);
-    const present_state = dynamic_state.swapchain.present_end(
-        &[_]vk.CommandBuffer{
-            dynamic_state.cmdbuffer.bufs[dynamic_state.swapchain.image_index],
-            gui_renderer.cmd_bufs[dynamic_state.swapchain.image_index],
-        },
-        ctx,
-        current_si,
-    ) catch |err| switch (err) {
-        error.OutOfDateKHR => blk: {
-            _ = app_state.resize_fuse.fuse();
-            break :blk .suboptimal;
-        },
-        else => |narrow| return narrow,
-    };
+    {
+        self.telemetry.begin_sample(@src(), ".present");
+        defer self.telemetry.end_sample();
+
+        const current_si = try renderer_state.swapchain.present_start(ctx);
+        const present_state = renderer_state.swapchain.present_end(
+            &[_]vk.CommandBuffer{
+                renderer_state.cmdbuffer.bufs[renderer_state.swapchain.image_index],
+                gui_renderer.cmd_bufs[renderer_state.swapchain.image_index],
+            },
+            ctx,
+            current_si,
+        ) catch |err| switch (err) {
+            error.OutOfDateKHR => blk: {
+                _ = app_state.resize_fuse.fuse();
+                break :blk .suboptimal;
+            },
+            else => |narrow| return narrow,
+        };
+        // IDK: this never triggers :/
+        if (present_state == .suboptimal) {
+            std.debug.print("{any}\n", .{present_state});
+        }
+    }
+
+    if (engine.window.resize_fuse.unfuse()) {
+        _ = app_state.resize_fuse.fuse();
+    }
 
     // this has to happen before the next app/gui tick
     if (app_state.resize_fuse.unfuse()) {
@@ -480,13 +470,13 @@ pub fn present(
         // we have to wait for queue to be idle before creating swapchain again
         try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
 
-        try dynamic_state.recreate_swapchain(engine, app_state);
+        try renderer_state.recreate_swapchain(engine, app_state);
 
         gui_renderer.deinit(&engine.graphics.device);
-        gui_renderer.* = try GuiEngine.GuiRenderer.init(engine, &dynamic_state.swapchain);
+        gui_renderer.* = try GuiEngine.GuiRenderer.init(engine, &renderer_state.swapchain);
     }
 
-    return present_state;
+    return true;
 }
 
 pub const RendererState = struct {
