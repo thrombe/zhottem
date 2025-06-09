@@ -341,19 +341,26 @@ pub fn tick(
 
     if (engine.window.should_close()) return false;
 
-    defer engine.window.tick();
-
     if (engine.window.is_minimized()) {
         return true;
     }
 
-    app_state.ticker.tick();
-
     gui_renderer.render_start();
-    try gui_state.tick(self, app_state);
-    try gui_renderer.render_end(&engine.graphics.device, &renderer_state.swapchain);
 
     try app_state.tick(engine, self);
+
+    {
+        self.telemetry.begin_sample(@src(), "gui_state.tick");
+        defer self.telemetry.end_sample();
+
+        try gui_state.tick(self, app_state);
+    }
+    {
+        self.telemetry.begin_sample(@src(), "gui_renderer.render_end");
+        defer self.telemetry.end_sample();
+
+        try gui_renderer.render_end(&engine.graphics.device, &renderer_state.swapchain);
+    }
 
     const res = try self.present(renderer_state, app_state, gui_renderer, engine);
     // IDK: this never triggers :/
@@ -917,90 +924,42 @@ pub const AppState = struct {
         app.telemetry.begin_sample(@src(), "app_state.tick");
         defer app.telemetry.end_sample();
 
-        app.telemetry.plot("num_entities", app.world.ecs.entities.count());
-
         const temp = self.arena.allocator();
         defer _ = self.arena.reset(.retain_capacity);
         _ = temp;
 
+        self.ticker.tick_real();
+        engine.window.tick();
+        try self.tick_local_input(engine, app);
+
+        var steps: u32 = 5;
+        while (steps > 0 and self.ticker.tick_simulation()) : (steps -= 1) {
+            try self.tick_network(engine, app);
+            try self.tick_simulation(engine, app);
+        }
+
+        self.ticker.tick_animation();
+        try self.tick_prepare_render(engine, app);
+    }
+
+    fn tick_network(self: *@This(), engine: *Engine, app: *App) !void {
+        app.telemetry.begin_sample(@src(), "app_state.tick_network");
+        defer app.telemetry.end_sample();
+
+        app.telemetry.plot("num_entities", app.world.ecs.entities.count());
+
         const assets = &app.resources.assets;
         const window = engine.window;
-
-        var input = window.input();
 
         var pexp = try app.world.ecs.explorer(self.entities.player);
         const camera = pexp.get_component(C.Camera).?;
         const pid = pexp.get_component(C.PlayerId).?;
         const player_id = pid.id;
 
-        // local input tick
-        {
-            app.telemetry.begin_sample(@src(), ".local_input");
-            defer app.telemetry.end_sample();
-
-            var mouse = &input.mouse;
-            var kb = &input.keys;
-
-            const imgui_io = &c.ImGui_GetIO()[0];
-            if (imgui_io.WantCaptureMouse) {
-                // mouse.* = std.mem.zeroes(@TypeOf(mouse));
-                mouse.x = input.mouse.x;
-                mouse.y = input.mouse.y;
-                mouse.left = .none;
-                mouse.right = .none;
-            }
-            if (imgui_io.WantCaptureKeyboard) {
-                // kb.* = std.mem.zeroes(@TypeOf(kb));
-            }
-
-            if (kb.p.just_pressed()) {
-                try render_utils.dump_image_to_file(
-                    &app.screen_image,
-                    &engine.graphics,
-                    app.command_pool,
-                    window.extent,
-                    "images",
-                );
-            }
-
-            if (mouse.left.just_pressed() and !self.focus) {
-                self.focus = true;
-                imgui_io.ConfigFlags |= c.ImGuiConfigFlags_NoMouse;
-                window.hide_cursor(true);
-            }
-            if (kb.escape.just_pressed() and !self.focus) {
-                window.queue_close();
-
-                if (app.net_server) |_| {
-                    try app.net_client.send_message(.{ .event = .{ .quit = {} } });
-                } else {
-                    try app.net_client.send_message(.{ .event = .{ .despawn_player = .{ .id = pid.id } } });
-                }
-            }
-            if (kb.escape.just_pressed() and self.focus) {
-                self.focus = false;
-                imgui_io.ConfigFlags &= ~c.ImGuiConfigFlags_NoMouse;
-                window.hide_cursor(false);
-            }
-
-            self.mouse.left = mouse.left.pressed();
-            self.mouse.x = @intFromFloat(mouse.x);
-            self.mouse.y = @intFromFloat(mouse.y);
-
-            self.frame += 1;
-
-            if (!self.focus) {
-                mouse.dx = 0;
-                mouse.dy = 0;
-            }
-        }
-
         // networking tick
         {
             app.telemetry.begin_sample(@src(), ".networking");
             defer app.telemetry.end_sample();
-
-            try app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
 
             {
                 app.telemetry.begin_sample(@src(), ".tick");
@@ -1242,6 +1201,16 @@ pub const AppState = struct {
                 }
             }
         }
+    }
+
+    fn tick_simulation(self: *@This(), engine: *Engine, app: *App) !void {
+        _ = engine;
+        app.telemetry.begin_sample(@src(), "app_state.tick_simulation");
+        defer app.telemetry.end_sample();
+
+        app.telemetry.plot("num_entities", app.world.ecs.entities.count());
+
+        const assets = &app.resources.assets;
 
         // physics tick
         {
@@ -1249,11 +1218,9 @@ pub const AppState = struct {
             defer app.telemetry.end_sample();
 
             const ticks = &self.ticker.simulation.ticks;
-            app.telemetry.plot(std.fmt.comptimePrint("requested physics steps", .{}), ticks.requested);
-            app.telemetry.plot(std.fmt.comptimePrint("executed physics steps", .{}), ticks.capped);
+            app.telemetry.plot(std.fmt.comptimePrint("pending physics steps", .{}), ticks.pending);
 
-            // no more than x steps per frame
-            if (ticks.requested > 0) {
+            {
                 app.telemetry.begin_sample(@src(), ".jolt");
                 defer app.telemetry.end_sample();
 
@@ -1266,7 +1233,7 @@ pub const AppState = struct {
                     app.world.phy.render_tick();
                 };
 
-                for (0..ticks.capped) |step| {
+                {
                     app.telemetry.begin_sample(@src(), ".step");
                     defer app.telemetry.end_sample();
 
@@ -1277,9 +1244,7 @@ pub const AppState = struct {
 
                         const char: *C.CharacterBody = e.char;
                         const update_settings: jolt.CharacterVirtual.ExtendedUpdateSettings = .{};
-                        if (step == 0) {
-                            char.force = char.force.add(Vec3.from_buf(app.world.phy.phy.getGravity()));
-                        }
+                        char.force = char.force.add(Vec3.from_buf(app.world.phy.phy.getGravity()));
 
                         var vel = Vec3.from_buf(char.character.getLinearVelocity());
                         vel = vel.add(char.force.scale(self.ticker.simulation.step_f));
@@ -1292,9 +1257,7 @@ pub const AppState = struct {
                             vel = vel.scale(0.9);
                         }
 
-                        if (step == 0) {
-                            vel = vel.add(char.impulse);
-                        }
+                        vel = vel.add(char.impulse);
                         char.character.setLinearVelocity(vel.to_buf());
 
                         char.character.extendedUpdate(
@@ -1397,6 +1360,118 @@ pub const AppState = struct {
             }
         }
 
+        {
+            app.telemetry.begin_sample(@src(), ".cmdbuf_apply");
+            defer app.telemetry.end_sample();
+
+            try self.cmdbuf.apply(@ptrCast(&app.world));
+        }
+    }
+
+    fn tick_local_input(self: *@This(), engine: *Engine, app: *App) !void {
+        app.telemetry.begin_sample(@src(), "app_state.tick_local_input");
+        defer app.telemetry.end_sample();
+
+        const window = engine.window;
+
+        var input = window.input();
+
+        var pexp = try app.world.ecs.explorer(self.entities.player);
+        const pid = pexp.get_component(C.PlayerId).?;
+
+        // local input tick
+        {
+            app.telemetry.begin_sample(@src(), ".local_input");
+            defer app.telemetry.end_sample();
+
+            var mouse = &input.mouse;
+            var kb = &input.keys;
+
+            const imgui_io = &c.ImGui_GetIO()[0];
+            if (imgui_io.WantCaptureMouse) {
+                // mouse.* = std.mem.zeroes(@TypeOf(mouse));
+                mouse.x = input.mouse.x;
+                mouse.y = input.mouse.y;
+                mouse.left = .none;
+                mouse.right = .none;
+            }
+            if (imgui_io.WantCaptureKeyboard) {
+                // kb.* = std.mem.zeroes(@TypeOf(kb));
+            }
+
+            if (kb.p.just_pressed()) {
+                try render_utils.dump_image_to_file(
+                    &app.screen_image,
+                    &engine.graphics,
+                    app.command_pool,
+                    window.extent,
+                    "images",
+                );
+            }
+
+            if (mouse.left.just_pressed() and !self.focus) {
+                self.focus = true;
+                imgui_io.ConfigFlags |= c.ImGuiConfigFlags_NoMouse;
+                window.hide_cursor(true);
+            }
+            if (kb.escape.just_pressed() and !self.focus) {
+                window.queue_close();
+
+                if (app.net_server) |_| {
+                    try app.net_client.send_message(.{ .event = .{ .quit = {} } });
+                } else {
+                    try app.net_client.send_message(.{ .event = .{ .despawn_player = .{ .id = pid.id } } });
+                }
+            }
+            if (kb.escape.just_pressed() and self.focus) {
+                self.focus = false;
+                imgui_io.ConfigFlags &= ~c.ImGuiConfigFlags_NoMouse;
+                window.hide_cursor(false);
+            }
+
+            self.mouse.left = mouse.left.pressed();
+            self.mouse.x = @intFromFloat(mouse.x);
+            self.mouse.y = @intFromFloat(mouse.y);
+
+            self.frame += 1;
+
+            if (!self.focus) {
+                mouse.dx = 0;
+                mouse.dy = 0;
+            }
+        }
+
+        try app.net_client.send_message(.{ .event = .{ .input = .{ .id = pid.id, .input = input } } });
+    }
+
+    fn tick_prepare_render(self: *@This(), engine: *Engine, app: *App) !void {
+        app.telemetry.begin_sample(@src(), "app_state.tick_prepare_render");
+        defer app.telemetry.end_sample();
+
+        const assets = &app.resources.assets;
+        const window = engine.window;
+
+        // add missing last transforms
+        {
+            app.telemetry.begin_sample(@src(), ".add_missing_transforms");
+            defer app.telemetry.end_sample();
+
+            var it = app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
+            while (it.next()) |e| {
+                var ee = it.current_entity_explorer();
+                if (ee.get_component(C.LastTransform) == null) {
+                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .transform = e.t.transform });
+                }
+            }
+        }
+
+        {
+            app.telemetry.begin_sample(@src(), ".cmdbuf_apply");
+            defer app.telemetry.end_sample();
+
+            try self.cmdbuf.apply(@ptrCast(&app.world));
+        }
+
         // animation tick
         {
             app.telemetry.begin_sample(@src(), ".animation");
@@ -1488,27 +1563,6 @@ pub const AppState = struct {
             }
         }
 
-        // add missing last transforms
-        {
-            app.telemetry.begin_sample(@src(), ".add_missing_transforms");
-            defer app.telemetry.end_sample();
-
-            var it = app.world.ecs.iterator(struct { entity: Entity, t: C.GlobalTransform });
-            while (it.next()) |e| {
-                var ee = it.current_entity_explorer();
-                if (ee.get_component(C.LastTransform) == null) {
-                    try self.cmdbuf.add_component(e.entity.*, C.LastTransform{ .transform = e.t.transform });
-                }
-            }
-        }
-
-        {
-            app.telemetry.begin_sample(@src(), ".cmdbuf_apply");
-            defer app.telemetry.end_sample();
-
-            try self.cmdbuf.apply(@ptrCast(&app.world));
-        }
-
         // render instance tick
         {
             app.telemetry.begin_sample(@src(), ".render_instance");
@@ -1558,6 +1612,7 @@ pub const AppState = struct {
             }
         }
 
+        // TODO: not sure if this belongs here or in simulation
         // audio tick
         {
             app.telemetry.begin_sample(@src(), ".audio");

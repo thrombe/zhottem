@@ -300,9 +300,8 @@ pub const SimulationTicker = struct {
         delta: f32 = 0,
 
         ticks: struct {
-            max: u64 = 5,
-            requested: u64 = 0,
-            capped: u64 = 0,
+            pending: u64 = 0,
+            must_step: bool = false,
         } = .{},
     } = .{},
 
@@ -326,7 +325,7 @@ pub const SimulationTicker = struct {
         };
     }
 
-    pub fn tick(self: *@This()) void {
+    pub fn tick_real(self: *@This()) void {
         self.real.lap = self.real.timer.lap();
         self.real.delta = ns_to_s(self.real.lap);
         self.real.time_ns += self.real.lap;
@@ -338,20 +337,37 @@ pub const SimulationTicker = struct {
         self.scaled.time_f = ns_to_s(self.scaled.time_ns);
 
         self.simulation.acctime_ns += self.scaled.lap;
-        self.simulation.ticks.requested = self.simulation.acctime_ns / self.simulation.step_ns;
-        self.simulation.ticks.capped = @min(self.simulation.ticks.requested, self.simulation.ticks.max);
-        self.simulation.acctime_ns -= self.simulation.ticks.capped * self.simulation.step_ns;
+    }
+
+    pub fn tick_simulation(self: *@This()) bool {
+        self.simulation.ticks.pending = self.simulation.acctime_ns / self.simulation.step_ns;
+        if (self.simulation.ticks.pending > 0) {
+            self.simulation.ticks.must_step = true;
+            self.simulation.ticks.pending -= 1;
+            self.simulation.acctime_ns -= self.simulation.step_ns;
+        } else {
+            self.simulation.ticks.must_step = false;
+        }
         self.simulation.acctime_f = ns_to_s(self.simulation.acctime_ns);
         self.simulation.interpolation_factor = @min(self.simulation.acctime_f / self.simulation.step_f, 1);
 
-        self.simulation.lap = self.simulation.ticks.capped * self.simulation.step_ns;
+        if (self.simulation.ticks.must_step) {
+            self.simulation.lap = self.simulation.step_ns;
+        } else {
+            self.simulation.lap = 0;
+        }
         self.simulation.delta = ns_to_s(self.simulation.lap);
         self.simulation.time_ns += self.simulation.lap;
         self.simulation.time_f = ns_to_s(self.simulation.time_ns);
 
+        return self.simulation.ticks.must_step;
+    }
+
+    pub fn tick_animation(self: *@This()) void {
         const anim_time = self.animation.time_ns;
+        // TODO: this condition is broken
         // keep animation flowing smoothly as long as physics isn't lagging
-        if (self.simulation.ticks.requested == self.simulation.ticks.capped) {
+        if (false and self.simulation.ticks.pending == 0) {
             self.animation.time_ns = self.scaled.time_ns;
 
             // (optional) physics is interpolated each frame from last to current step's transform
@@ -377,7 +393,7 @@ pub const SimulationTicker = struct {
 
     pub fn drop_pending_simtime(self: *@This()) void {
         // if simulation is lagging, this function will drop the extra time
-        if (self.simulation.ticks.requested != self.simulation.ticks.capped) {
+        if (self.simulation.ticks.pending > 0) {
             self.simulation.acctime_ns = 0;
             self.scaled.time_ns = self.simulation.time_ns;
         }
@@ -391,7 +407,6 @@ pub const SimulationTicker = struct {
             .simulation = .{
                 .step_ns = self.simulation.step_ns,
                 .step_f = self.simulation.step_f,
-                .ticks = .{ .max = self.simulation.ticks.max },
             },
         };
     }
