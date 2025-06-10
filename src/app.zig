@@ -15,9 +15,10 @@ const Vec3 = math.Vec3;
 const assets_mod = @import("assets.zig");
 const loader_mod = @import("loader.zig");
 
-const Engine = @import("engine.zig");
-const c = Engine.c;
-const Device = Engine.VulkanContext.Api.Device;
+const engine_mod = @import("engine.zig");
+const Engine = engine_mod.Engine;
+const c = engine_mod.c;
+const Device = engine_mod.VulkanContext.Api.Device;
 
 const gui = @import("gui.zig");
 const GuiEngine = gui.GuiEngine;
@@ -747,7 +748,7 @@ pub const AppState = struct {
         return lt.transform.lerp(&t.transform, self.ticker.simulation.interpolation_factor);
     }
 
-    pub fn init(window: *Engine.Window, app: *App) !@This() {
+    pub fn init(window: *engine_mod.Window, app: *App) !@This() {
         const mouse = window.poll_mouse();
         const sze = try window.get_res();
 
@@ -1672,7 +1673,7 @@ pub const AppState = struct {
 
     fn uniforms(
         self: *@This(),
-        window: *Engine.Window,
+        window: *engine_mod.Window,
         transform: *const C.Transform,
         camera: *const C.Camera,
         controller: *const C.Controller,

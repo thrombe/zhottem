@@ -7,7 +7,7 @@ const Vec3 = math.Vec3;
 const utils_mod = @import("utils.zig");
 const cast = utils_mod.cast;
 
-const Engine = @import("engine.zig");
+const engine_mod = @import("engine.zig");
 
 const resources_mod = @import("resources.zig");
 const ResourceManager = resources_mod.ResourceManager;
@@ -800,8 +800,8 @@ pub const Jphysics = struct {
     };
 };
 
-pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
-    const c = Engine.c;
+pub const AudioPlayer = engine_mod.Audio.Stream(.output, struct {
+    const c = engine_mod.c;
 
     // owned by ResourceManager.CpuResources
     samples: []assets_mod.Wav,
@@ -1001,8 +1001,8 @@ pub const AudioPlayer = Engine.Audio.Stream(.output, struct {
     };
 });
 
-pub const AudioRecorder = Engine.Audio.Stream(.input, struct {
-    const c = Engine.c;
+pub const AudioRecorder = engine_mod.Audio.Stream(.input, struct {
+    const c = engine_mod.c;
 
     recorded: utils_mod.Channel([256]f32),
 
@@ -1169,7 +1169,7 @@ pub const Components = struct {
         ticker: utils_mod.Ticker,
         hold: bool,
 
-        pub fn try_shoot(self: *@This(), action: Engine.Window.Action, time: u64) bool {
+        pub fn try_shoot(self: *@This(), action: engine_mod.Window.Action, time: u64) bool {
             return ((action.pressed() and self.hold) or (action.just_pressed() and !self.hold)) and self.ticker.tick(time);
         }
     };

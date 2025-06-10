@@ -4,12 +4,14 @@ const vk = @import("vulkan");
 
 const utils = @import("utils.zig");
 
-const Engine = @import("engine.zig");
+const engine_mod = @import("engine.zig");
+const Engine = engine_mod.Engine;
+const VulkanContext = engine_mod.VulkanContext;
 
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-const Device = Engine.VulkanContext.Api.Device;
+const Device = engine_mod.VulkanContext.Api.Device;
 
 pub const DescriptorPool = struct {
     pool: vk.DescriptorPool,
@@ -525,7 +527,7 @@ pub const Image = struct {
         view_aspect_mask: vk.ImageAspectFlags = .{},
     };
 
-    pub fn new_from_slice(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: struct {
+    pub fn new_from_slice(ctx: *VulkanContext, pool: vk.CommandPool, v: struct {
         extent: vk.Extent2D,
         bind_desc_type: vk.DescriptorType,
         layout: vk.ImageLayout,
@@ -595,7 +597,7 @@ pub const Image = struct {
         return this;
     }
 
-    pub fn new(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: Args) !@This() {
+    pub fn new(ctx: *VulkanContext, pool: vk.CommandPool, v: Args) !@This() {
         const device = &ctx.device;
 
         const img = try device.createImage(&.{
@@ -677,7 +679,7 @@ pub const Image = struct {
         return this;
     }
 
-    pub fn transition(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool, layout: vk.ImageLayout, new_layout: vk.ImageLayout, aspect_flags: vk.ImageAspectFlags) !void {
+    pub fn transition(self: *@This(), ctx: *VulkanContext, pool: vk.CommandPool, layout: vk.ImageLayout, new_layout: vk.ImageLayout, aspect_flags: vk.ImageAspectFlags) !void {
         const device = &ctx.device;
 
         var cmdbuf_handle: vk.CommandBuffer = undefined;
@@ -689,7 +691,7 @@ pub const Image = struct {
         defer device.freeCommandBuffers(pool, 1, @ptrCast(&cmdbuf_handle));
 
         // OOF: so you are saying i could have been using a nicer api all this time? :mous
-        const cmdbuf = Engine.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
+        const cmdbuf = engine_mod.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
 
         try cmdbuf.beginCommandBuffer(&.{
             .flags = .{ .one_time_submit_bit = true },
@@ -711,7 +713,7 @@ pub const Image = struct {
         try device.queueWaitIdle(ctx.graphics_queue.handle);
     }
 
-    pub fn copy_to_host(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool, copy_extent: vk.Extent3D) ![]align(8) u8 {
+    pub fn copy_to_host(self: *@This(), ctx: *VulkanContext, pool: vk.CommandPool, copy_extent: vk.Extent3D) ![]align(8) u8 {
         const unit_size: usize = switch (self.format) {
             .r16g16b16a16_sfloat => 4 * 2,
             .r8g8b8a8_srgb => 4,
@@ -823,7 +825,7 @@ pub const Buffer = struct {
         desc_type: vk.DescriptorType = .storage_buffer,
     };
 
-    pub fn new_initialized(ctx: *Engine.VulkanContext, v: Args, val: anytype, pool: vk.CommandPool) !@This() {
+    pub fn new_initialized(ctx: *VulkanContext, v: Args, val: anytype, pool: vk.CommandPool) !@This() {
         const E = @TypeOf(val);
         const size = v.size * @sizeOf(E);
         const this = try @This().new(
@@ -863,7 +865,7 @@ pub const Buffer = struct {
         return this;
     }
 
-    pub fn new_from_slice(ctx: *Engine.VulkanContext, v: struct {
+    pub fn new_from_slice(ctx: *VulkanContext, v: struct {
         usage: vk.BufferUsageFlags = .{},
         memory_type: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
         desc_type: vk.DescriptorType = .storage_buffer,
@@ -909,7 +911,7 @@ pub const Buffer = struct {
         return this;
     }
 
-    pub fn new(ctx: *Engine.VulkanContext, v: Args) !@This() {
+    pub fn new(ctx: *VulkanContext, v: Args) !@This() {
         const device = &ctx.device;
 
         const buffer = try device.createBuffer(&.{
@@ -1513,11 +1515,11 @@ pub const Swapchain = struct {
         prefer_present_mode: ?vk.PresentModeKHR = null,
     };
 
-    pub fn init(ctx: *Engine.VulkanContext, extent: vk.Extent2D, args: Args) !Swapchain {
+    pub fn init(ctx: *VulkanContext, extent: vk.Extent2D, args: Args) !Swapchain {
         return try initRecycle(ctx, .null_handle, extent, args);
     }
 
-    pub fn initRecycle(ctx: *Engine.VulkanContext, old_handle: vk.SwapchainKHR, extent: vk.Extent2D, args: Args) !Swapchain {
+    pub fn initRecycle(ctx: *VulkanContext, old_handle: vk.SwapchainKHR, extent: vk.Extent2D, args: Args) !Swapchain {
         const caps = try ctx.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(ctx.pdev, ctx.surface);
         const actual_extent = blk: {
             if (caps.current_extent.width != 0xFFFF_FFFF) {
@@ -1666,22 +1668,22 @@ pub const Swapchain = struct {
         };
     }
 
-    fn deinitExceptSwapchain(self: Swapchain, device: *Engine.VulkanContext.Api.Device) void {
+    fn deinitExceptSwapchain(self: Swapchain, device: *VulkanContext.Api.Device) void {
         for (self.swap_images) |si| si.deinit(device);
         allocator.free(self.swap_images);
         device.destroySemaphore(self.next_image_acquired, null);
     }
 
-    pub fn waitForAllFences(self: Swapchain, device: *Engine.VulkanContext.Api.Device) !void {
+    pub fn waitForAllFences(self: Swapchain, device: *VulkanContext.Api.Device) !void {
         for (self.swap_images) |si| si.waitForFence(device) catch {};
     }
 
-    pub fn deinit(self: Swapchain, device: *Engine.VulkanContext.Api.Device) void {
+    pub fn deinit(self: Swapchain, device: *VulkanContext.Api.Device) void {
         self.deinitExceptSwapchain(device);
         device.destroySwapchainKHR(self.handle, null);
     }
 
-    pub fn recreate(self: *Swapchain, ctx: *Engine.VulkanContext, new_extent: vk.Extent2D, args: Args) !void {
+    pub fn recreate(self: *Swapchain, ctx: *VulkanContext, new_extent: vk.Extent2D, args: Args) !void {
         const old_handle = self.handle;
         self.deinitExceptSwapchain(&ctx.device);
         self.* = try initRecycle(ctx, old_handle, new_extent, .{
@@ -1697,7 +1699,7 @@ pub const Swapchain = struct {
         return &self.swap_images[self.image_index];
     }
 
-    pub fn present_start(self: *Swapchain, ctx: *Engine.VulkanContext) !*const SwapImage {
+    pub fn present_start(self: *Swapchain, ctx: *VulkanContext) !*const SwapImage {
         // Simple method:
         // 1) Acquire next image
         // 2) Wait for and reset fence of the acquired image
@@ -1723,7 +1725,7 @@ pub const Swapchain = struct {
         return current;
     }
 
-    pub fn present_end(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *Engine.VulkanContext, current: *const SwapImage) !PresentState {
+    pub fn present_end(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *VulkanContext, current: *const SwapImage) !PresentState {
         // Step 2: Submit the command buffer
         const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
         try ctx.device.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{
@@ -1770,7 +1772,7 @@ pub const Swapchain = struct {
         render_finished: vk.Semaphore,
         frame_fence: vk.Fence,
 
-        fn init(device: *Engine.VulkanContext.Api.Device, image: vk.Image, format: vk.Format) !SwapImage {
+        fn init(device: *VulkanContext.Api.Device, image: vk.Image, format: vk.Format) !SwapImage {
             const view = try device.createImageView(&.{
                 .image = image,
                 .view_type = .@"2d",
@@ -1804,7 +1806,7 @@ pub const Swapchain = struct {
             };
         }
 
-        fn deinit(self: SwapImage, device: *Engine.VulkanContext.Api.Device) void {
+        fn deinit(self: SwapImage, device: *VulkanContext.Api.Device) void {
             self.waitForFence(device) catch return;
             device.destroyImageView(self.view, null);
             device.destroySemaphore(self.image_acquired, null);
@@ -1812,7 +1814,7 @@ pub const Swapchain = struct {
             device.destroyFence(self.frame_fence, null);
         }
 
-        fn waitForFence(self: SwapImage, device: *Engine.VulkanContext.Api.Device) !void {
+        fn waitForFence(self: SwapImage, device: *VulkanContext.Api.Device) !void {
             _ = try device.waitForFences(1, @ptrCast(&self.frame_fence), vk.TRUE, std.math.maxInt(u64));
         }
     };
@@ -1856,7 +1858,7 @@ pub fn transitionImage(
 }
 
 pub fn copyBuffer(
-    ctx: *Engine.VulkanContext,
+    ctx: *VulkanContext,
     device: *Device,
     pool: vk.CommandPool,
     dst: vk.Buffer,
@@ -1871,7 +1873,7 @@ pub fn copyBuffer(
     }, @ptrCast(&cmdbuf_handle));
     defer device.freeCommandBuffers(pool, 1, @ptrCast(&cmdbuf_handle));
 
-    const cmdbuf = Engine.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
+    const cmdbuf = engine_mod.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
 
     try cmdbuf.beginCommandBuffer(&.{
         .flags = .{ .one_time_submit_bit = true },
@@ -1896,7 +1898,7 @@ pub fn copyBuffer(
 }
 
 pub fn copyImageToBuffer(
-    ctx: *Engine.VulkanContext,
+    ctx: *VulkanContext,
     device: *Device,
     pool: vk.CommandPool,
     src: vk.Image,
@@ -1912,7 +1914,7 @@ pub fn copyImageToBuffer(
     }, @ptrCast(&cmdbuf_handle));
     defer device.freeCommandBuffers(pool, 1, @ptrCast(&cmdbuf_handle));
 
-    const cmdbuf = Engine.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
+    const cmdbuf = VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
 
     try cmdbuf.beginCommandBuffer(&.{
         .flags = .{ .one_time_submit_bit = true },
@@ -1945,7 +1947,7 @@ pub fn copyImageToBuffer(
 }
 
 pub fn copyBufferToImage(
-    ctx: *Engine.VulkanContext,
+    ctx: *VulkanContext,
     device: *Device,
     pool: vk.CommandPool,
     src: vk.Buffer,
@@ -1961,7 +1963,7 @@ pub fn copyBufferToImage(
     }, @ptrCast(&cmdbuf_handle));
     defer device.freeCommandBuffers(pool, 1, @ptrCast(&cmdbuf_handle));
 
-    const cmdbuf = Engine.VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
+    const cmdbuf = VulkanContext.Api.CommandBuffer.init(cmdbuf_handle, device.wrapper);
 
     try cmdbuf.beginCommandBuffer(&.{
         .flags = .{ .one_time_submit_bit = true },
@@ -1995,7 +1997,7 @@ pub fn copyBufferToImage(
 
 pub fn dump_image_to_file(
     image: *Image,
-    ctx: *Engine.VulkanContext,
+    ctx: *VulkanContext,
     pool: vk.CommandPool,
     copy_extent: vk.Extent2D,
     _path: []const u8,

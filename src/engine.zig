@@ -22,7 +22,7 @@ const Fuse = utils_mod.Fuse;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-const Engine = @This();
+pub const Engine = @This();
 
 audio: Audio,
 window: *Window,

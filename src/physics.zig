@@ -6,8 +6,6 @@ const Vec4 = math.Vec4;
 const utils_mod = @import("utils.zig");
 const TypeId = utils_mod.TypeId;
 
-const Engine = @import("engine.zig");
-
 const app = @import("app.zig");
 const AppState = app.AppState;
 

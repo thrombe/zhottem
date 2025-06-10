@@ -180,9 +180,6 @@ pub fn main() !void {
             while (try app.tick()) {}
         },
     }
-
-    // no defer if we don't want to print leaks when we error out
-    // _ = gpa.deinit();
 }
 
 export fn hot_init() callconv(.c) ?*anyopaque {
@@ -295,8 +292,9 @@ const HotApp = struct {
     const Vec4 = math.Vec4;
     const Mat4x4 = math.Mat4x4;
 
-    const Engine = @import("engine.zig");
-    const c = Engine.c;
+    const engine_mod = @import("engine.zig");
+    const Engine = engine_mod.Engine;
+    const c = engine_mod.c;
 
     const gui = @import("gui.zig");
     const GuiEngine = gui.GuiEngine;
@@ -335,7 +333,7 @@ const HotApp = struct {
         var args = try std.process.argsWithAllocator(allocator.*);
         defer args.deinit();
 
-        var engine_args: Engine.Window.Args = .{};
+        var engine_args: engine_mod.Window.Args = .{};
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "-x11")) {
                 engine_args.platform_hint = .x11;
@@ -415,6 +413,12 @@ const HotApp = struct {
     }
 
     fn tick(self: *@This()) !bool {
-        return try self.app.tick(&self.engine, &self.app_state, &self.gui_renderer, &self.gui_state, &self.renderer_state);
+        return try self.app.tick(
+            &self.engine,
+            &self.app_state,
+            &self.gui_renderer,
+            &self.gui_state,
+            &self.renderer_state,
+        );
     }
 };

@@ -7,8 +7,9 @@ const utils_mod = @import("utils.zig");
 const math = @import("math.zig");
 const assets_mod = @import("assets.zig");
 
-const Engine = @import("engine.zig");
-const Device = Engine.VulkanContext.Api.Device;
+const engine_mod = @import("engine.zig");
+const Engine = engine_mod.Engine;
+const Device = engine_mod.VulkanContext.Api.Device;
 
 const render_utils = @import("render_utils.zig");
 const Buffer = render_utils.Buffer;
@@ -170,7 +171,7 @@ pub const ResourceManager = struct {
             back_allocated,
         } = .enough,
 
-        pub fn init(ctx: *Engine.VulkanContext, pool: vk.CommandPool, v: Buffer.Args, val: anytype) !@This() {
+        pub fn init(ctx: *engine_mod.VulkanContext, pool: vk.CommandPool, v: Buffer.Args, val: anytype) !@This() {
             const device = &ctx.device;
 
             var buf = try Buffer.new_initialized(ctx, v, val, pool);
@@ -216,7 +217,7 @@ pub const ResourceManager = struct {
             self.count = 0;
         }
 
-        pub fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool, val: anytype) !void {
+        pub fn alloc_tick(self: *@This(), ctx: *engine_mod.VulkanContext, pool: vk.CommandPool, val: anytype) !void {
             const device = &ctx.device;
 
             switch (self.state) {
@@ -297,7 +298,7 @@ pub const ResourceManager = struct {
 
         pub fn update(
             self: *@This(),
-            ctx: *Engine.VulkanContext,
+            ctx: *engine_mod.VulkanContext,
             command_pool: vk.CommandPool,
             v: struct {
                 line_buffer: []LineVertex,
@@ -321,7 +322,7 @@ pub const ResourceManager = struct {
             _ = self.line_buffer.alloc(vertices);
         }
 
-        fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool) !void {
+        fn alloc_tick(self: *@This(), ctx: *engine_mod.VulkanContext, pool: vk.CommandPool) !void {
             try self.line_buffer.alloc_tick(ctx, pool, std.mem.zeroes(LineVertex));
         }
 
@@ -555,7 +556,7 @@ pub const ResourceManager = struct {
         }
 
         // call asap after reserving all instances of a frame
-        fn alloc_tick(self: *@This(), ctx: *Engine.VulkanContext, pool: vk.CommandPool) !void {
+        fn alloc_tick(self: *@This(), ctx: *engine_mod.VulkanContext, pool: vk.CommandPool) !void {
             try self.instance_buffer.alloc_tick(ctx, pool, std.mem.zeroes(Instance));
             try self.bone_buffer.alloc_tick(ctx, pool, std.mem.zeroes(math.Mat4x4));
             try self.draw_call_buffer.alloc_tick(ctx, pool, std.mem.zeroes(DrawCall));
@@ -573,7 +574,7 @@ pub const ResourceManager = struct {
             return did_swap;
         }
 
-        pub fn update(self: *@This(), ctx: *Engine.VulkanContext, command_pool: vk.CommandPool) !struct {
+        pub fn update(self: *@This(), ctx: *engine_mod.VulkanContext, command_pool: vk.CommandPool) !struct {
             buffer_invalid: bool,
             cmdbuf_invalid: bool,
         } {

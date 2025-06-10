@@ -8,7 +8,7 @@ const math = @import("math.zig");
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-const Engine = @import("engine.zig");
+const engine_mod = @import("engine.zig");
 
 const posix = std.posix;
 
@@ -32,7 +32,7 @@ pub const Event = union(enum(u8)) {
     },
     input: packed struct {
         id: u8,
-        input: Engine.Window.InputState,
+        input: engine_mod.Window.InputState,
     },
     quit,
 

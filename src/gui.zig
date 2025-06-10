@@ -5,8 +5,9 @@ const vk = @import("vulkan");
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-const Engine = @import("engine.zig");
-const c = Engine.c;
+const engine_mod = @import("engine.zig");
+const Engine = engine_mod.Engine;
+const c = engine_mod.c;
 
 const math = @import("math.zig");
 const Vec4 = math.Vec4;
@@ -18,13 +19,13 @@ const Swapchain = render_utils.Swapchain;
 pub const GuiEngine = struct {
     ctx: *c.ImGuiContext,
 
-    const Device = Engine.VulkanContext.Api.Device;
+    const Device = engine_mod.VulkanContext.Api.Device;
 
     pub fn loader(name: [*c]const u8, instance: ?*anyopaque) callconv(.C) ?*const fn () callconv(.C) void {
         return c.glfwGetInstanceProcAddress(@ptrCast(instance), name);
     }
 
-    pub fn init(window: *Engine.Window) !@This() {
+    pub fn init(window: *engine_mod.Window) !@This() {
         const ctx = c.ImGui_CreateContext(null) orelse return error.ErrorCreatingImguiContext;
         errdefer c.ImGui_DestroyContext(ctx);
 
