@@ -339,6 +339,7 @@ pub fn tick(
     self.telemetry.mark_frame() catch |e| utils_mod.dump_error(e);
     self.telemetry.begin_sample(@src(), "frame.tick");
     defer self.telemetry.end_sample();
+    self.telemetry.plot("last frame time (ms)", app_state.ticker.real.delta * std.time.ms_per_s);
 
     const ctx = &engine.graphics;
 
@@ -438,14 +439,14 @@ pub fn tick(
         self.telemetry.begin_sample(@src(), ".present");
         defer self.telemetry.end_sample();
 
-        const current_si = try renderer_state.swapchain.present_start(ctx);
+        try renderer_state.swapchain.present_start(ctx);
         const present_state = renderer_state.swapchain.present_end(
             &[_]vk.CommandBuffer{
                 renderer_state.cmdbuffer.bufs[renderer_state.swapchain.image_index],
                 gui_renderer.cmd_bufs[renderer_state.swapchain.image_index],
             },
             ctx,
-            current_si,
+            &renderer_state.swapchain.swap_images[renderer_state.swapchain.image_index],
         ) catch |err| switch (err) {
             error.OutOfDateKHR => blk: {
                 _ = app_state.resize_fuse.fuse();

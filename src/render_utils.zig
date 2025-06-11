@@ -1691,15 +1691,7 @@ pub const Swapchain = struct {
         });
     }
 
-    pub fn currentImage(self: Swapchain) vk.Image {
-        return self.swap_images[self.image_index].image;
-    }
-
-    pub fn currentSwapImage(self: Swapchain) *const SwapImage {
-        return &self.swap_images[self.image_index];
-    }
-
-    pub fn present_start(self: *Swapchain, ctx: *VulkanContext) !*const SwapImage {
+    pub fn present_start(self: *Swapchain, ctx: *VulkanContext) !void {
         // Simple method:
         // 1) Acquire next image
         // 2) Wait for and reset fence of the acquired image
@@ -1718,20 +1710,18 @@ pub const Swapchain = struct {
         // so we keep an extra auxilery semaphore that is swapped around
 
         // Step 1: Make sure the current frame has finished rendering
-        const current = self.currentSwapImage();
+        const current = &self.swap_images[self.image_index];
+        // wait on the gpu command buffers of the frame that was acquired at the end of the last frame.
         try current.waitForFence(&ctx.device);
         try ctx.device.resetFences(1, @ptrCast(&current.frame_fence));
-
-        return current;
     }
 
     pub fn present_end(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *VulkanContext, current: *const SwapImage) !PresentState {
         // Step 2: Submit the command buffer
-        const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
         try ctx.device.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast(&current.image_acquired),
-            .p_wait_dst_stage_mask = &wait_stage,
+            .p_wait_dst_stage_mask = &[_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }},
             .command_buffer_count = @intCast(cmdbufs.len),
             .p_command_buffers = cmdbufs.ptr,
             .signal_semaphore_count = 1,
@@ -1748,6 +1738,15 @@ pub const Swapchain = struct {
         });
 
         // Step 4: Acquire next frame
+        // - [Vulkan® 1.4.317](https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#vkAcquireNextImageKHR)
+        // this does not block till the image is ready to be used, but here we can supply a fence/semaphore
+        // so that it can signal that when it is ready to be used.
+        // - [VK_KHR_swapchain(3)](https://registry.khronos.org/vulkan/specs/latest/man/html/VK_KHR_swapchain.html)
+        // - [Vulkan Lecture Series, Episode 2 - YouTube](https://youtu.be/nSzQcyQTtRY?si=owZn39Zbd51Fh9ew&t=1610)
+        //  it only waits for the image to become 'available'. we still have to wait for it to be usable by our commands
+        // now the gpu will signal this semaphore (which we will swap with current.image_acquired a few lines down)
+        // and we can wait for this acquire to be complete before we start executing this frame's command buffers
+        // by passing the semaphore in vk.SubmitInfo.p_wait_semaphores
         const result = try ctx.device.acquireNextImageKHR(
             self.handle,
             std.math.maxInt(u64),
@@ -1768,6 +1767,7 @@ pub const Swapchain = struct {
     const SwapImage = struct {
         image: vk.Image,
         view: vk.ImageView,
+        // swapchain does not support timeline semaphores
         image_acquired: vk.Semaphore,
         render_finished: vk.Semaphore,
         frame_fence: vk.Fence,
