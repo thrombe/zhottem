@@ -446,7 +446,6 @@ pub fn tick(
                 gui_renderer.cmd_bufs[renderer_state.swapchain.image_index],
             },
             ctx,
-            &renderer_state.swapchain.swap_images[renderer_state.swapchain.image_index],
         ) catch |err| switch (err) {
             error.OutOfDateKHR => blk: {
                 _ = app_state.resize_fuse.fuse();
@@ -674,7 +673,7 @@ pub const RendererState = struct {
     }
 
     pub fn deinit(self: *@This(), device: *Device) void {
-        try self.swapchain.waitForAllFences(device);
+        try self.swapchain.waitForAll(device);
 
         defer self.swapchain.deinit(device);
         defer self.cmdbuffer.deinit(device);

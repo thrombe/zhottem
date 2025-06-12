@@ -381,7 +381,7 @@ const HotApp = struct {
         defer self.renderer_state.deinit(&self.engine.graphics.device);
         defer self.gui_renderer.deinit(&self.engine.graphics.device);
 
-        try self.renderer_state.swapchain.waitForAllFences(&self.engine.graphics.device);
+        try self.renderer_state.swapchain.waitForAll(&self.engine.graphics.device);
         try self.engine.graphics.device.deviceWaitIdle();
     }
 
@@ -389,7 +389,7 @@ const HotApp = struct {
         {
             // imgui bugs out on reload, so we deinit it on pre_reload, and reinit it on load :/
 
-            try self.renderer_state.swapchain.waitForAllFences(&self.engine.graphics.device);
+            try self.renderer_state.swapchain.waitForAll(&self.engine.graphics.device);
             try self.engine.graphics.device.deviceWaitIdle();
 
             self.gui_renderer.pre_reload();

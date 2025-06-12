@@ -3,6 +3,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 
 const utils = @import("utils.zig");
+const cast = utils.cast;
 
 const engine_mod = @import("engine.zig");
 const Engine = engine_mod.Engine;
@@ -1023,6 +1024,7 @@ pub const CmdBuffer = struct {
             .compute_shader_bit = true,
         },
     }) void {
+        // - [Vulkan Synchronization](https://youtu.be/GiKbGWI4M-Y?si=1Ya1zseAnDnJ1RCf&t=2046)
         for (self.bufs) |cmdbuf| {
             device.cmdPipelineBarrier(cmdbuf, v.src, v.dst, .{}, 1, &[_]vk.MemoryBarrier{.{
                 .src_access_mask = .{
@@ -1506,6 +1508,16 @@ pub const Swapchain = struct {
     image_index: u32,
     next_image_acquired: vk.Semaphore,
 
+    // - [Vulkan Synchronization](https://www.youtube.com/watch?v=GiKbGWI4M-Y)
+    timeline_semaphore: vk.Semaphore,
+    frame: u64 = 0,
+
+    const FrameStage = enum(u64) {
+        submit = 0,
+
+        const count = std.meta.fields(@This()).len;
+    };
+
     pub const PresentState = enum {
         optimal,
         suboptimal,
@@ -1635,7 +1647,7 @@ pub const Swapchain = struct {
             errdefer allocator.free(swap_images);
 
             var i: usize = 0;
-            errdefer for (swap_images[0..i]) |si| si.deinit(&ctx.device);
+            errdefer for (swap_images[0..i]) |si| si.deinit(&ctx.device, null);
             for (images) |image| {
                 swap_images[i] = try SwapImage.init(&ctx.device, image, surface_format.format);
                 i += 1;
@@ -1644,7 +1656,7 @@ pub const Swapchain = struct {
             break :blk swap_images;
         };
         errdefer {
-            for (swap_images) |si| si.deinit(&ctx.device);
+            for (swap_images) |si| si.deinit(&ctx.device, null);
             allocator.free(swap_images);
         }
 
@@ -1657,7 +1669,17 @@ pub const Swapchain = struct {
         }
 
         std.mem.swap(vk.Semaphore, &swap_images[result.image_index].image_acquired, &next_image_acquired);
+
+        const typ = vk.SemaphoreTypeCreateInfo{
+            .semaphore_type = .timeline,
+            .initial_value = 0,
+        };
+        const semaphore = try ctx.device.createSemaphore(&vk.SemaphoreCreateInfo{
+            .p_next = @ptrCast(&typ),
+        }, null);
+        errdefer ctx.device.destroySemaphore(semaphore, null);
         return Swapchain{
+            .timeline_semaphore = semaphore,
             .surface_format = surface_format,
             .present_mode = present_mode,
             .extent = actual_extent,
@@ -1668,22 +1690,51 @@ pub const Swapchain = struct {
         };
     }
 
-    fn deinitExceptSwapchain(self: Swapchain, device: *VulkanContext.Api.Device) void {
-        for (self.swap_images) |si| si.deinit(device);
+    fn deinitExceptSwapchain(self: *@This(), device: *VulkanContext.Api.Device) void {
+        for (self.swap_images) |si| si.deinit(device, self);
         allocator.free(self.swap_images);
         device.destroySemaphore(self.next_image_acquired, null);
+        device.destroySemaphore(self.timeline_semaphore, null);
     }
 
-    pub fn waitForAllFences(self: Swapchain, device: *VulkanContext.Api.Device) !void {
-        for (self.swap_images) |si| si.waitForFence(device) catch {};
+    pub fn timeline_wait(self: *@This(), device: *Device, val: u64) !void {
+        const res = try device.waitSemaphores(&vk.SemaphoreWaitInfo{
+            .semaphore_count = 1,
+            .p_semaphores = @ptrCast(&self.timeline_semaphore),
+            .p_values = @ptrCast(&val),
+        }, std.math.maxInt(u64));
+
+        switch (res) {
+            .success => return,
+            .not_ready => return error.TimelineSemaphoreNotReady,
+            .timeout => return error.TimelineSemaphoreTimeout,
+            .event_set => return error.TimelineSemaphoreEventSet,
+            .event_reset => return error.TimelineSemaphoreEventReset,
+            .incomplete => return error.TimelineSemaphoreIncomplete,
+            else => {
+                std.debug.print("{any}", .{res});
+                return error.TimelineSemaphoreUnknownError;
+            },
+        }
     }
 
-    pub fn deinit(self: Swapchain, device: *VulkanContext.Api.Device) void {
+    pub fn timeline_signal(self: *@This(), device: *Device, val: u64) !void {
+        try device.signalSemaphore(&vk.SemaphoreSignalInfo{
+            .semaphore = self.timeline_semaphore,
+            .value = val,
+        });
+    }
+
+    pub fn waitForAll(self: *@This(), device: *VulkanContext.Api.Device) !void {
+        for (self.swap_images) |si| self.timeline_wait(device, si.submit_stage) catch {};
+    }
+
+    pub fn deinit(self: *@This(), device: *VulkanContext.Api.Device) void {
         self.deinitExceptSwapchain(device);
         device.destroySwapchainKHR(self.handle, null);
     }
 
-    pub fn recreate(self: *Swapchain, ctx: *VulkanContext, new_extent: vk.Extent2D, args: Args) !void {
+    pub fn recreate(self: *@This(), ctx: *VulkanContext, new_extent: vk.Extent2D, args: Args) !void {
         const old_handle = self.handle;
         self.deinitExceptSwapchain(&ctx.device);
         self.* = try initRecycle(ctx, old_handle, new_extent, .{
@@ -1712,21 +1763,32 @@ pub const Swapchain = struct {
         // Step 1: Make sure the current frame has finished rendering
         const current = &self.swap_images[self.image_index];
         // wait on the gpu command buffers of the frame that was acquired at the end of the last frame.
-        try current.waitForFence(&ctx.device);
-        try ctx.device.resetFences(1, @ptrCast(&current.frame_fence));
+        try self.timeline_wait(&ctx.device, current.submit_stage);
     }
 
-    pub fn present_end(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *VulkanContext, current: *const SwapImage) !PresentState {
+    pub fn present_end(self: *Swapchain, cmdbufs: []const vk.CommandBuffer, ctx: *VulkanContext) !PresentState {
+        const current = &self.swap_images[self.image_index];
+
         // Step 2: Submit the command buffer
         try ctx.device.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast(&current.image_acquired),
-            .p_wait_dst_stage_mask = &[_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }},
+            .p_next = @ptrCast(&vk.TimelineSemaphoreSubmitInfo{
+                .wait_semaphore_value_count = 2,
+                .p_wait_semaphore_values = &[_]u64{ 0, self.get_stage(0, .submit) },
+                .signal_semaphore_value_count = 2,
+                .p_signal_semaphore_values = &[_]u64{ 0, self.get_stage(1, .submit) },
+            }),
+            .wait_semaphore_count = 2,
+            .p_wait_semaphores = &[_]vk.Semaphore{ current.image_acquired, self.timeline_semaphore },
+            // length == number of wait semaphores
+            .p_wait_dst_stage_mask = &[_]vk.PipelineStageFlags{ .{ .top_of_pipe_bit = true }, .{ .top_of_pipe_bit = true } },
+
+            .signal_semaphore_count = 2,
+            .p_signal_semaphores = &[_]vk.Semaphore{ current.render_finished, self.timeline_semaphore },
+
             .command_buffer_count = @intCast(cmdbufs.len),
             .p_command_buffers = cmdbufs.ptr,
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast(&current.render_finished),
-        }}, current.frame_fence);
+        }}, .null_handle);
+        current.submit_stage = self.get_stage(1, .submit);
 
         // Step 3: Present the current frame
         _ = try ctx.device.queuePresentKHR(ctx.present_queue.handle, &.{
@@ -1756,6 +1818,7 @@ pub const Swapchain = struct {
 
         std.mem.swap(vk.Semaphore, &self.swap_images[result.image_index].image_acquired, &self.next_image_acquired);
         self.image_index = result.image_index;
+        self.frame = self.get_stage(1, .submit);
 
         return switch (result.result) {
             .success => .optimal,
@@ -1764,13 +1827,17 @@ pub const Swapchain = struct {
         };
     }
 
+    pub fn get_stage(self: *@This(), frame_offset: i32, stage: FrameStage) u64 {
+        return cast(u64, (cast(i64, self.frame) + frame_offset) * cast(i64, FrameStage.count) + cast(i64, @intFromEnum(stage)));
+    }
+
     const SwapImage = struct {
         image: vk.Image,
         view: vk.ImageView,
         // swapchain does not support timeline semaphores
         image_acquired: vk.Semaphore,
         render_finished: vk.Semaphore,
-        frame_fence: vk.Fence,
+        submit_stage: u64 = 0,
 
         fn init(device: *VulkanContext.Api.Device, image: vk.Image, format: vk.Format) !SwapImage {
             const view = try device.createImageView(&.{
@@ -1794,28 +1861,19 @@ pub const Swapchain = struct {
             const render_finished = try device.createSemaphore(&.{}, null);
             errdefer device.destroySemaphore(render_finished, null);
 
-            const frame_fence = try device.createFence(&.{ .flags = .{ .signaled_bit = true } }, null);
-            errdefer device.destroyFence(frame_fence, null);
-
             return SwapImage{
                 .image = image,
                 .view = view,
                 .image_acquired = image_acquired,
                 .render_finished = render_finished,
-                .frame_fence = frame_fence,
             };
         }
 
-        fn deinit(self: SwapImage, device: *VulkanContext.Api.Device) void {
-            self.waitForFence(device) catch return;
+        fn deinit(self: SwapImage, device: *VulkanContext.Api.Device, chain: ?*Swapchain) void {
+            if (chain) |sc| sc.timeline_wait(device, self.submit_stage) catch return;
             device.destroyImageView(self.view, null);
             device.destroySemaphore(self.image_acquired, null);
             device.destroySemaphore(self.render_finished, null);
-            device.destroyFence(self.frame_fence, null);
-        }
-
-        fn waitForFence(self: SwapImage, device: *VulkanContext.Api.Device) !void {
-            _ = try device.waitForFences(1, @ptrCast(&self.frame_fence), vk.TRUE, std.math.maxInt(u64));
         }
     };
 };

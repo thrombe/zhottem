@@ -772,8 +772,11 @@ pub const VulkanContext = struct {
                 .p_next = @ptrCast(&vk.PhysicalDeviceVulkan13Features{
                     .dynamic_rendering = vk.TRUE,
                     .synchronization_2 = vk.TRUE,
-                    .p_next = @ptrCast(@constCast(&vk.PhysicalDeviceVulkan11Features{
-                        .shader_draw_parameters = vk.TRUE,
+                    .p_next = @ptrCast(@constCast(&vk.PhysicalDeviceVulkan12Features{
+                        .timeline_semaphore = vk.TRUE,
+                        .p_next = @ptrCast(@constCast(&vk.PhysicalDeviceVulkan11Features{
+                            .shader_draw_parameters = vk.TRUE,
+                        })),
                     })),
                 }),
                 .queue_create_info_count = queue_count,
