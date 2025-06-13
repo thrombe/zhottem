@@ -7,6 +7,10 @@
         gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x +\
         gl_GlobalInvocationID.z * gl_NumWorkGroups.x * gl_NumWorkGroups.y * gl_WorkGroupSize.x * gl_WorkGroupSize.y)
 
+#define u32 uint
+#define i32 int
+#define f32 float
+
 uint rand_xorshift(uint state) {
     state ^= (state << 13);
     state ^= (state >> 17);
@@ -33,6 +37,10 @@ float random() {
     return fhash(seed++);
 }
 
+uint randuint() {
+    return hash(seed++);
+}
+
 vec3 random_normal() {
     vec2 r = vec2(6.28318530718 * random(), acos(2.0 * random() - 1.0));
     vec2 c = cos(r), s = sin(r);
@@ -55,6 +63,10 @@ ivec2 to2D(int id, int side) {
 ivec3 to3D(int id, int side) {
     ivec3 pos = ivec3(id % side, (id / side)%side, (id / (side * side))%side);
     return pos;
+}
+
+int divide_roof(int a, int b) {
+    return a / b + int(mod(a, b) > 0);
 }
 
 vec3 reinhard_tonemap(vec3 x) {
