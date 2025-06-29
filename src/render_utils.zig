@@ -1022,10 +1022,10 @@ pub const CmdBuffer = struct {
 
     pub fn memBarrier(self: *@This(), device: *Device, v: struct {
         src: vk.PipelineStageFlags = .{
-            .compute_shader_bit = true,
+            .all_commands_bit = true,
         },
         dst: vk.PipelineStageFlags = .{
-            .compute_shader_bit = true,
+            .all_commands_bit = true,
         },
     }) void {
         // - [Vulkan Synchronization](https://youtu.be/GiKbGWI4M-Y?si=1Ya1zseAnDnJ1RCf&t=2046)
