@@ -1220,18 +1220,23 @@ pub const ShaderUtils = struct {
         }
     }
 
-    pub fn create_uniform_object(comptime uniform_type: type, uniform: anytype) create_extern_type(uniform_type) {
+    pub fn shader_object(comptime obj_typ: type, obj: anytype) shader_type(obj_typ) {
         const Type = std.builtin.Type;
-        const Ut: Type = @typeInfo(uniform_type);
-        const U = Ut.@"struct";
+        const Ut: Type = @typeInfo(obj_typ);
+        const S = shader_type(obj_typ);
 
-        var uniform_object: create_extern_type(uniform_type) = undefined;
-
-        inline for (U.fields) |field| {
-            @field(uniform_object, field.name) = @field(uniform, field.name);
+        var shader_obj: S = undefined;
+        inline for (Ut.@"struct".fields) |field| {
+            const O = @TypeOf(@field(shader_obj, field.name));
+            if (comptime std.meta.eql(O, @TypeOf(@field(obj, field.name)))) {
+                @field(shader_obj, field.name) = @field(obj, field.name);
+            } else {
+                @field(shader_obj, field.name) = shader_object(O, @field(obj, field.name));
+            }
         }
 
-        return uniform_object;
+        return shader_obj;
+
     }
 
     pub const GlslBindingGenerator = struct {
