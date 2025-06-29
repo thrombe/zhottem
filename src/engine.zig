@@ -340,10 +340,15 @@ pub const Window = struct {
             right: Action = .none,
             middle: Action = .none,
 
-            x: f32 = 0,
-            y: f32 = 0,
-            dx: f32 = 0,
-            dy: f32 = 0,
+            x: f64 = 0,
+            y: f64 = 0,
+            dx: f64 = 0,
+            dy: f64 = 0,
+
+            scroll: packed struct {
+                dx: f64 = 0,
+                dy: f64 = 0,
+            } = .{},
 
             fn tick(self: anytype) void {
                 self.left.tick();
@@ -352,6 +357,8 @@ pub const Window = struct {
 
                 self.dx = 0;
                 self.dy = 0;
+                self.scroll.dx = 0;
+                self.scroll.dy = 0;
             }
         } = .{},
         keys: packed struct {
@@ -447,11 +454,11 @@ pub const Window = struct {
             const m = &global_window.input_state.mouse;
 
             // NOTE: .tick() clears this to 0
-            m.dx += @as(f32, @floatCast(x)) - m.x;
-            m.dy += @as(f32, @floatCast(y)) - m.y;
+            m.dx += x - m.x;
+            m.dy += y - m.y;
 
-            m.x = @as(f32, @floatCast(x));
-            m.y = @as(f32, @floatCast(y));
+            m.x = x;
+            m.y = y;
         }
 
         fn mouse(_: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -463,6 +470,13 @@ pub const Window = struct {
                 c.GLFW_MOUSE_BUTTON_MIDDLE => global_window.input_state.mouse.middle = a,
                 else => return,
             }
+        }
+
+        fn scroll(_: ?*c.GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
+            const m = &global_window.input_state.mouse;
+
+            m.scroll.dx += xoffset;
+            m.scroll.dy += yoffset;
         }
 
         fn key(_: ?*c.GLFWwindow, button: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -559,6 +573,7 @@ pub const Window = struct {
 
         _ = c.glfwSetFramebufferSizeCallback(window, &Callbacks.resize);
         _ = c.glfwSetMouseButtonCallback(window, &Callbacks.mouse);
+        _ = c.glfwSetScrollCallback(window, &Callbacks.scroll);
         _ = c.glfwSetKeyCallback(window, &Callbacks.key);
         _ = c.glfwSetCursorPosCallback(window, &Callbacks.cursor_pos);
 
@@ -574,6 +589,7 @@ pub const Window = struct {
 
         _ = c.glfwSetFramebufferSizeCallback(self.handle, null);
         _ = c.glfwSetMouseButtonCallback(self.handle, null);
+        _ = c.glfwSetScrollCallback(self.handle, null);
         _ = c.glfwSetKeyCallback(self.handle, null);
         _ = c.glfwSetCursorPosCallback(self.handle, null);
     }
@@ -585,6 +601,7 @@ pub const Window = struct {
 
         _ = c.glfwSetFramebufferSizeCallback(self.handle, &Callbacks.resize);
         _ = c.glfwSetMouseButtonCallback(self.handle, &Callbacks.mouse);
+        _ = c.glfwSetScrollCallback(self.handle, &Callbacks.scroll);
         _ = c.glfwSetKeyCallback(self.handle, &Callbacks.key);
         _ = c.glfwSetCursorPosCallback(self.handle, &Callbacks.cursor_pos);
     }
