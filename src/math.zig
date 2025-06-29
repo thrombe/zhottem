@@ -1,5 +1,16 @@
 const std = @import("std");
 
+pub fn divide_roof(x: anytype, r: @TypeOf(x)) @TypeOf(x) {
+    switch (@typeInfo(@TypeOf(x))) {
+        .int => {
+            return @divFloor(x, r) + @as(@TypeOf(x), @intFromBool(@mod(x, r) > 0));
+        },
+        else => {
+            return x / r + @as(@TypeOf(x), @intFromBool(x % r > 0));
+        },
+    }
+}
+
 pub const Rng = struct {
     rng: std.Random,
     constraints: Constraints = .{},
@@ -51,6 +62,31 @@ pub const Rng = struct {
         return this;
     }
 };
+
+pub fn Vec2T(T: type) type {
+    return extern struct {
+        x: T = 0,
+        y: T = 0,
+    };
+}
+
+pub fn Vec3T(T: type) type {
+    return extern struct {
+        x: T = 0,
+        y: T = 0,
+        z: T = 0,
+        __: T = 0,
+    };
+}
+
+pub fn Vec4T(T: type) type {
+    return extern struct {
+        x: T = 0,
+        y: T = 0,
+        z: T = 0,
+        w: T = 0,
+    };
+}
 
 pub const Vec4 = extern struct {
     x: f32 = 0,
@@ -284,6 +320,11 @@ pub const Vec4 = extern struct {
         return Vec3{ .x = q_result.x, .y = q_result.y, .z = q_result.z };
     }
 
+    pub fn as_buf(self: *@This()) []f32 {
+        const bytes = std.mem.asBytes(self);
+        return std.mem.bytesAsSlice(f32, bytes);
+    }
+
     pub fn to_buf(self: *const @This()) [4]f32 {
         return .{ self.x, self.y, self.z, self.w };
     }
@@ -439,6 +480,11 @@ pub const Vec3 = extern struct {
     pub fn withw(self: *const @This(), w: f32) Vec4 {
         return .{ .x = self.x, .y = self.y, .z = self.z, .w = w };
     }
+};
+
+pub const Vec2 = extern struct {
+    x: f32,
+    y: f32,
 };
 
 // - [Matrix storage](https://github.com/hexops/machengine.org/blob/0aab00137dc3d1098e5237e2bee124e0ef9fbc17/content/docs/math/matrix-storage.md)
