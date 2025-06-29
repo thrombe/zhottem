@@ -14,6 +14,23 @@ const allocator = main.allocator;
 
 const Device = engine_mod.VulkanContext.Api.Device;
 
+pub fn push_constant_ranges(constants: type, comptime stage: vk.ShaderStageFlags) [std.meta.fields(constants).len]vk.PushConstantRange {
+    comptime {
+        const fields = @typeInfo(constants).@"struct".fields;
+        var range_arr: [fields.len]vk.PushConstantRange = undefined;
+        var offset: u32 = 0;
+        for (fields, 0..) |field, i| {
+            range_arr[i] = .{
+                .stage_flags = stage,
+                .offset = offset,
+                .size = @sizeOf(field.type),
+            };
+            offset += @sizeOf(field.type);
+        }
+        return range_arr;
+    }
+}
+
 pub const DescriptorPool = struct {
     pool: vk.DescriptorPool,
 

@@ -1231,7 +1231,6 @@ pub const ShaderUtils = struct {
         }
 
         return shader_obj;
-
     }
 
     pub const GlslBindingGenerator = struct {
