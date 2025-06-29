@@ -201,6 +201,16 @@ pub const GraphicsPipeline = struct {
         pass: ?vk.RenderPass = null,
         desc_set_layouts: []const vk.DescriptorSetLayout,
         push_constant_ranges: []const vk.PushConstantRange = &.{},
+        alpha_blend: vk.PipelineColorBlendAttachmentState = .{
+            .blend_enable = vk.FALSE,
+            .src_color_blend_factor = .one,
+            .dst_color_blend_factor = .zero,
+            .color_blend_op = .add,
+            .src_alpha_blend_factor = .one,
+            .dst_alpha_blend_factor = .zero,
+            .alpha_blend_op = .add,
+            .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
+        },
         cull_mode: vk.CullModeFlags = .{ .back_bit = true },
         render_mode: RenderMode = .solid_triangles,
     };
@@ -305,16 +315,7 @@ pub const GraphicsPipeline = struct {
             .alpha_to_one_enable = vk.FALSE,
         };
 
-        const pcbas = vk.PipelineColorBlendAttachmentState{
-            .blend_enable = vk.FALSE,
-            .src_color_blend_factor = .one,
-            .dst_color_blend_factor = .zero,
-            .color_blend_op = .add,
-            .src_alpha_blend_factor = .one,
-            .dst_alpha_blend_factor = .zero,
-            .alpha_blend_op = .add,
-            .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        };
+        const pcbas = v.alpha_blend;
 
         const pcbsci = vk.PipelineColorBlendStateCreateInfo{
             .logic_op_enable = vk.FALSE,
@@ -1199,7 +1200,7 @@ pub const CmdBuffer = struct {
         v: struct {
             pipeline: *const GraphicsPipeline,
             desc_sets: []const vk.DescriptorSet,
-            offsets: []const u32,
+            offsets: []const u32 = &.{},
             calls: struct {
                 buffer: vk.Buffer,
                 count: u32,
