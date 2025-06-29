@@ -1123,33 +1123,29 @@ pub const ShaderUtils = struct {
     const Vec2 = math.Vec2;
     const Mat4x4 = math.Mat4x4;
 
-    pub const Mouse = extern struct { x: i32, y: i32, left: u32, right: u32 };
-    pub const Camera2D = extern struct {
+    pub const Mouse = struct { x: i32, y: i32, left: u32, right: u32 };
+    pub const Camera2D = struct {
         eye: Vec4, // vec2 aligned
         meta: CameraMeta = .{},
 
-        pub const CameraMeta = extern struct {
+        pub const CameraMeta = struct {
             did_move: u32 = 0,
-            _pad1: u32 = 0,
-            _pad2: u32 = 0,
-            _pad3: u32 = 0,
         };
     };
-    pub const Camera3D = extern struct {
+    pub const Camera3D = struct {
         eye: Vec3,
         fwd: Vec3,
         right: Vec3,
         up: Vec3,
         meta: CameraMeta = .{},
 
-        pub const CameraMeta = extern struct {
+        pub const CameraMeta = struct {
             did_change: u32 = 0,
             did_move: u32 = 0,
             did_rotate: u32 = 0,
-            pad: u32 = 0,
         };
     };
-    pub const Frame = extern struct {
+    pub const Frame = struct {
         frame: u32,
         time: f32,
         deltatime: f32,
@@ -1157,7 +1153,6 @@ pub const ShaderUtils = struct {
         height: i32,
         monitor_width: i32,
         monitor_height: i32,
-        pad0: u32 = 0,
     };
 
     // - [Descriptor pool and sets - Vulkan Tutorial](https://vulkan-tutorial.com/Uniform_buffers/Descriptor_pool_and_sets)

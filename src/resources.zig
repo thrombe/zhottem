@@ -19,27 +19,35 @@ const CmdBuffer = render_utils.CmdBuffer;
 const main = @import("main.zig");
 const allocator = main.allocator;
 
-pub const CameraUniform = extern struct {
+pub const CameraUniform = struct {
     camera: utils_mod.ShaderUtils.Camera3D,
     mouse: utils_mod.ShaderUtils.Mouse,
     world_to_screen: math.Mat4x4,
     frame: utils_mod.ShaderUtils.Frame,
+
+    pub const shader_type = utils_mod.ShaderUtils.shader_type(@This());
 };
 
-pub const PushConstants = extern struct {
+pub const PushConstants = struct {
     first_draw_ctx: u32,
+
+    pub const shader_type = utils_mod.ShaderUtils.shader_type(@This());
 };
 
-pub const Vertex = extern struct {
+pub const Vertex = struct {
     pos: math.Vec3,
     normal: math.Vec3,
     uv: math.Vec4, // vec2
     bone_ids: [4]u32,
     bone_weights: [4]f32,
+
+    pub const shader_type = utils_mod.ShaderUtils.shader_type(@This());
 };
 
-pub const Instance = extern struct {
+pub const Instance = struct {
     bone_offset: u32,
+
+    pub const shader_type = utils_mod.ShaderUtils.shader_type(@This());
 };
 
 pub const UniformBinds = enum(u32) {
@@ -131,8 +139,8 @@ pub const ResourceManager = struct {
         // keeping memory mapped is not bad in vulkan
         defer device.unmapMemory(self.camera_uniform_buf.memory);
 
-        const mem: *CameraUniform = @ptrCast(@alignCast(mapped));
-        mem.* = self.camera_uniform;
+        const mem: *CameraUniform.shader_type = @ptrCast(@alignCast(mapped));
+        mem.* = utils_mod.ShaderUtils.shader_object(CameraUniform.shader_type, self.camera_uniform);
 
         // flush manually + host_coherent_bit = false
         // device.flushMappedMemoryRanges(memory_range_count: u32, p_memory_ranges: [*]const MappedMemoryRange)
@@ -263,9 +271,11 @@ pub const ResourceManager = struct {
     pub const JoltDebugResources = struct {
         line_buffer: ElementDoubleBuffer,
 
-        pub const LineVertex = extern struct {
+        pub const LineVertex = struct {
             pos: math.Vec3,
             color: math.Vec4,
+
+            pub const shader_type = utils_mod.ShaderUtils.shader_type(@This());
         };
 
         pub fn init(engine: *Engine, pool: vk.CommandPool, v: struct {
@@ -301,7 +311,7 @@ pub const ResourceManager = struct {
             ctx: *engine_mod.VulkanContext,
             command_pool: vk.CommandPool,
             v: struct {
-                line_buffer: []LineVertex,
+                line_buffer: []LineVertex.shader_type,
             },
         ) !struct {
             buffer_invalid: bool,
@@ -318,7 +328,7 @@ pub const ResourceManager = struct {
             return .{ .buffer_invalid = swapped, .cmdbuf_invalid = true };
         }
 
-        fn update_vertices(self: *@This(), vertices: []LineVertex) !void {
+        fn update_vertices(self: *@This(), vertices: []LineVertex.shader_type) !void {
             _ = self.line_buffer.alloc(vertices);
         }
 
@@ -373,13 +383,14 @@ pub const ResourceManager = struct {
         hash: u64 = 0,
 
         pub const DrawCall = vk.DrawIndexedIndirectCommand;
-        pub const DrawCtx = extern struct {
+        pub const DrawCtx = struct {
             first_vertex: u32,
             first_index: u32,
             first_instance: u32,
-            _pad: u32 = 0,
+
+            pub const shader_type = utils_mod.ShaderUtils.shader_type(@This());
         };
-        const Instances = std.ArrayList(Instance);
+        const Instances = std.ArrayList(Instance.shader_type);
         const Bones = std.ArrayList(math.Mat4x4);
         const Batch = struct {
             mesh: MeshHandle,
@@ -545,7 +556,7 @@ pub const ResourceManager = struct {
 
         // null means we don't have the resources currently available to render this.
         // but we will try to allocate necessary resources on next frame
-        pub fn reserve_instance(self: *@This(), handle: BatchHandle) !?*Instance {
+        pub fn reserve_instance(self: *@This(), handle: BatchHandle) !?*Instance.shader_type {
             const batch = &self.batches.items[handle.index];
             return try batch.instances.addOne();
         }
@@ -637,7 +648,7 @@ pub const ResourceManager = struct {
             var it = self.material_batches.iterator();
             while (it.next()) |mbatch| for (mbatch.value_ptr.batch.items) |hbatch| {
                 const batch = &self.batches.items[hbatch.index];
-                const ctx_buf: [1]DrawCtx = .{.{
+                const ctx_buf: [1]DrawCtx.shader_type = .{.{
                     .first_vertex = batch.mesh.regions.vertex.first,
                     .first_index = batch.mesh.regions.index.first,
                     .first_instance = batch.first_draw,

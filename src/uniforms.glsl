@@ -4,7 +4,6 @@
      uint did_change;
      uint did_move;
      uint did_rotate;
-     uint pad;
  };
 
  struct Camera3D {
@@ -30,7 +29,6 @@
      int height;
      int monitor_width;
      int monitor_height;
-     uint pad0;
  };
 
  struct Uniforms {
@@ -56,7 +54,6 @@
      uint first_vertex;
      uint first_index;
      uint first_instance;
-     uint _pad;
  };
 
  struct PushConstants {

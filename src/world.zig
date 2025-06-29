@@ -669,7 +669,7 @@ pub const Jphysics = struct {
             const JoltDebugResources = resources_mod.ResourceManager.JoltDebugResources;
             const RenderState = struct {
                 lock: std.Thread.Mutex = .{},
-                lines: std.ArrayList(JoltDebugResources.LineVertex),
+                lines: std.ArrayList(JoltDebugResources.LineVertex.shader_type),
             };
 
             pub fn init() !@This() {
