@@ -132,12 +132,15 @@ pub const ComputePipeline = struct {
     const Args = struct {
         shader: []u32,
         desc_set_layouts: []const vk.DescriptorSetLayout,
+        push_constant_ranges: []const vk.PushConstantRange = &.{},
     };
 
     pub fn new(device: *Device, v: Args) !@This() {
         const layout = try device.createPipelineLayout(&.{
             .set_layout_count = @intCast(v.desc_set_layouts.len),
             .p_set_layouts = v.desc_set_layouts.ptr,
+            .push_constant_range_count = @intCast(v.push_constant_ranges.len),
+            .p_push_constant_ranges = v.push_constant_ranges.ptr,
         }, null);
         errdefer device.destroyPipelineLayout(layout, null);
 
@@ -197,7 +200,7 @@ pub const GraphicsPipeline = struct {
         },
         pass: ?vk.RenderPass = null,
         desc_set_layouts: []const vk.DescriptorSetLayout,
-        push_constant_ranges: []const vk.PushConstantRange,
+        push_constant_ranges: []const vk.PushConstantRange = &.{},
         cull_mode: vk.CullModeFlags = .{ .back_bit = true },
         render_mode: RenderMode = .solid_triangles,
     };
@@ -1203,7 +1206,7 @@ pub const CmdBuffer = struct {
                 stride: u32,
                 offset: u32 = 0,
             },
-            push_constants: []const u8,
+            push_constants: []const u8 = &.{},
         },
     ) void {
         for (self.bufs) |cmdbuf| {
@@ -1218,14 +1221,16 @@ pub const CmdBuffer = struct {
                 @intCast(v.offsets.len),
                 v.offsets.ptr,
             );
-            device.cmdPushConstants(
-                cmdbuf,
-                v.pipeline.layout,
-                .{ .vertex_bit = true, .fragment_bit = true },
-                0,
-                @intCast(v.push_constants.len),
-                @ptrCast(v.push_constants.ptr),
-            );
+            if (v.push_constants.len > 0) {
+                device.cmdPushConstants(
+                    cmdbuf,
+                    v.pipeline.layout,
+                    .{ .vertex_bit = true, .fragment_bit = true },
+                    0,
+                    @intCast(v.push_constants.len),
+                    @ptrCast(v.push_constants.ptr),
+                );
+            }
             device.cmdDrawIndirect(
                 cmdbuf,
                 v.calls.buffer,
@@ -1456,6 +1461,19 @@ pub const CmdBuffer = struct {
     pub fn dispatch(self: *@This(), device: *Device, v: struct { x: u32, y: u32 = 1, z: u32 = 1 }) void {
         for (self.bufs) |cmdbuf| {
             device.cmdDispatch(cmdbuf, v.x, v.y, v.z);
+        }
+    }
+
+    pub fn push_constants(self: *@This(), device: *Device, pipeline_layout: vk.PipelineLayout, constants: []const u8, flags: vk.ShaderStageFlags) void {
+        for (self.bufs) |cmdbuf| {
+            device.cmdPushConstants(
+                cmdbuf,
+                pipeline_layout,
+                flags,
+                0,
+                @intCast(constants.len),
+                @ptrCast(constants.ptr),
+            );
         }
     }
 };
