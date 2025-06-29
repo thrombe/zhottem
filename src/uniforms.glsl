@@ -1,18 +1,18 @@
  // This file is generated from code. DO NOT EDIT.
 
- struct CameraMeta {
+ struct Camera3DMeta {
      uint did_change;
      uint did_move;
      uint did_rotate;
      uint pad;
  };
 
- struct Camera {
+ struct Camera3D {
      vec3 eye;
      vec3 fwd;
      vec3 right;
      vec3 up;
-     CameraMeta meta;
+     Camera3DMeta meta;
  };
 
  struct Mouse {
@@ -30,10 +30,11 @@
      int height;
      int monitor_width;
      int monitor_height;
+     uint pad0;
  };
 
  struct Uniforms {
-     Camera camera;
+     Camera3D camera;
      Mouse mouse;
      mat4 world_to_screen;
      Frame frame;

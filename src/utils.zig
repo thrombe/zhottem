@@ -1120,15 +1120,27 @@ pub const ImageMagick = struct {
 pub const ShaderUtils = struct {
     const Vec4 = math.Vec4;
     const Vec3 = math.Vec3;
+    const Vec2 = math.Vec2;
     const Mat4x4 = math.Mat4x4;
 
     pub const Mouse = extern struct { x: i32, y: i32, left: u32, right: u32 };
-    pub const Camera = extern struct {
+    pub const Camera2D = extern struct {
+        eye: Vec4, // vec2 aligned
+        meta: CameraMeta = .{},
+
+        pub const CameraMeta = extern struct {
+            did_move: u32 = 0,
+            _pad1: u32 = 0,
+            _pad2: u32 = 0,
+            _pad3: u32 = 0,
+        };
+    };
+    pub const Camera3D = extern struct {
         eye: Vec3,
         fwd: Vec3,
         right: Vec3,
         up: Vec3,
-        meta: CameraMeta,
+        meta: CameraMeta = .{},
 
         pub const CameraMeta = extern struct {
             did_change: u32 = 0,
@@ -1145,6 +1157,7 @@ pub const ShaderUtils = struct {
         height: i32,
         monitor_width: i32,
         monitor_height: i32,
+        pad0: u32 = 0,
     };
 
     // TODO: maybe enforce this
@@ -1212,6 +1225,7 @@ pub const ShaderUtils = struct {
 
         fn zig_to_glsl_type(t: type) []const u8 {
             return switch (t) {
+                Vec2 => "vec2",
                 Vec3 => "vec3",
                 Vec4 => "vec4",
                 Mat4x4 => "mat4",
@@ -1219,11 +1233,20 @@ pub const ShaderUtils = struct {
                 u32 => "uint",
                 f32 => "float",
                 Mouse => "Mouse",
-                Camera => "Camera",
-                Camera.CameraMeta => "CameraMeta",
+                Camera2D => "Camera2D",
+                Camera2D.CameraMeta => "Camera2DMeta",
+                Camera3D => "Camera3D",
+                Camera3D.CameraMeta => "Camera3DMeta",
                 Frame => "Frame",
                 else => switch (@typeInfo(t)) {
                     .array => |child| zig_to_glsl_type(child.child),
+                    .@"struct" => {
+                        comptime {
+                            const name = @typeName(t);
+                            const last = std.mem.lastIndexOfScalar(u8, name, '.') orelse @compileError("oof? " ++ name);
+                            return name[last + 1 ..];
+                        }
+                    },
                     else => @compileError("cannot handle this type"),
                 },
             };
@@ -1257,13 +1280,13 @@ pub const ShaderUtils = struct {
             const w = self.shader.writer();
 
             switch (t) {
-                []Mat4x4, Mat4x4, Vec4, Vec3, i32, u32, f32 => return,
+                []Mat4x4, Mat4x4, Vec4, Vec3, Vec2, i32, u32, f32 => return,
                 else => switch (@typeInfo(t)) {
                     .array => return,
                     else => {
                         const fields = @typeInfo(t).@"struct".fields;
                         inline for (fields) |field| {
-                            try self.add_struct(zig_to_glsl_type(field.type), field.type);
+                            try self.add_struct(comptime zig_to_glsl_type(field.type), field.type);
                         }
 
                         try w.print(
@@ -1275,7 +1298,7 @@ pub const ShaderUtils = struct {
                             try w.print(
                                 \\     {s} {s};
                                 \\
-                            , .{ zig_to_glsl_type(field.type), fieldname(field) });
+                            , .{ comptime zig_to_glsl_type(field.type), fieldname(field) });
                         }
 
                         try w.print(
