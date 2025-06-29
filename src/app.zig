@@ -1077,8 +1077,8 @@ pub const AppState = struct {
 
                             // rotation should not be multiplied by deltatime. if mouse moves by 3cm, it should always rotate the same amount.
                             if (player.controller.did_rotate) {
-                                player.controller.yaw += mouse.dx * player.controller.sensitivity_scale * player.controller.sensitivity;
-                                player.controller.pitch += mouse.dy * player.controller.sensitivity_scale * player.controller.sensitivity;
+                                player.controller.yaw += cast(f32, mouse.dx) * player.controller.sensitivity_scale * player.controller.sensitivity;
+                                player.controller.pitch += cast(f32, mouse.dy) * player.controller.sensitivity_scale * player.controller.sensitivity;
                                 player.controller.pitch = std.math.clamp(player.controller.pitch, C.Camera.constants.pitch_min, C.Camera.constants.pitch_max);
                             }
 

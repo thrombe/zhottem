@@ -20,7 +20,7 @@ const main = @import("main.zig");
 const allocator = main.allocator;
 
 pub const CameraUniform = extern struct {
-    camera: utils_mod.ShaderUtils.Camera,
+    camera: utils_mod.ShaderUtils.Camera3D,
     mouse: utils_mod.ShaderUtils.Mouse,
     world_to_screen: math.Mat4x4,
     frame: utils_mod.ShaderUtils.Frame,
