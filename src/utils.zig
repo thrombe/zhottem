@@ -1160,26 +1160,64 @@ pub const ShaderUtils = struct {
         pad0: u32 = 0,
     };
 
-    // TODO: maybe enforce this
     // - [Descriptor pool and sets - Vulkan Tutorial](https://vulkan-tutorial.com/Uniform_buffers/Descriptor_pool_and_sets)
     // scalars => N (= 4 bytes given 32 bit floats).
     // vec2 => 2N (= 8 bytes)
     // vec3 or vec4 => 4N (= 16 bytes)
     // nested structure => base alignment of its members rounded up to a multiple of 16.
     // mat4 => same alignment as vec4.
-    pub fn create_extern_type(comptime uniform: type) type {
-        const Type = std.builtin.Type;
-        const Ut: Type = @typeInfo(uniform);
-        const U = Ut.@"struct";
+    pub fn shader_type(comptime typ: type) type {
+        comptime {
+            switch (typ) {
+                Vec2, Vec3, Vec4, Mat4x4 => return typ,
+                else => {},
+            }
+            switch (@typeInfo(typ)) {
+                .float, .int => return typ,
+                .@"struct" => {},
+                else => @compileError("type: '" ++ @typeName(typ) ++ "' not supported"),
+            }
 
-        return @Type(.{
-            .@"struct" = .{
-                .layout = .@"extern",
-                .fields = U.fields,
-                .decls = &[_]Type.Declaration{},
-                .is_tuple = false,
+            const Type = std.builtin.Type;
+            const Ut: Type = @typeInfo(typ);
+            const U = Ut.@"struct";
+
+            var fields: [U.fields.len]Type.StructField = undefined;
+            for (U.fields, 0..) |field, i| {
+                const field_type = shader_type(field.type);
+                fields[i] = .{
+                    .name = field.name,
+                    .type = field_type,
+                    .default_value_ptr = null,
+                    .is_comptime = false,
+                    .alignment = shader_type_alignment(field_type),
+                };
+            }
+
+            return @Type(.{
+                .@"struct" = .{
+                    .layout = .@"extern",
+                    .fields = &fields,
+                    .decls = &[_]Type.Declaration{},
+                    .is_tuple = false,
+                },
+            });
+        }
+    }
+
+    inline fn shader_type_alignment(comptime typ: type) comptime_int {
+        switch (typ) {
+            u8, i8 => return 1,
+            i32, u32, f32 => return 4,
+            Vec2 => return 8,
+            Vec3, Vec4, Mat4x4 => return 16,
+            else => {
+                switch (@typeInfo(typ)) {
+                    .@"struct" => return 16,
+                    else => @compileError("alignment of '" ++ @typeName(typ) ++ "' not supported"),
+                }
             },
-        });
+        }
     }
 
     pub fn create_uniform_object(comptime uniform_type: type, uniform: anytype) create_extern_type(uniform_type) {
