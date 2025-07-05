@@ -1161,6 +1161,8 @@ pub const ShaderUtils = struct {
     // vec3 or vec4 => 4N (= 16 bytes)
     // nested structure => base alignment of its members rounded up to a multiple of 16.
     // mat4 => same alignment as vec4.
+    //
+    // apparently something immediately after a struct should also have a alignment of 16
     pub fn shader_type(comptime typ: type) type {
         comptime {
             switch (typ) {
@@ -1178,15 +1180,19 @@ pub const ShaderUtils = struct {
             const U = Ut.@"struct";
 
             var fields: [U.fields.len]Type.StructField = undefined;
+            var last_was_struct: bool = false;
             for (U.fields, 0..) |field, i| {
                 const field_type = shader_type(field.type);
+                const field_type_alignment = shader_type_alignment(field_type);
+                const alignment = if (last_was_struct) @max(16, field_type_alignment) else field_type_alignment;
                 fields[i] = .{
                     .name = field.name,
                     .type = field_type,
                     .default_value_ptr = null,
                     .is_comptime = false,
-                    .alignment = shader_type_alignment(field_type),
+                    .alignment = alignment,
                 };
+                last_was_struct = @typeInfo(field.type) == .@"struct";
             }
 
             return @Type(.{
