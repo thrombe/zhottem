@@ -69,6 +69,7 @@ int divide_roof(int a, int b) {
     return a / b + int(mod(a, b) > 0);
 }
 
+
 // - [hsv rgb conversion glsl shader · GitHub](https://gist.github.com/983/e170a24ae8eba2cd174f)
 vec3 rgb2hsv(vec3 c) {
     vec4 k = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -137,6 +138,10 @@ vec3 oklab_mix(vec3 lin1, vec3 lin2, float a) {
     return kLMStoCONE*(lms*lms*lms);
 }
 
+vec3 oklab_mix2(vec3 lin1, vec3 lin2, f32 t) {
+    return linear_from_oklab(mix(oklab_from_linear(lin1), oklab_from_linear(lin2), t));
+}
+
 uint rgba_encode_u32(vec4 color) {
     uint r = uint(color.r * 255.0);
     uint g = uint(color.g * 255.0);
@@ -153,6 +158,31 @@ vec4 rgba_decode_u32(uint color) {
     return vec4(float(r), float(g), float(b), float(a)) / 255.0;
 }
 
+// https://mini.gmshaders.com/p/tonemaps
+vec3 uncharted2_tonemap(vec3 x) {
+    x *= 16.0;
+    const float A = 0.15;
+    const float B = 0.50;
+    const float C = 0.10;
+    const float D = 0.20;
+    const float E = 0.02;
+    const float F = 0.30;
+
+    return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
+
+vec3 unreal_tonemap(vec3 x) {
+    // Unreal 3, Documentation: "Color Grading"
+    // Adapted to be close to Tonemap_ACES, with similar range
+    // Gamma 2.2 correction is baked in, don't use with sRGB conversion!
+    return x / (x + 0.155) * 1.019;
+}
+
+// float tanh(float x) {
+//     float exp_neg_2x = exp(-2.0 * x);
+//     return -1.0 + 2.0 / (1.0 + exp_neg_2x);
+// }
+
 vec3 reinhard_tonemap(vec3 x) {
     return x / (x + vec3(1.0));
 }
@@ -160,6 +190,12 @@ vec3 reinhard_tonemap(vec3 x) {
 vec3 tanh_tonemap(vec3 x) {
     x = clamp(x, -40.0, 40.0);
     return (exp(x) - exp(-x)) / (exp(x) + exp(-x));
+}
+
+vec3 tanh_tonemap2(vec3 x) {
+    x = clamp(x, -40.0, 40.0);
+    vec3 exp_neg_2x = exp(-2.0 * x);
+    return -1.0 + 2.0 / (1.0 + exp_neg_2x);
 }
 
 vec3 aces_tonemap(vec3 x) {
