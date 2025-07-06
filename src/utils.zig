@@ -1176,11 +1176,11 @@ pub const ShaderUtils = struct {
                 .float, .int => return typ,
                 .@"struct" => |U| {
                     var fields: [U.fields.len]Type.StructField = undefined;
-                    var last_was_struct: bool = false;
+                    var next_alignment: comptime_int = 0;
                     for (U.fields, 0..) |field, i| {
                         const field_type = shader_type(field.type);
                         const field_type_alignment = shader_type_alignment(field_type);
-                        const alignment = if (last_was_struct) @max(16, field_type_alignment) else field_type_alignment;
+                        const alignment = @max(next_alignment, field_type_alignment);
                         fields[i] = .{
                             .name = field.name,
                             .type = field_type,
@@ -1188,7 +1188,7 @@ pub const ShaderUtils = struct {
                             .is_comptime = false,
                             .alignment = alignment,
                         };
-                        last_was_struct = @typeInfo(field.type) == .@"struct";
+                        next_alignment = next_field_alignment(field_type);
                     }
 
                     return @Type(.{
@@ -1211,6 +1211,16 @@ pub const ShaderUtils = struct {
                 },
                 else => @compileError("type: '" ++ @typeName(typ) ++ "' not supported"),
             }
+        }
+    }
+
+    inline fn next_field_alignment(comptime typ: type) comptime_int {
+        switch (@typeInfo(typ)) {
+            .@"struct" => return 16,
+            .array => |A| {
+                return next_field_alignment(A.child);
+            },
+            else => return 0,
         }
     }
 
