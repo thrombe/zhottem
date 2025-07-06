@@ -1200,15 +1200,14 @@ pub const ShaderUtils = struct {
                         },
                     });
                 },
-                .array => |U| {
-                    return @Type(.{
-                        .array = .{
-                            .len = U.len,
-                            .child = shader_type(U.child),
-                            .sentinel_ptr = U.sentinel_ptr,
-                        },
-                    });
-                },
+                .array => |U| return @Type(.{
+                    .array = .{
+                        .len = U.len,
+                        .child = shader_type(U.child),
+                        .sentinel_ptr = U.sentinel_ptr,
+                    },
+                }),
+                .@"enum" => |U| return U.tag_type,
                 else => @compileError("type: '" ++ @typeName(typ) ++ "' not supported"),
             }
         }
@@ -1217,9 +1216,8 @@ pub const ShaderUtils = struct {
     inline fn next_field_alignment(comptime typ: type) comptime_int {
         switch (@typeInfo(typ)) {
             .@"struct" => return 16,
-            .array => |A| {
-                return next_field_alignment(A.child);
-            },
+            .array => |A| return next_field_alignment(A.child),
+            .@"enum" => |E| return next_field_alignment(E.tag_type),
             else => return 0,
         }
     }
@@ -1234,6 +1232,7 @@ pub const ShaderUtils = struct {
                 switch (@typeInfo(typ)) {
                     .@"struct" => return 16,
                     .array => |U| return shader_type_alignment(U.child),
+                    .@"enum" => |U| return shader_type_alignment(U.tag_type),
                     else => @compileError("alignment of '" ++ @typeName(typ) ++ "' not supported"),
                 }
             },
@@ -1248,8 +1247,11 @@ pub const ShaderUtils = struct {
         var shader_obj: S = undefined;
         inline for (Ut.@"struct".fields) |field| {
             const O = @TypeOf(@field(shader_obj, field.name));
-            if (comptime std.meta.eql(O, @TypeOf(@field(obj, field.name)))) {
+            const T = @TypeOf(@field(obj, field.name));
+            if (comptime std.meta.eql(O, T)) {
                 @field(shader_obj, field.name) = @field(obj, field.name);
+            } else if (comptime @typeInfo(T) == .@"enum") {
+                @field(shader_obj, field.name) = @intFromEnum(@field(obj, field.name));
             } else {
                 @field(shader_obj, field.name) = shader_object(O, @field(obj, field.name));
             }
@@ -1309,7 +1311,8 @@ pub const ShaderUtils = struct {
                             return name[last + 1 ..];
                         }
                     },
-                    else => @compileError("cannot handle this type"),
+                    .@"enum" => return zig_to_glsl_type(shader_type(t)),
+                    else => @compileError("cannot handle this type: " ++ @typeName(t)),
                 },
             };
         }
@@ -1348,7 +1351,13 @@ pub const ShaderUtils = struct {
                     else => {
                         const fields = @typeInfo(t).@"struct".fields;
                         inline for (fields) |field| {
-                            try self.add_struct(comptime zig_to_glsl_type(field.type), field.type);
+                            switch (comptime @typeInfo(field.type)) {
+                                .int, .float, .@"struct" => {
+                                    try self.add_struct(comptime zig_to_glsl_type(field.type), field.type);
+                                },
+                                .@"enum" => {},
+                                else => @compileError("type not supported: " ++ @typeName(field.type)),
+                            }
                         }
 
                         try w.print(
