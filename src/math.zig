@@ -460,6 +460,11 @@ pub const Vec3 = extern struct {
         };
     }
 
+    pub fn as_buf(self: *@This()) []f32 {
+        const bytes = std.mem.asBytes(self);
+        return std.mem.bytesAsSlice(f32, bytes);
+    }
+
     pub fn to_buf(self: *const @This()) [3]f32 {
         return .{ self.x, self.y, self.z };
     }
@@ -485,6 +490,11 @@ pub const Vec3 = extern struct {
 pub const Vec2 = extern struct {
     x: f32,
     y: f32,
+
+    pub fn as_buf(self: *@This()) []f32 {
+        const bytes = std.mem.asBytes(self);
+        return std.mem.bytesAsSlice(f32, bytes);
+    }
 };
 
 // - [Matrix storage](https://github.com/hexops/machengine.org/blob/0aab00137dc3d1098e5237e2bee124e0ef9fbc17/content/docs/math/matrix-storage.md)
