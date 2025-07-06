@@ -1169,40 +1169,48 @@ pub const ShaderUtils = struct {
                 Vec2, Vec3, Vec4, Mat4x4 => return typ,
                 else => {},
             }
-            switch (@typeInfo(typ)) {
-                .float, .int => return typ,
-                .@"struct" => {},
-                else => @compileError("type: '" ++ @typeName(typ) ++ "' not supported"),
-            }
 
             const Type = std.builtin.Type;
             const Ut: Type = @typeInfo(typ);
-            const U = Ut.@"struct";
+            switch (Ut) {
+                .float, .int => return typ,
+                .@"struct" => |U| {
+                    var fields: [U.fields.len]Type.StructField = undefined;
+                    var last_was_struct: bool = false;
+                    for (U.fields, 0..) |field, i| {
+                        const field_type = shader_type(field.type);
+                        const field_type_alignment = shader_type_alignment(field_type);
+                        const alignment = if (last_was_struct) @max(16, field_type_alignment) else field_type_alignment;
+                        fields[i] = .{
+                            .name = field.name,
+                            .type = field_type,
+                            .default_value_ptr = null,
+                            .is_comptime = false,
+                            .alignment = alignment,
+                        };
+                        last_was_struct = @typeInfo(field.type) == .@"struct";
+                    }
 
-            var fields: [U.fields.len]Type.StructField = undefined;
-            var last_was_struct: bool = false;
-            for (U.fields, 0..) |field, i| {
-                const field_type = shader_type(field.type);
-                const field_type_alignment = shader_type_alignment(field_type);
-                const alignment = if (last_was_struct) @max(16, field_type_alignment) else field_type_alignment;
-                fields[i] = .{
-                    .name = field.name,
-                    .type = field_type,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = alignment,
-                };
-                last_was_struct = @typeInfo(field.type) == .@"struct";
-            }
-
-            return @Type(.{
-                .@"struct" = .{
-                    .layout = .@"extern",
-                    .fields = &fields,
-                    .decls = &[_]Type.Declaration{},
-                    .is_tuple = false,
+                    return @Type(.{
+                        .@"struct" = .{
+                            .layout = .@"extern",
+                            .fields = &fields,
+                            .decls = &[_]Type.Declaration{},
+                            .is_tuple = false,
+                        },
+                    });
                 },
-            });
+                .array => |U| {
+                    return @Type(.{
+                        .array = .{
+                            .len = U.len,
+                            .child = shader_type(U.child),
+                            .sentinel_ptr = U.sentinel_ptr,
+                        },
+                    });
+                },
+                else => @compileError("type: '" ++ @typeName(typ) ++ "' not supported"),
+            }
         }
     }
 
@@ -1215,6 +1223,7 @@ pub const ShaderUtils = struct {
             else => {
                 switch (@typeInfo(typ)) {
                     .@"struct" => return 16,
+                    .array => |U| return shader_type_alignment(U.child),
                     else => @compileError("alignment of '" ++ @typeName(typ) ++ "' not supported"),
                 }
             },
