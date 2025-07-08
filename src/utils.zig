@@ -1123,6 +1123,8 @@ pub const ShaderUtils = struct {
     const Vec2 = math.Vec2;
     const Mat4x4 = math.Mat4x4;
 
+    const ShaderVec3 = extern struct { x: f32, y: f32, z: f32 };
+
     pub const Mouse = struct { x: i32, y: i32, left: u32, right: u32 };
     pub const Camera2D = struct {
         eye: Vec4, // vec2 aligned
@@ -1163,10 +1165,12 @@ pub const ShaderUtils = struct {
     // mat4 => same alignment as vec4.
     //
     // apparently something immediately after a struct should also have a alignment of 16
+    // vec3 has an alignment of 16, but a vec3 followed by a u32 or something will take 16 bytes total
     pub fn shader_type(comptime typ: type) type {
         comptime {
             switch (typ) {
-                Vec2, Vec3, Vec4, Mat4x4 => return typ,
+                Vec3 => return ShaderVec3,
+                Vec2, ShaderVec3, Vec4, Mat4x4 => return typ,
                 else => {},
             }
 
@@ -1214,6 +1218,10 @@ pub const ShaderUtils = struct {
     }
 
     inline fn next_field_alignment(comptime typ: type) comptime_int {
+        switch (typ) {
+            ShaderVec3 => return 4,
+            else => {},
+        }
         switch (@typeInfo(typ)) {
             .@"struct" => return 16,
             .array => |A| return next_field_alignment(A.child),
@@ -1227,7 +1235,7 @@ pub const ShaderUtils = struct {
             u8, i8 => return 1,
             i32, u32, f32 => return 4,
             Vec2 => return 8,
-            Vec3, Vec4, Mat4x4 => return 16,
+            ShaderVec3, Vec4, Mat4x4 => return 16,
             else => {
                 switch (@typeInfo(typ)) {
                     .@"struct" => return 16,
@@ -1291,6 +1299,7 @@ pub const ShaderUtils = struct {
             return switch (t) {
                 Vec2 => "vec2",
                 Vec3 => "vec3",
+                ShaderVec3 => "vec3",
                 Vec4 => "vec4",
                 Mat4x4 => "mat4",
                 i32 => "int",
